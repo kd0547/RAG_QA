@@ -1,0 +1,8 @@
+pypdf
+fastapi
+uvicorn[standard]
+python-multipart
+chromadb
+
+langchain-ollama
+langgraph
