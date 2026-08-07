@@ -14,7 +14,7 @@ from app.controller.file_controller import router as file_router
 from app.controller.question_controller import router as question_router
 from app.controller.search_controller import router as search_router
 from rag.embedder import set_embedding_model
-from agent.rag_agent import set_llm_model, get_graph
+from agent.rag_agent import set_llm_model, get_agent
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
 
     load_rerank()
 
-    graph = get_graph()
+    graph = get_agent()
     graph.get_graph().draw_png(
         output_file_path="./data/graph.png"
     )
