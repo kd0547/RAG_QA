@@ -1,0 +1,81 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* ===== TG OCR 디자인 토큰 (Figma: TG OCR_260721) ===== */
+@theme {
+    --font-sans: "Pretendard Variable", Pretendard, "Noto Sans KR", "Apple SD Gothic Neo",
+        "Malgun Gothic", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+    --color-brand: #00A4E4;
+    --color-brand-hover: #0092CC;
+    --color-brand-soft: #D6F0FB;
+    --color-brand-tint: #F5FBFC;
+    --color-brand-pale: #EBF8FC;
+
+    --color-ink: #141C2B;
+    --color-muted: #9AA6B9;
+    --color-line: #D9DFE6;
+    --color-divide: #E9EDF1;
+
+    --color-surface: #FAFBFC;
+    --color-chip: #F5F6F7;
+    --color-track: #F7F8FA;
+
+    --color-danger: #E5484D;
+    --color-danger-soft: #FFE8E9;
+    --color-danger-surface: #FFF5F5;
+
+    --color-warn: #E19A00;
+    --color-warn-soft: #FCEFC7;
+}
+
+/* ===== MDXEditor를 디자인 톤에 맞춤 ===== */
+.mdxeditor {
+    --accentBase: var(--color-brand-tint);
+    --accentBgSubtle: var(--color-brand-pale);
+    --accentSolid: var(--color-brand);
+    --accentSolidHover: var(--color-brand-hover);
+    --baseBorder: var(--color-divide);
+    font-family: inherit;
+}
+
+/* 툴바: 디자인의 33px 단일 라인에 맞춰 버튼/셀렉트를 24px 그리드로 축소 */
+.mdxeditor-toolbar {
+    border-radius: 0 !important;
+    background: #fff !important;
+    border-bottom: 1px solid var(--color-divide);
+    padding: 4px 12px !important;
+    height: 33px !important;
+    min-height: 0 !important;
+    align-items: center;
+    box-sizing: border-box;
+    scrollbar-width: none;
+}
+
+.mdxeditor-toolbar::-webkit-scrollbar {
+    display: none;
+}
+
+.mdxeditor-toolbar [class*="toolbarButton"],
+.mdxeditor-toolbar [class*="toolbarToggleItem"] {
+    width: 24px !important;
+    height: 24px !important;
+    padding: 0 !important;
+}
+
+.mdxeditor-toolbar [class*="toolbarGroupOfGroups"],
+.mdxeditor-toolbar [class*="toolbarModeSwitch"] {
+    height: 24px !important;
+}
+
+.mdxeditor-toolbar [class*="selectTrigger"] {
+    height: 22px !important;
+    width: 100px !important;
+    min-width: 0 !important;
+    padding: 0 8px !important;
+    font-size: 11px !important;
+}
+
+.mdxeditor-root-contenteditable > div {
+    padding: 20px 24px;
+}

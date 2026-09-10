@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets / local caches
+.env
+token_cache.bin
+**/token_cache.bin
+
+# Local databases
+mail.db
+
+# Vector store (ChromaDB persist)
+repository/data/
+
+# Uploaded originals / generated artifacts
+data/uploads/
+images/
