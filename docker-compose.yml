@@ -1,0 +1,13 @@
+services:
+  ragqa:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./chroma_data:/repository/data/   # ChromaDB persist 경로에 맞게 수정
+      - ./data:/data/uploads                  # pdf 등 원본 파일 경로 있으면
+    env_file:
+      - .env
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434  # 로컬 테스트용
+    restart: unless-stopped

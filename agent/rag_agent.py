@@ -1,40 +1,23 @@
 from typing import Literal
 
-from langchain_ollama import ChatOllama
-from langchain_anthropic import ChatAnthropic
 from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
+from agent.llm_provider import get_llm_model
 from rag.embedder import get_embedding_model
 from repository.embedding_repository import search
 from agent.reranker import rerank
 
 load_dotenv()
 
-_local_llm: ChatOllama | None = None
-_claude_llm: ChatAnthropic | None = None
 
+# ---------- 판단용 구조화 출력 ----------
 
-def set_llm_model(model: ChatOllama):
-    global _local_llm
-    _local_llm = model
-
-
-def get_llm_model(mode: str) -> ChatOllama | ChatAnthropic:
-    global _claude_llm
-
-    if mode == "local":
-        if _local_llm is None:
-            raise RuntimeError(
-                "로컬 LLM이 아직 로드되지 않았습니다. "
-                "서버 시작 시 set_llm_model()로 모델을 주입해주세요."
-            )
-        return _local_llm
-
-    if _claude_llm is None:
-        _claude_llm = ChatAnthropic(model="claude-sonnet-5")
-    return _claude_llm
+class AnswerabilityCheck(BaseModel):
+    is_answerable: bool = Field(description="검색된 문서만으로 질문에 답할 수 있는지 여부")
+    reason: str = Field(description="판단 근거를 한두 문장으로")
 
 
 # ---------- Tools ----------
@@ -50,7 +33,12 @@ def search_documents(query: str, top_k: int = 5) -> list[dict]:
     embedding = rag_retriever.embed_query(query)
     docs = search(embedding, top_k)
     print(f"[search_documents] query={query!r} top_k={top_k} -> {len(docs)}건")
-    return docs
+    return  [{
+        "id": doc["id"],
+        "source": doc["source"],
+        "page": doc["page"],
+        "text": doc["text"],
+    } for doc in docs if doc]
 
 
 @tool
@@ -64,47 +52,107 @@ def rerank_documents(query: str, documents: list[dict], top_n: int = 3) -> list[
     return results
 
 
-TOOLS = [search_documents, rerank_documents]
+@tool
+def check_answerability(question: str, documents: list[dict]) -> dict:
+    """현재까지 검색된 문서들로 질문에 실제로 답할 수 있는지 판단합니다.
+
+    **최종 답변을 작성하기 전에 반드시 이 도구를 먼저 호출해야 합니다.**
+    is_answerable=false가 나오면 답변을 작성하지 말고, 다른 검색어로 재검색하세요.
+    is_answerable=true가 나온 경우에만 문서 내용을 근거로 답변을 작성하세요.
+    """
+    llm = get_llm_model("local")  # 판단은 안정적인 모델로 고정
+    structured_llm = llm.with_structured_output(AnswerabilityCheck)
+
+    content = "\n\n".join(
+        f'<content index="{i}">\n{doc.get("text")}\n</content>'
+        for i, doc in enumerate(documents, start=1)
+    )
+
+    system_prompt = """당신은 사용자의 질문과 <content></content>의 내용을 비교 후 적합성을 평가하는 AI입니다.
+
+    아래 기준으로 판단하세요:
+    - <content>에 사용자 질문에 대한 답을 구성할 수 있는 정보가 포함되어 있으면 answerable
+    - 질문과 무관하거나, 일부만 겹치고 핵심 답변 정보가 없으면 not answerable
+    - 여러 content 중 하나라도 충분한 정보를 제공하면 answerable로 판단
+
+    반드시 지정된 형식(is_answerable, reason)으로만 응답하세요."""
+
+    user_prompt = f"""질문: {question}
+
+    {content}"""
+
+    result = structured_llm.invoke(
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+    )
+
+    print(f"[check_answerability] is_answerable={result.is_answerable}, reason={result.reason}")
+    return {"is_answerable": result.is_answerable, "reason": result.reason}
+
+
+TOOLS = [search_documents, rerank_documents, check_answerability]
 
 
 # ---------- Agent ----------
 
-SYSTEM_PROMPT = """당신은 사용자의 질문에 문서 기반으로 답변하는 RAG 에이전트입니다.
+SYSTEM_PROMPT = """당신은 RAG 에이전트입니다. 사용자 질문에 문서 근거로 직접 답변하는 것이 유일한 임무입니다.
 
-다음 절차를 스스로 판단하여 수행하세요:
-1. search_documents로 질문과 관련된 문서를 검색하세요. 한 번의 검색으로 부족하다고 판단되면, 표현을 바꿔 여러 번 검색하세요.
-2. 검색 결과가 많거나(10개 이상) 여러 번 검색해 후보가 섞였다면, rerank_documents로 관련성 높은 것만 추려내세요.
-3. 검색 결과가 질문에 답하기에 불충분하다고 판단되면, 다른 검색어로 다시 search_documents를 호출하세요. (최대 3회 재검색)
-4. 충분한 근거가 모이면, 그 근거만 사용해 답변하세요.
+**실행 절차 (사용자에게 설명하지 말고 그대로 실행만 하세요)**
+1. search_documents를 호출해 질문과 관련된 문서를 검색한다. query는 사용자 질문의 핵심 키워드를 그대로 사용한다.
+2. 후보 문서가 많거나(10개 이상) 여러 번 검색해 후보가 섞였으면 rerank_documents로 관련성 높은 것만 추린다.
+3. **답변을 작성하기 전에 반드시 check_answerability를 호출해 현재 문서로 답할 수 있는지 확인한다.**
+   - is_answerable=false면 절대 답변하지 말고, 다른 표현으로 재검색한다 (최대 2회).
+   - 2회 재검색 후에도 is_answerable=false면, "문서에서 관련 정보를 찾지 못했습니다"라고 짧게 답한다.
+   - is_answerable=true인 경우에만 문서 내용을 근거로 답변을 작성한다.
+4. 검색된 문서 내용만 근거로 삼아 질문에 직접 답변한다.
 
-답변 시 규칙:
-- 근거로 사용한 문장 끝에 [출처파일명 pN] 형식으로 표시하세요.
-- 문서에 없는 내용은 답변에 포함하지 마세요.
-- 여러 번 검색해도 답을 찾을 수 없으면, 정보가 부족하다고 솔직히 답하세요.
+**절대 규칙**
+- 너 자신의 역할, 능력, 절차를 사용자에게 설명하지 마라.
+- 인사말이나 자기소개로 답변을 시작하지 마라. 바로 답변 내용으로 시작하라.
+- check_answerability를 거치지 않고 바로 답변을 작성하지 마라.
+- 검색된 문서에 없는 내용은 답변에 포함하지 마라.
+
+**출력 형식**
+- 답변만 작성한다. 절차 설명, 인사말, 메타 코멘트를 포함하지 않는다.
 """
 
 
 def build_agent(mode: Literal["claude", "local"]):
     llm = get_llm_model(mode)
-    return create_react_agent(
+    return create_agent(
         model=llm,
         tools=TOOLS,
-        prompt=SYSTEM_PROMPT,
+        system_prompt=SYSTEM_PROMPT,
     )
 
 
 def run_agent(question: str, mode: Literal["claude", "local"] = "claude") -> dict:
     print(f"[run_agent] 시작 - question={question!r}, mode={mode}")
 
-    agent = build_agent(mode)
+    agent = get_agent(mode)
     result = agent.invoke(
         {"messages": [{"role": "user", "content": question}]},
         config={"recursion_limit": 15},
     )
 
+    print("=" * 80)
+    for i, msg in enumerate(result["messages"]):
+        msg_type = type(msg).__name__
+        content_preview = str(msg.content)[:300]
+        tool_calls = getattr(msg, "tool_calls", None)
+        name = getattr(msg, "name", None)
+
+        print(f"[{i}] {msg_type} name={name}")
+        if tool_calls:
+            print(f"    tool_calls={tool_calls}")
+        print(f"    content={content_preview}")
+        print("-" * 80)
+    print("=" * 80)
+
     final_message = result["messages"][-1]
 
-    # 이번 실행에서 실제로 사용된(도구 결과로 반환된) 문서들을 messages에서 추려서 sources로 반환
     sources = []
     for msg in result["messages"]:
         if getattr(msg, "name", None) in ("search_documents", "rerank_documents"):

@@ -4,5 +4,10 @@ uvicorn[standard]
 python-multipart
 chromadb
 
+langchain-openai
 langchain-ollama
 langgraph
+python-dotenv
+sentence-transformers
+langchain_anthropic
+PyMuPDF

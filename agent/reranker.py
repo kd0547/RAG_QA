@@ -1,8 +1,4 @@
-from typing import Any
-
 from sentence_transformers import CrossEncoder
-
-from rag.embedder import EmbeddedChunk
 
 model = None
 def load_rerank():

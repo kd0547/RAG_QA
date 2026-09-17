@@ -1,37 +1,62 @@
-"""PDF 텍스트 파싱 + 기본 청킹 CLI.
-
-사용법:
-    python main.py <pdf_path> [--chunk-size 1000] [--chunk-overlap 200] [--out chunks.json]
-"""
+"""RAG 웹 앱 진입점 (FastAPI). 앱 조립만 담당하고 로직은 controller/에 있다."""
 from __future__ import annotations
 
-import argparse
-import json
+from contextlib import asynccontextmanager
+from pathlib import Path
 
-from rag.ingest import chunks_to_dicts, ingest_pdf
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from langchain_ollama import OllamaEmbeddings, ChatOllama
 
+from agent.reranker import load_rerank
+from app.controller.file_controller import router as file_router
+from app.controller.mail_controller import router as mail_router
+from app.controller.question_controller import router as question_router
+from app.controller.search_controller import router as search_router
+from mail.email_service import email_loop_build
+from rag.embedder import set_embedding_model
+from agent.llm_provider import set_llm_model
+from agent.rag_agent import get_agent
+from repository import db, email_repo, task_repo
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="PDF를 파싱하고 텍스트를 청크로 나눈다.")
-    parser.add_argument("pdf_path", help="파싱할 PDF 파일 경로")
-    parser.add_argument("--chunk-size", type=int, default=1000, help="청크 최대 문자 수 (기본 1000)")
-    parser.add_argument("--chunk-overlap", type=int, default=200, help="청크 간 겹침 문자 수 (기본 200)")
-    parser.add_argument("--out", help="결과를 저장할 JSON 파일 경로 (미지정 시 표준출력에 요약 출력)")
-    args = parser.parse_args()
-
-    chunks = ingest_pdf(args.pdf_path, chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap)
-    data = chunks_to_dicts(chunks)
-
-    if args.out:
-        with open(args.out, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        print(f"{len(data)}개 청크를 {args.out} 에 저장했습니다.")
-    else:
-        print(f"총 {len(data)}개 청크 생성됨.")
-        for c in data[:3]:
-            preview = c["text"][:80].replace("\n", " ")
-            print(f"- [{c['id']}] p{c['page']} : {preview}...")
+STATIC_DIR = Path(__file__).resolve().parent / "app" / "static"
 
 
-if __name__ == "__main__":
-    main()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    embedding_model = OllamaEmbeddings(
+        model="bge-m3:latest")
+
+    set_embedding_model(embedding_model)
+
+    llm = ChatOllama(
+        model="qwen3.8:27b",
+        num_ctx=65536,
+    )
+    set_llm_model(llm)
+
+    load_rerank()
+
+    graph = get_agent()
+    producer, consumer, stop_event = email_loop_build(email_repo, task_repo,db)
+    yield
+
+    # 서버 종료 시 정리
+    stop_event.set()
+    producer.join(timeout=5)
+    consumer.join(timeout=5)
+
+
+app = FastAPI(title="RAG PDF Uploader", lifespan=lifespan)
+app.mount("/app/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.include_router(file_router)
+app.include_router(search_router)
+app.include_router(question_router)
+app.include_router(mail_router)
+
+
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")

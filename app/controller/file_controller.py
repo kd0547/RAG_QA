@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile
 
 from rag.embedder import embed_chunks
-from rag.ingest import ingest_pdf
+from rag.ingest import ingest_pdf,ingest_pdf_image
 from repository.embedding_repository import save_embeddings
 
 router = APIRouter()
@@ -42,7 +42,8 @@ async def upload_pdfs(files: list[UploadFile]) -> dict:
         dest_path.write_bytes(content)
 
         try:
-            chunks = ingest_pdf(dest_path)
+            #chunks = ingest_pdf(dest_path)
+            chunks = ingest_pdf_image(dest_path) #테스트용으로 교체
             embedded_chunks = embed_chunks(chunks)
         except Exception as exc:  # 개별 파일 실패는 건너뛰고 나머지는 계속 처리
             results.append({"filename": file.filename, "error": f"처리 실패: {exc}"})

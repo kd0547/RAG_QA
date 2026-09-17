@@ -6,15 +6,14 @@ venv/
 
 # Secrets / local caches
 .env
-token_cache.bin
-**/token_cache.bin
+storage/token_cache.bin
 
 # Local databases
-mail.db
+storage/mail.db
 
 # Vector store (ChromaDB persist)
-repository/data/
+storage/chroma/
 
 # Uploaded originals / generated artifacts
 data/uploads/
-images/
+data/images/

@@ -6,10 +6,9 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol
 
-from rag.ingest import Chunk
+from rag.type import Chunk, EmbeddedChunk
 
 
 class EmbeddingModel(Protocol):
@@ -38,16 +37,6 @@ def get_embedding_model() -> EmbeddingModel:
     return _embedding_model
 
 
-@dataclass
-class EmbeddedChunk:
-    id: str
-    source: str
-    page: int
-    chunk_index: int
-    text: str
-    embedding: list[float]
-
-
 def embed_chunks(chunks: list[Chunk]) -> list[EmbeddedChunk]:
     """청크 리스트를 임베딩 벡터와 함께 EmbeddedChunk 리스트로 변환한다."""
     if not chunks:
@@ -63,6 +52,7 @@ def embed_chunks(chunks: list[Chunk]) -> list[EmbeddedChunk]:
             page=c.page,
             chunk_index=c.chunk_index,
             text=c.text,
+            chunk_type=c.chunk_type,
             embedding=vector,
         )
         for c, vector in zip(chunks, vectors)

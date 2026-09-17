@@ -21,12 +21,16 @@ def chunk_text(
     chunks: list[str] = []
     start = 0
     text_len = len(text)
+    min_advance = max(chunk_size // 4, 1)
 
     while start < text_len:
         end = min(start + chunk_size, text_len)
 
         if end < text_len:
-            boundary = text.rfind("\n", start, end)
+            boundary = text.rfind("\n\n", start, end)
+
+            if boundary == -1:
+                boundary = text.rfind("\n", start, end)
             if boundary == -1:
                 boundary = text.rfind(" ", start, end)
             if boundary != -1 and boundary > start:
@@ -38,7 +42,9 @@ def chunk_text(
 
         if end >= text_len:
             break
+        next_start = max(end - chunk_overlap, start + min_advance)
+
         # 겹침을 적용하되, 항상 앞으로 진행하도록 보장한다 (무한 루프 방지)
-        start = max(end - chunk_overlap, start + 1)
+        start = next_start
 
     return chunks

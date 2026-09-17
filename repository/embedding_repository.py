@@ -1,6 +1,6 @@
 """임베딩 저장소 (Chroma 기반).
 
-repository/data 를 persist 디렉터리로 쓰는 단일 컬렉션에 청크를 저장한다.
+storage/chroma 를 persist 디렉터리로 쓰는 단일 컬렉션에 청크를 저장한다.
 문서 구분은 메타데이터의 source(doc_id) 필드로 한다.
 """
 from __future__ import annotations
@@ -9,9 +9,9 @@ from pathlib import Path
 
 import chromadb
 
-from rag.embedder import EmbeddedChunk
+from rag.type import EmbeddedChunk
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent / "storage" / "chroma"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 COLLECTION_NAME = "rag_chunks"

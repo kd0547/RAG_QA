@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DataSourcePerFileMappings">
+    <file url="file://$PROJECT_DIR$/repository/email_repository.py" value="7b101d33-fb3d-4204-bf51-6b054a97fc62" />
+    <file url="file://$PROJECT_DIR$/storage/schema.sql" value="f02ae0b8-bc0f-417b-be81-f742691568cf" />
+  </component>
+</project>
