@@ -14,12 +14,31 @@ services:
     env_file:
       - .env
     environment:
-      # langchain-ollama(OllamaEmbeddings)는 OLLAMA_HOST를 읽는다
-      - OLLAMA_HOST=http://host.docker.internal:11434
+      # 임베딩(bge-m3)은 아래 ollama 컨테이너가 맡는다. langchain-ollama는 OLLAMA_HOST를 읽는다.
+      - OLLAMA_HOST=http://ollama:11434
     extra_hosts:
-      # 리눅스 Docker에서도 host.docker.internal이 호스트를 가리키게 한다
+      # 같은 서버의 vLLM 등 호스트 서비스를 host.docker.internal로 부를 수 있게 한다 (리눅스용)
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - ollama
     restart: unless-stopped
+
+  # 임베딩 전용 Ollama. 모델은 처음 한 번 받아야 한다:
+  #   docker compose exec ollama ollama pull bge-m3
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    # GPU로 돌리려면 주석 해제 (nvidia-container-toolkit 필요, vLLM과 VRAM을 나눠 씀)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 
 volumes:
   hf_cache:
+  ollama_models:
