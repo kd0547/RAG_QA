@@ -1,6 +1,8 @@
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Optional
+
 
 class TaskStatus(Enum):
     PENDING = "pending"        # 메일 수신 완료, AI 답변 생성 대기 중
@@ -10,6 +12,11 @@ class TaskStatus(Enum):
     APPROVED = "approved"
     SENT = "sent"              # 담당자 승인 후 최종 전송 완료
     FAILED = "failed"          # 처리 중 오류 발생 (재시도 대상)
+
+class DocumentType(Enum):
+    PDF = "pdf"
+    IMAGE = "image"
+
 
 def parse_status_filter(status:str)-> list[TaskStatus] | None:
     if not status:
@@ -32,13 +39,22 @@ def parse_status_filter(status:str)-> list[TaskStatus] | None:
     return result
 
 @dataclass
+class Attachment:
+    type: DocumentType
+    filename: str
+    content_type: str
+    image:Optional[str]
+    path: Optional[str]
+
+@dataclass
 class MailEntity:
     uid: str
     subject: str
     sender: str
     body: str = ""                          # 기본값
     received_at: datetime = field(default_factory=datetime.now)
-    attachments: list[str] = field(default_factory=list)  # 가변 기본값은 반드시 이렇게
+    attachments: list[Attachment] = field(default_factory=list)
+
 
 @dataclass
 class TaskEntity:

@@ -7,17 +7,11 @@ export type MailStatus = 'pending' | 'drafted' | 'in_review' | 'sent' | 'failed'
 
 /** 목록(GET /mails)의 행 */
 export interface MailSummary {
-    uid: string;
+    task_id: string;
     subject: string;
     sender: string;                 // 이메일 주소
-    sender_name: string | null;     // 표시 이름
-    sender_domain: string | null;
     received_at: string;            // ISO 8601 (+09:00)
     status: MailStatus;
-    confidence: number | null;      // 0~1
-    assignee: string | null;        // 검토 담당자
-    has_draft: boolean;
-    retry_count: number;
 }
 
 export interface MailSource {
@@ -26,8 +20,9 @@ export interface MailSource {
     text: string;                   // 근거 스니펫
 }
 
-/** 상세(GET /mails/{uid}) */
+/** 상세(GET /mails/{task_id}) */
 export interface MailDetail extends MailSummary {
+    assignee: string | null;        // 검토 담당자
     recipient: string;
     body: string;                   // 받은 원문 (plain text)
     draft: string | null;           // AI 초안 (편집 대상)
@@ -47,7 +42,6 @@ export interface DailyVolume {
 export interface MailStats {
     date: string;                   // YYYY-MM-DD
     pending_review: number;         // drafted + in_review
-    low_confidence: number;         // 대기 중 confidence < 0.6
     sent_today: number;
     rejected_today: number;
     failed: number;
@@ -65,7 +59,7 @@ export interface MailListResponse {
 }
 
 export interface ApproveResult {
-    uid: string;
+    task_id: string;
     status: MailStatus;
     sent_at: string;
     to: string;

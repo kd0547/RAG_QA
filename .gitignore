@@ -17,3 +17,10 @@ storage/chroma/
 # Uploaded originals / generated artifacts
 data/uploads/
 data/images/
+markdown/
+
+# 로컬 도구 / 실행 중 생기는 파일
+.claude/
+.pytest_cache/
+identifier.sqlite
+temp/

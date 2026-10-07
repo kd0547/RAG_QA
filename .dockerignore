@@ -4,7 +4,20 @@ __pycache__
 .git
 .gitignore
 .env
+.idea
+.claude
 *.db-journal
 chroma_data/
 data/*.db
+# 프론트는 Dockerfile 1단계에서 새로 빌드하므로 로컬 산출물은 넣지 않는다
+frontend/node_modules/
+frontend/dist/
 *.db
+
+# 실행 중 생기는 상태/비밀은 이미지에 굽지 않고 볼륨으로 붙인다 (schema.sql은 필요)
+storage/token_cache.bin
+storage/chroma/
+data/uploads/
+data/images/
+temp/
+markdown/

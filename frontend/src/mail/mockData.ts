@@ -9,89 +9,52 @@ const at = (hhmm: string) => `${TODAY}T${hhmm}:00+09:00`;
 
 export const MOCK_ROWS: MailSummary[] = [
     {
-        uid: 'UID-1a2b3c',
+        task_id: 'TASK-1a2b3c',
         subject: 'A650 16인치 모델 RAM 최대 용량과 슬롯 구성 문의',
         sender: 'kim.jh@trigem.co.kr',
-        sender_name: '김지현',
-        sender_domain: 'trigem.co.kr',
         received_at: at('14:23'),
         status: 'drafted',
-        confidence: 0.92,
-        assignee: null,
-        has_draft: true,
-        retry_count: 0,
     },
     {
-        uid: 'UID-4d5e6f',
+        task_id: 'TASK-4d5e6f',
         subject: 'RTX5070 GPU 스튜디오 드라이버 버전 호환성',
         sender: 'lee.sy@partner.co.kr',
-        sender_name: '이수영',
-        sender_domain: 'partner.co.kr',
         received_at: at('13:51'),
         status: 'drafted',
-        confidence: 0.74,
-        assignee: null,
-        has_draft: true,
-        retry_count: 0,
     },
     {
-        uid: 'UID-7g8h9i',
+        task_id: 'TASK-7g8h9i',
         subject: '코난LLM 온프레미스 설치 최소 요구사항',
         sender: 'park.dw@trigem.co.kr',
-        sender_name: '박도원',
-        sender_domain: 'trigem.co.kr',
         received_at: at('13:40'),
         status: 'in_review',
-        confidence: 0.88,
-        assignee: '나',
-        has_draft: true,
-        retry_count: 0,
     },
     {
-        uid: 'UID-0j1k2l',
+        task_id: 'TASK-0j1k2l',
         subject: 'Jirisan 보드 EVT 검인 보고서 외부 공유 가능 여부',
         sender: 'm.chen@arrowtech.com',
-        sender_name: 'Michael Chen',
-        sender_domain: 'arrowtech.com',
         received_at: at('12:58'),
         status: 'drafted',
-        confidence: 0.57,
-        assignee: null,
-        has_draft: true,
-        retry_count: 0,
     },
     {
-        uid: 'UID-3m4n5o',
+        task_id: 'TASK-3m4n5o',
         subject: '제품 보증 기간 연장 정책 (B2B 계약분)',
         sender: 'jung.hn@trigem.co.kr',
-        sender_name: '정하늘',
-        sender_domain: 'trigem.co.kr',
         received_at: at('11:30'),
         status: 'drafted',
-        confidence: 0.81,
-        assignee: null,
-        has_draft: true,
-        retry_count: 0,
     },
     {
-        uid: 'UID-6p7q8r',
+        task_id: 'TASK-6p7q8r',
         subject: '[자동] 배송 지연 안내 회신',
         sender: 'noreply@trigem.co.kr',
-        sender_name: null,
-        sender_domain: 'trigem.co.kr',
         received_at: at('09:12'),
         status: 'failed',
-        confidence: null,
-        assignee: null,
-        has_draft: true,
-        retry_count: 2,
     },
 ];
 
 export const MOCK_STATS: MailStats = {
     date: TODAY,
     pending_review: 5,
-    low_confidence: 1,
     sent_today: 24,
     rejected_today: 3,
     failed: 1,
@@ -119,7 +82,7 @@ const KIM_DRAFT = `김지현 님,
 감사합니다.`;
 
 const MOCK_DETAIL_EXTRA: Record<string, Partial<MailDetail>> = {
-    'UID-1a2b3c': {
+    'TASK-1a2b3c': {
         body: `안녕하세요. 개발본부 김지현입니다.
 A650 16인치(Jirisan, Kraken Point) 모델 관련 고객사 문의가 들어왔습니다.
 1) 메모리 최대 확장 용량이 얼마인지
@@ -134,7 +97,7 @@ RTX5070 탑재 모델 기준으로 확인 부탁드립니다. 감사합니다.`,
             { source: 'TG_NPC_제품제안서_A650_16인치_Jirisan.pdf', page: 7, text: '확장성 표 - 최대 64GB DDR5-5600' },
         ],
     },
-    'UID-4d5e6f': {
+    'TASK-4d5e6f': {
         body: 'RTX5070 탑재 모델에서 NVIDIA 스튜디오 드라이버 어느 버전부터 검증됐는지, 게임 레디 드라이버와 혼용해도 되는지 문의드립니다.',
         draft: '이수영 님,\n\nRTX5070 탑재 모델은 NVIDIA Studio Driver 566.14 이상에서 검증되었습니다. Game Ready Driver도 동작하나, 콘텐츠 제작 워크로드는 Studio Driver 사용을 권장합니다.\n\n감사합니다.',
         model: 'qwen3.8:27b',
@@ -143,7 +106,8 @@ RTX5070 탑재 모델 기준으로 확인 부탁드립니다. 감사합니다.`,
             { source: 'TG_NPC_제품제안서_A650_16인치_Jirisan.pdf', page: 9, text: 'GPU 드라이버 검증 버전: Studio 566.xx' },
         ],
     },
-    'UID-7g8h9i': {
+    'TASK-7g8h9i': {
+        assignee: '나',
         body: '코난LLM을 사내 서버에 온프레미스로 올리려는데 GPU/메모리/디스크 최소 사양을 알려주세요.',
         draft: '박도원 님,\n\n코난LLM 온프레미스 최소 사양은 다음과 같습니다.\n· GPU: VRAM 48GB 이상 (A6000 / L40S급)\n· 시스템 메모리: 128GB\n· 디스크: NVMe 1TB 이상\n\n감사합니다.',
         model: 'qwen3.8:27b',
@@ -152,16 +116,16 @@ RTX5070 탑재 모델 기준으로 확인 부탁드립니다. 감사합니다.`,
             { source: 'TG_AI_Powered_Station_with_코난LLM_사용자가이드_3.0.pdf', page: 22, text: '온프레미스 최소 요구사양 표' },
         ],
     },
-    'UID-0j1k2l': {
+    'TASK-0j1k2l': {
         body: 'Could you share the Jirisan board EVT qualification report and related mass-production data (A650)?',
         draft: 'Michael 님,\n\n요청하신 EVT 검인 보고서는 대외 공유 등급 확인이 필요합니다. 담당 부서 확인 후 회신드리겠습니다.\n\n감사합니다.',
         model: 'qwen3.8:27b',
         retrieval: { query_top_k: 6, rerank_top_n: 3 },
         sources: [
-            { source: 'EVT_검인증_보고서_및_양산이관자료_A650.pdf', page: 1, text: '(신뢰도 낮음) 문서 접근 등급 미상' },
+            { source: 'EVT_검인증_보고서_및_양산이관자료_A650.pdf', page: 1, text: '문서 접근 등급 미상' },
         ],
     },
-    'UID-3m4n5o': {
+    'TASK-3m4n5o': {
         body: 'B2B 계약분 제품의 보증 기간을 연장할 수 있는지, 연장 조건과 최대 기간을 알려주세요.',
         draft: '정하늘 님,\n\nB2B 계약분 보증 연장은 계약 부속합의서 기준으로 기본 12개월 + 최대 24개월까지 가능합니다. 연장 신청은 출고 후 6개월 이내에 접수되어야 합니다.\n\n감사합니다.',
         model: 'qwen3.8:27b',
@@ -170,7 +134,7 @@ RTX5070 탑재 모델 기준으로 확인 부탁드립니다. 감사합니다.`,
             { source: '사양서_일반형노트북_20.pdf', page: 19, text: '보증 정책 - B2B 연장 조항' },
         ],
     },
-    'UID-6p7q8r': {
+    'TASK-6p7q8r': {
         body: '배송 지연 안내에 대한 자동 회신 건. SMTP 인증 오류(535)로 전송에 2회 실패했습니다.',
         draft: '고객님, 주문하신 상품의 배송이 지연되어 안내드립니다. 예상 출고일은 영업일 기준 2일 이내입니다. 불편을 드려 죄송합니다.',
         model: 'qwen3.8:27b',
@@ -180,9 +144,10 @@ RTX5070 탑재 모델 기준으로 확인 부탁드립니다. 감사합니다.`,
 };
 
 export function mockDetail(row: MailSummary): MailDetail {
-    const extra = MOCK_DETAIL_EXTRA[row.uid] ?? {};
+    const extra = MOCK_DETAIL_EXTRA[row.task_id] ?? {};
     return {
         ...row,
+        assignee: extra.assignee ?? null,
         recipient: 'support-ai@trigem.co.kr',
         body: extra.body ?? '(원문 없음)',
         draft: extra.draft ?? null,

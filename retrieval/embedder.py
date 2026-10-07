@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from rag.type import Chunk, EmbeddedChunk
+from retrieval.type import Chunk, EmbeddedChunk
 
 
 class EmbeddingModel(Protocol):
@@ -54,6 +54,7 @@ def embed_chunks(chunks: list[Chunk]) -> list[EmbeddedChunk]:
             text=c.text,
             chunk_type=c.chunk_type,
             embedding=vector,
+            file_id=c.file_id,
         )
         for c, vector in zip(chunks, vectors)
     ]

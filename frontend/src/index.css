@@ -79,3 +79,50 @@
 .mdxeditor-root-contenteditable > div {
     padding: 20px 24px;
 }
+
+/* 메일 초안은 Markdown으로 읽고, 편집할 때는 원본 텍스트를 유지한다. */
+.mail-draft-markdown {
+    overflow-x: auto;
+    overflow-wrap: anywhere;
+    font-size: 16px;
+    line-height: 1.85;
+    white-space: pre-wrap;
+}
+
+.mail-draft-markdown :is(h1, h2, h3, h4) {
+    color: var(--color-ink);
+    line-height: 1.4;
+}
+
+.mail-draft-markdown :is(p, ul, ol, blockquote, pre, table) {
+    margin-top: 0.65em;
+    margin-bottom: 0.65em;
+}
+
+.mail-draft-markdown :is(ul, ol) {
+    padding-left: 1.5em;
+}
+
+.mail-draft-markdown table {
+    width: 100%;
+    min-width: 520px;
+    border-collapse: collapse;
+    white-space: normal;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.mail-draft-markdown :is(th, td) {
+    padding: 0.4em 0.65em;
+    border: 1px solid var(--color-line);
+}
+
+.mail-draft-markdown pre {
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.mail-draft-markdown a {
+    color: var(--color-brand-hover);
+    overflow-wrap: anywhere;
+}

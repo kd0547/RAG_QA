@@ -97,6 +97,14 @@ export function CloseIcon({ className = 'w-[9px] h-[9px]' }: IconProps) {
     );
 }
 
+export function TrashIcon({ className = 'w-3 h-3' }: IconProps) {
+    return (
+        <svg className={className} viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2 3.5h10M5.5 3.5V2.2h3v1.3M3.3 3.5l.6 8.3h6.2l.6-8.3M5.8 6v3.8M8.2 6v3.8" />
+        </svg>
+    );
+}
+
 export function RetryIcon({ className = 'w-[10px] h-[10px]' }: IconProps) {
     return (
         <svg className={className} viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">

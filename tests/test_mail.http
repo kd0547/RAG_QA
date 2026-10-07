@@ -1,0 +1,7 @@
+### GET request to example server
+GET https://examples.http-client.intellij.net/get
+    ?generated-in=PyCharm
+
+### GET mail
+
+GET http://192.168.0.184:8000/mails

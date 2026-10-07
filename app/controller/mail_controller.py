@@ -1,9 +1,16 @@
+from dataclasses import asdict
+from datetime import datetime
+
 from fastapi import APIRouter, HTTPException
 
-from entity.type import parse_status_filter
+from entity.type import parse_status_filter, TaskStatus
+from mail.email_send import SENDER_EMAIL, send_email
+from mail.templates import render_answer_email
 from repository import task_repo
 
 router = APIRouter()
+
+
 
 
 @router.get("/mails")
@@ -19,8 +26,60 @@ def mail_view(
     if statuses is None:
         raise HTTPException(status_code=400, detail=f"알 수 없는 status 값: {status}")
 
-    # TODO: mails/tasks 조인 조회는 아직 미구현 (TaskRepository.view_all 등이 스텁).
-    # 여기는 라우팅/파라미터 계약만 맞춰둔 상태 — 실제 쿼리는 repository 계층에서 채워야 함.
-    items = task_repo.view_all() or []
+    items = task_repo.view_all(statuses) or []
     return {"items": items, "total": len(items), "limit": limit, "offset": offset}
 
+@router.get("/mails/{task_id}")
+def view_mail_detail(task_id: str):
+    detail = task_repo.view_task(task_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
+
+    return {
+        **asdict(detail),
+        "recipient": SENDER_EMAIL,
+        "model": None,
+        "retrieval": None,
+        "sources": [],
+    }
+
+
+@router.post("/mails/{task_id}/approve")
+def mail_approve(task_id: str):
+    #먼저 task를 가져옴
+    task = task_repo.approve(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="not_found")
+
+    #상태 체크
+    if task.get("status") != "drafted":
+        raise HTTPException(status_code=409, detail=f"승인할 수 없는 상태입니다: {task.get('status')}")
+
+    #답변
+    answer = task.get("draft_answer") or ""
+    if not answer:
+        raise HTTPException(status_code=409, detail="draft_answer가 없습니다")
+
+    subject = f"[응답] {task.get('subject')}"
+
+    #메일 전송
+    try:
+        send_email(
+            to_addr=task.get("sender"),
+            subject=subject,
+            body=render_answer_email(answer),
+            html=True,
+        )
+    except Exception:
+        task_repo.update_status(task_id, TaskStatus.FAILED)
+        raise HTTPException(status_code=502, detail="smtp_error")
+
+    #상태 변경
+    task_repo.update_status(task_id, TaskStatus.SENT)
+
+    return {
+        "task_id": task_id,
+        "status": TaskStatus.SENT.value,
+        "sent_at": datetime.now().astimezone().isoformat(),
+        "to": task.get("sender"),
+    }

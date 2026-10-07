@@ -11,12 +11,12 @@ SMTP_PORT = 587  # 아래 참고
 SENDER_EMAIL = os.environ["MAIL_ID"]       # 환경변수로 관리 권장
 SENDER_PASSWORD = os.environ["MAIL_PW"]
 
-def send_email(to_addr: str, subject: str, body: str):
+def send_email(to_addr: str, subject: str, body: str, html: bool = False):
     msg = MIMEMultipart()
     msg["From"] = SENDER_EMAIL
     msg["To"] = to_addr
     msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain", "utf-8"))
+    msg.attach(MIMEText(body, "html" if html else "plain", "utf-8"))
 
     with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
         server.ehlo()

@@ -4,7 +4,6 @@ from typing import Any
 from PIL import Image
 from typing import Optional
 
-
 @dataclass
 class PageText:
     page: int  # 1-based 페이지 번호
@@ -14,22 +13,6 @@ class PageText:
 class PageImage:
     page:int
     img: Image.Image
-
-
-@dataclass(kw_only=True)
-class Chunk:
-    id: str
-    source: str
-    page: int
-    chunk_index: int
-    text: str
-    chunk_type: str = "text"
-
-
-@dataclass(kw_only=True)
-class EmbeddedChunk(Chunk):
-    """임베딩 벡터가 채워진 Chunk. 필드는 Chunk를 그대로 상속하고 embedding만 추가한다."""
-    embedding: list[float]
 
 class Span(BaseModel):
     size: float

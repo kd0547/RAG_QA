@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
-from rag.embedder import embed_query
+from retrieval.embedder import embed_query
 from repository.embedding_repository import search
 
 router = APIRouter()

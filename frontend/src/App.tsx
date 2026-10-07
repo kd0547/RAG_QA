@@ -9,6 +9,7 @@ import JSZip from 'jszip';
 import '@mdxeditor/editor/style.css';
 import type {FileStatus, OcrFile, OcrPageInfo, Selection, PreviewMode, CopyStatus, OcrResponse, OcrMarkdownImage} from './types';
 import {ImageWithBoxes} from "./components/ImageWithBoxes.tsx";
+import {OCR_API_BASE} from "./lib/http.ts";
 import {MarkdownEditor} from "./components/MarkdownEditor.tsx";
 import {
     AlertIcon,
@@ -326,7 +327,7 @@ export default function App() {
             const formData = new FormData();
             formData.append('files', item.file);
 
-            const response = await fetch('http://127.0.0.1:8082/ocr/run_ocr', {
+            const response = await fetch(`${OCR_API_BASE}/ocr/run_ocr`, {
                 method: 'POST',
                 body: formData,
             });

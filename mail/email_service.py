@@ -1,22 +1,25 @@
 import threading
-from queue import Queue
-from agent.rag_agent import get_agent, run_agent
-from entity.type import TaskEntity
+
+import config
+from agent.rag_agent import run_agent, run_agent_temp_attachments
+from entity.type import MailEntity
 from repository.email_repository import EmailRepository
 from repository.repo_connect import Database
 from repository.task_repository import TaskRepository
 
-from .email_receiver import fetch_new_emails, MailEntity
-import queue
+from .email_receiver import fetch_new_emails
+from entity.type import TaskStatus
 import logging
 
 from mail.email_send import send_email
+from mail.templates import render_mail_review_email
 
 
 logger = logging.getLogger(__name__)
 
 
 def intake_mail(mail: MailEntity, db: Database, email_repo: EmailRepository, task_repo: TaskRepository) -> None:
+    print("저장 실행중...")
     with db.transaction() as conn:
         email_repo.save_pending(mail, conn)
         task_repo.create_task(mail.uid, conn)
@@ -58,29 +61,57 @@ def email_consumer_loop(stop_event: threading.Event,
     logger.info("메일 처리 루프 시작")
 
     while not stop_event.is_set():
-        mail: MailEntity
+        pending_tasks = task_repo.get_pending_tasks()
 
-        task_repo.get_task_peddings()
-
-        logger.info("메일 처리 시작: uid=%s, sender=%s, subject=%s", mail.uid, mail.sender, mail.subject)
-
-        try:
-            #메일 읽기
-            body = mail.body
-            if not body or not body.strip():
-                logger.warning("본문이 비어있어 처리 건너뜀: uid=%s, subject=%s", mail.uid, mail.subject)
+        for task in pending_tasks:
+            mail = email_repo.get_mail_by_id(task.mail_uid)
+            if mail is None:
+                logger.warning("메일을 찾을 수 없음: mail_uid=%s", task.mail_uid)
                 continue
 
+            logger.info("메일 처리 시작: uid=%s, sender=%s, subject=%s", mail.uid, mail.sender, mail.subject)
+
+            try:
+                #메일 읽기
+                body = mail.body
+                if not body or not body.strip():
+                    logger.warning("본문이 비어있어 처리 건너뜀: uid=%s, subject=%s", mail.uid, mail.subject)
+                    continue
 
 
-            logger.debug("답변 생성 완료: uid=%s, answer_len=%d", mail.uid, len(answer))
+                #답변 생성하기
+                result = run_agent_temp_attachments(
+                    body,
+                    mode="local",
+                    attachments=mail.attachments,
+                )
+                answer = result["answer"]
+
+                dandang = config.REVIEWER_EMAIL
+                #담당자 배정 (지금은 .env의 REVIEWER_EMAIL 한 명)
+                task_repo.assign_task(task.task_id, dandang)
+                send_email(
+                    dandang,
+                    "[테스트] 검토가 필요한 메일이 도착했습니다.",
+                    render_mail_review_email(
+                        mail=mail,
+                        answer=answer,
+                        task_id=task.task_id,
+                        base_url=config.PUBLIC_BASE_URL,
+                    ),
+                    html=True,
+                )
 
 
-        except Exception:
-            logger.exception("메일 처리 실패: uid=%s", mail.uid)
-            repo.update_status(mail.uid, MailStatus.FAILED)
-        finally:
-            mail_queue.task_done()
+
+                task_repo.save_draft(task.task_id, answer)
+                logger.debug("답변 생성 완료: uid=%s, answer_len=%d", mail.uid, len(answer))
+
+            except Exception:
+                logger.exception("메일 처리 실패: uid=%s", mail.uid)
+                task_repo.update_status(task.task_id, TaskStatus.FAILED)
+
+        stop_event.wait(10)
 
     logger.info("메일 처리 루프 종료")
 
