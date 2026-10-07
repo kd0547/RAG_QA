@@ -116,6 +116,12 @@ class TaskRepository:
                 "UPDATE tasks SET draft_answer = ?, status = ?, updated_at = ? WHERE task_id = ?",
                 (answer, TaskStatus.DRAFTED.value, datetime.now().isoformat(), task_id),
             )
+    def update_draft_answer(self, task_id: str, answer: str) -> None:
+        with self.db.transaction() as conn:
+            conn.execute(
+                "UPDATE tasks SET draft_answer = ?, updated_at = ? WHERE task_id = ?",
+                (answer, datetime.now().isoformat(), task_id),
+            )
 
     def view_all(self,statuses:list[TaskStatus]):
         placeholders = ",".join("?" for _ in statuses)
@@ -172,6 +178,6 @@ class TaskRepository:
             row = conn.execute(select_sql, (task_id,)).fetchone()
 
         if row is None:
-            return None  # 컨트롤러 쪽에서 404 처리
+            return None  # 라우터(app/routers/mails.py)에서 404 처리
 
         return dict(row)  # {"task_id": ..., "status": ..., "draft_answer": ..., "sender": ..., "subject": ...}

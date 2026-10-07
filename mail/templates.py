@@ -1,8 +1,9 @@
-"""담당자 알림 메일용 HTML 템플릿."""
+"""메일 HTML 템플릿: 고객 답변 메일, 담당자 검토 요청 메일, 메일 버튼이 여는 전송 결과 페이지."""
 from __future__ import annotations
 from urllib.parse import quote
 
 import html as html_lib
+import json
 
 from entity.type import MailEntity
 import markdown
@@ -190,12 +191,10 @@ def render_mail_review_email(
     encoded_task_id = quote(task_id, safe="")
     base_url = base_url.rstrip("/")
 
-    # 검토/수정 화면
+    # 답변 수정: 웹 앱의 메일 검토 화면을 연다
     edit_url = f"{base_url}/mail?task_id={encoded_task_id}"
-    send_url = f"{base_url}/mails/{encoded_task_id}/review"
-
-    # 실제 API
-    approve_api_url = f"{base_url}/api/mails/{encoded_task_id}/approve"
+    # 답변 전송: 웹 앱을 거치지 않고 바로 전송하는 단독 페이지 (app/routers/mail_links.py)
+    send_url = f"{base_url}/mails/{encoded_task_id}/send"
 
     return f"""
 <!DOCTYPE html>
@@ -406,7 +405,7 @@ def render_mail_review_email(
                                     <!-- 전송 -->
                                     <td style="padding-left:8px;">
                                         <a
-                                            href="{send_url}?action=send"
+                                            href="{send_url}"
                                             style="
                                                 display:inline-block;
                                                 padding:11px 22px;
@@ -432,7 +431,8 @@ def render_mail_review_email(
                                 line-height:1.5;
                                 color:#9ca3af;
                             ">
-                                전송 전 답변 내용을 다시 확인해주세요.
+                                '답변 전송'을 누르면 위 초안이 바로 고객에게 전송됩니다.
+                                고칠 내용이 있으면 '답변 수정'을 눌러주세요.
                             </p>
 
                         </td>
@@ -461,6 +461,146 @@ def render_mail_review_email(
             </td>
         </tr>
     </table>
+</body>
+</html>
+"""
+
+
+# 상태값 → 화면 표시 이름 (frontend/src/mail/format.ts 의 STATUS_META 와 맞춘다)
+_STATUS_LABEL = {
+    "pending": "초안 생성 대기",
+    "drafted": "초안 준비",
+    "in_review": "검토 중",
+    "rejected": "반려",
+    "approved": "전송 대기",
+    "sent": "전송 완료",
+    "failed": "전송 실패",
+}
+
+
+def render_quick_send_page(
+    task_id: str,
+    subject: str | None,
+    sender: str | None,
+    status: str | None,
+) -> str:
+    """검토 요청 메일의 '답변 전송' 버튼이 여는 단독 페이지 HTML.
+
+    페이지가 열리면 스크립트가 POST /mails/{task_id}/approve 를 호출해 바로 전송하고 결과만 보여준다.
+    GET 만으로 전송하지 않는 이유: 메일 보안 스캐너(링크 미리 열기)가 사람 대신 링크를 열어도
+    스크립트를 실행하지 않는 한 전송되지 않게 하려는 것이다.
+    status 가 None 이면 task 를 찾지 못한 경우다.
+    """
+    encoded_task_id = quote(task_id, safe="")
+    review_url = f"/mail/review?task_id={encoded_task_id}"
+
+    if status is None:
+        initial = "error"
+        title, message = "메일을 찾을 수 없습니다", "이미 삭제되었거나 잘못된 링크입니다."
+    elif status != "drafted":
+        initial = "done-before"
+        label = _STATUS_LABEL.get(status, status)
+        title, message = "이미 처리된 메일입니다", f"현재 상태: {label}. 다시 전송하지 않았습니다."
+    else:
+        initial = "sending"
+        title, message = "답변을 전송하는 중…", "잠시만 기다려주세요."
+
+    subject_html = html_lib.escape(subject or "")
+    sender_html = html_lib.escape(sender or "")
+    # <script> 안에 넣는 값은 JSON 으로 만들고 '</' 를 끊어 스크립트 탈출을 막는다
+    approve_path = json.dumps(f"/mails/{encoded_task_id}/approve").replace("</", "<\\/")
+    initial_js = json.dumps(initial)
+
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>답변 전송</title>
+<style>
+    :root {{ --ink:#141C2B; --muted:#6b7280; --line:#E9EDF1; --brand:#00A4E4; --ok:#0f9d58; --danger:#E5484D; }}
+    * {{ box-sizing:border-box; }}
+    body {{
+        margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+        padding:24px 16px; background:#FAFBFC; color:var(--ink);
+        font-family:'Pretendard','Segoe UI','Malgun Gothic',Arial,sans-serif;
+    }}
+    main {{ width:100%; max-width:440px; text-align:center; }}
+    .icon {{
+        width:56px; height:56px; margin:0 auto 20px; border-radius:50%;
+        display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:700;
+    }}
+    .sending .icon {{ border:4px solid #D6F0FB; border-top-color:var(--brand); animation:spin .8s linear infinite; }}
+    .done .icon, .done-before .icon {{ background:#E6F6EE; color:var(--ok); }}
+    .done-before .icon {{ background:#F5F6F7; color:var(--muted); }}
+    .error .icon {{ background:#FFE8E9; color:var(--danger); }}
+    @keyframes spin {{ to {{ transform:rotate(360deg); }} }}
+    h1 {{ margin:0 0 8px; font-size:20px; letter-spacing:-0.01em; }}
+    p {{ margin:0; font-size:14px; line-height:1.6; color:var(--muted); }}
+    .mail {{ margin:24px 0 0; padding:14px 0 0; border-top:1px solid var(--line); text-align:left; }}
+    .mail dt {{ font-size:11px; color:var(--muted); }}
+    .mail dd {{ margin:2px 0 10px; font-size:13px; font-weight:600; word-break:break-all; }}
+    a.link {{ display:inline-block; margin-top:18px; font-size:13px; font-weight:600; color:#0092CC; text-decoration:none; }}
+    a.link:hover {{ text-decoration:underline; }}
+</style>
+</head>
+<body>
+<main id="root" class="{initial}">
+    <div class="icon" id="icon" aria-hidden="true"></div>
+    <h1 id="title">{html_lib.escape(title)}</h1>
+    <p id="message">{html_lib.escape(message)}</p>
+    <dl class="mail">
+        <dt>제목</dt><dd>{subject_html or "—"}</dd>
+        <dt>받는 사람</dt><dd>{sender_html or "—"}</dd>
+    </dl>
+    <a class="link" href="{review_url}">웹에서 열어 확인하기 →</a>
+</main>
+<script>
+(function () {{
+    var root = document.getElementById("root");
+    var icon = document.getElementById("icon");
+    var title = document.getElementById("title");
+    var message = document.getElementById("message");
+
+    function show(state, t, m) {{
+        root.className = state;
+        icon.textContent = state === "done" ? "✓" : state === "error" ? "!" : state === "done-before" ? "–" : "";
+        title.textContent = t;
+        message.textContent = m;
+    }}
+
+    // approve API 의 오류 코드(detail) → 안내 문구
+    var ERROR_TEXT = {{
+        not_found: "메일을 찾을 수 없습니다. 이미 삭제되었거나 잘못된 링크입니다.",
+        smtp_error: "메일 서버 오류로 전송하지 못했습니다. 웹에서 열어 재전송해주세요."
+    }};
+
+    var initial = {initial_js};
+    if (initial !== "sending") {{
+        show(initial, title.textContent, message.textContent);
+        return;
+    }}
+
+    fetch({approve_path}, {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: "{{}}"
+    }})
+        .then(function (res) {{
+            return res.json().catch(function () {{ return {{}}; }}).then(function (data) {{
+                if (res.ok) {{
+                    show("done", "전송 완료", (data.to ? data.to + " 에게 " : "") + "답변을 보냈습니다. 이 창은 닫아도 됩니다.");
+                }} else {{
+                    show("error", "전송하지 못했습니다", ERROR_TEXT[data.detail] || data.detail || ("오류 " + res.status));
+                }}
+            }});
+        }})
+        .catch(function () {{
+            show("error", "전송하지 못했습니다", "서버에 연결할 수 없습니다.");
+        }});
+}})();
+</script>
 </body>
 </html>
 """

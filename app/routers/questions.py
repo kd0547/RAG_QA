@@ -1,4 +1,4 @@
-"""사용자 질문 -> LangGraph RAG 에이전트 컨트롤러."""
+"""사용자 질문 -> LangGraph RAG 에이전트 라우터."""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException

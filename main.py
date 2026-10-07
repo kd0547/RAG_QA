@@ -1,4 +1,4 @@
-"""RAG 웹 앱 진입점 (FastAPI). 앱 조립만 담당하고 로직은 controller/에 있다."""
+"""RAG 웹 앱 진입점 (FastAPI). 앱 조립만 담당하고 API 라우터는 app/routers/ 에 있다."""
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -11,10 +11,11 @@ from langchain_openai import ChatOpenAI
 
 import config
 from agent.reranker import load_rerank
-from app.controller.file_controller import router as file_router
-from app.controller.mail_controller import router as mail_router
-from app.controller.question_controller import router as question_router
-from app.controller.search_controller import router as search_router
+from app.routers.files import router as file_router
+from app.routers.mail_links import router as mail_link_router
+from app.routers.mails import router as mail_router
+from app.routers.questions import router as question_router
+from app.routers.search import router as search_router
 from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_llm_model
@@ -60,6 +61,7 @@ app.include_router(file_router)
 app.include_router(search_router)
 app.include_router(question_router)
 app.include_router(mail_router)
+app.include_router(mail_link_router)
 
 if FRONTEND_DIST.is_dir():
     # 라우터보다 뒤에 등록해야 /upload, /ask 등 API 경로가 가려지지 않는다.

@@ -1,7 +1,8 @@
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, date
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from entity.type import parse_status_filter, TaskStatus
 from mail.email_send import SENDER_EMAIL, send_email
@@ -12,6 +13,24 @@ router = APIRouter()
 
 
 
+class ApproveBody(BaseModel):
+    body: str | None = None
+    subject: str | None = None
+    edited: bool = False
+
+@router.get("/mails/stats")
+def view_mail_stats():
+    return  {
+        "date": date.today().isoformat(),
+        "pending_review": 0,
+        "sent_today": 0,
+        "rejected_today": 0,
+        "failed": 0,
+        "avg_review_seconds": None,
+        "draft_adoption_rate": None,
+        "sent_delta": None,
+        "daily_volume": [],
+    }
 
 @router.get("/mails")
 def mail_view(
@@ -45,7 +64,7 @@ def view_mail_detail(task_id: str):
 
 
 @router.post("/mails/{task_id}/approve")
-def mail_approve(task_id: str):
+def mail_approve(task_id: str,payload:ApproveBody | None = None):
     #먼저 task를 가져옴
     task = task_repo.approve(task_id)
     if task is None:
@@ -55,10 +74,14 @@ def mail_approve(task_id: str):
     if task.get("status") != "drafted":
         raise HTTPException(status_code=409, detail=f"승인할 수 없는 상태입니다: {task.get('status')}")
 
-    #답변
-    answer = task.get("draft_answer") or ""
+    #수정된 답변
+    answer = (payload.body if payload and payload.body else task.get("draft_answer")) or ""
     if not answer:
         raise HTTPException(status_code=409, detail="draft_answer가 없습니다")
+
+    # 수정본이면 task에 먼저 반영 (전송이 실패해도 재전송 때 수정본이 나가도록)
+    if payload and payload.body:
+        task_repo.update_draft_answer(task_id, answer)
 
     subject = f"[응답] {task.get('subject')}"
 

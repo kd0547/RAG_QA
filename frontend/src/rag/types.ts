@@ -1,6 +1,6 @@
 /**
  * RAG 업로드/질의 API 타입.
- * 계약: app/controller/file_controller.py (POST /upload, GET /files), question_controller.py (POST /ask)
+ * 계약: app/routers/files.py (POST /upload, GET /files), app/routers/questions.py (POST /ask)
  */
 
 /** GET /files 의 항목. repository/file_repository.py file_list() */

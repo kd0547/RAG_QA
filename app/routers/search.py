@@ -1,4 +1,4 @@
-"""쿼리 -> 임베딩 -> 저장소 유사도 검색 컨트롤러."""
+"""쿼리 -> 임베딩 -> 저장소 유사도 검색 라우터."""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query

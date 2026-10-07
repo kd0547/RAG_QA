@@ -1,4 +1,4 @@
-"""문서 업로드 컨트롤러: 파싱 -> 청킹 -> 임베딩 -> 저장소 저장."""
+"""문서 업로드 라우터: 파싱 -> 청킹 -> 임베딩 -> 저장소 저장."""
 from __future__ import annotations
 
 import hashlib
