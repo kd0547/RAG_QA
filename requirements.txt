@@ -18,3 +18,16 @@ python-pptx
 openpyxl
 # .hwp(HWP 5.0) 열기를 지원하는 버전
 python-hwpx>=6.7
+
+# 에이전트 (create_agent는 langchain 1.0부터)
+langchain>=1.0
+langchain-core
+pydantic
+
+# 메일 수신 (MS 인증, HTML 본문 파싱)
+msal
+beautifulsoup4
+
+# PDF 레이아웃 파싱 / 이미지
+pymupdf4llm
+pillow
