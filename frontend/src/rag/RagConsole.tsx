@@ -1,20 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+import { AppHeader } from '../components/AppHeader';
 import { ApiError } from '../lib/http';
-import { navigate } from '../lib/router';
 import { ragApi } from './api';
 import type { AskMode, AskSource, FileSummary, UploadResult } from './types';
-import { AlertIcon, CloseIcon, DocumentIcon, LogoMark, TrashIcon, UploadIcon } from '../components/icons';
+import { AlertIcon, CloseIcon, DocumentIcon, TrashIcon, UploadIcon } from '../components/icons';
 
 /**
- * RAG 콘솔 (기존 app/static/index.html 대체)
+ * TG RAG 콘솔
  *
- * 레이아웃: 좌측 사이드바(문서 관리) + 우측 질의응답 워크스페이스.
- *  - 좌: 업로드 + 업로드된 문서 목록 — 자체 스크롤
- *  - 우: 질문/답변 로그(스크롤) + 하단 고정 입력창
- * 페이지 전체는 스크롤되지 않고 각 패널이 독립적으로 스크롤한다.
+ * 레이아웃: 상단 공통 바 아래로 왼쪽 문서 열 + 오른쪽 질의응답 캔버스. 큰 상자 없이 구분선 하나로 나눈다.
+ *  - 왼쪽: 업로드 + 업로드된 문서 목록 — 자체 스크롤
+ *  - 오른쪽: 가운데 읽기 폭으로 놓인 질문/답변(스크롤) + 하단에 떠 있는 입력창
  */
 
 const PREVIEW_LEN = 200;
@@ -66,7 +65,7 @@ export function RagConsole() {
     const [docs, setDocs] = useState<FileSummary[]>([]);
     const [docsLoading, setDocsLoading] = useState(true);
     const [docsError, setDocsError] = useState('');
-    /** 직전 업로드 응답. 질의 로그가 비어 있을 때 워크스페이스에 요약으로 보여준다 */
+    /** 직전 업로드 응답. 질의 로그가 비어 있을 때 캔버스에 요약으로 보여준다 */
     const [lastUpload, setLastUpload] = useState<UploadResult[]>([]);
 
     // setState는 모두 await 이후에 실행된다. 로딩 표시는 호출하는 쪽(refreshDocs)에서 켠다
@@ -100,57 +99,31 @@ export function RagConsole() {
     );
 
     return (
-        <div className="flex h-screen w-full bg-white text-ink font-sans antialiased">
-            <aside className="w-[332px] min-w-[332px] shrink-0 flex flex-col border-r border-divide pl-7 pr-[18px] py-7">
-                {/* 브랜드 + 다른 화면 이동 */}
-                <div className="shrink-0">
-                    <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                            <LogoMark className="w-[21px] h-[21px]" />
-                            <span className="text-[17px] font-bold tracking-tight leading-none">
-                                TG RAG
-                            </span>
-                        </div>
-                        <nav className="flex items-center gap-1">
-                            <NavButton label="메일" onClick={() => navigate('/mail')} />
-                            <NavButton label="OCR" onClick={() => navigate('/ocr')} />
-                        </nav>
-                    </div>
-                    <p className="mt-[8px] pl-[23px] text-[10px] leading-none text-muted">
-                        문서를 근거로 답하는 RAG 콘솔
-                    </p>
-                </div>
+        <div className="min-h-screen md:h-dvh md:overflow-hidden bg-white text-ink font-sans antialiased flex flex-col">
+            <AppHeader current="rag">
+                <span className="hidden sm:block text-[12px] text-muted truncate">문서를 근거로 답하는 RAG 콘솔</span>
+            </AppHeader>
 
-                <UploadPanel onUploaded={handleUploaded} />
-                <DocumentList
-                    docs={docs}
-                    loading={docsLoading}
-                    error={docsError}
-                    onRefresh={refreshDocs}
-                    onDeleted={refreshDocs}
-                />
-            </aside>
+            <div className="flex-1 min-h-0 flex flex-col md:flex-row">
+                <aside className="md:w-[300px] xl:w-[320px] shrink-0 min-h-0 max-h-[45vh] md:max-h-none flex flex-col border-b md:border-b-0 md:border-r border-divide">
+                    <UploadPanel onUploaded={handleUploaded} />
+                    <DocumentList
+                        docs={docs}
+                        loading={docsLoading}
+                        error={docsError}
+                        onRefresh={refreshDocs}
+                        onDeleted={refreshDocs}
+                    />
+                </aside>
 
-            <Workspace docCount={docs.length} lastUpload={lastUpload} />
+                <Workspace docCount={docs.length} lastUpload={lastUpload} />
+            </div>
         </div>
     );
 }
 
-/** 사이드바의 다른 화면 이동 버튼 */
-function NavButton({ label, onClick }: { label: string; onClick: () => void }) {
-    return (
-        <button
-            type="button"
-            onClick={onClick}
-            className="h-[22px] px-2 rounded-md border border-line bg-white text-[11px] font-medium text-muted hover:text-ink hover:border-brand hover:bg-brand-tint transition-colors"
-        >
-            {label}
-        </button>
-    );
-}
-
 /* ================================================================== */
-/*  사이드바 — 업로드                                                  */
+/*  왼쪽 — 업로드                                                      */
 /* ================================================================== */
 
 function UploadPanel({ onUploaded }: { onUploaded: (results: UploadResult[]) => void }) {
@@ -186,10 +159,9 @@ function UploadPanel({ onUploaded }: { onUploaded: (results: UploadResult[]) => 
     };
 
     return (
-        <section className="shrink-0">
-            <h2 className="mt-[26px] text-[13px] font-semibold">문서 업로드</h2>
-
-            <div
+        <section className="shrink-0 px-4 pt-4 pb-3">
+            <button
+                type="button"
                 onClick={() => inputRef.current?.click()}
                 onDrop={(e) => {
                     e.preventDefault();
@@ -201,18 +173,18 @@ function UploadPanel({ onUploaded }: { onUploaded: (results: UploadResult[]) => 
                     setIsDragOver(true);
                 }}
                 onDragLeave={() => setIsDragOver(false)}
-                className={`mt-[9px] h-[104px] cursor-pointer rounded-xl border border-dashed flex flex-col items-center justify-center text-center transition-colors ${
-                    isDragOver
-                        ? 'border-brand bg-brand-tint'
-                        : 'border-line bg-surface hover:border-brand/50 hover:bg-brand-tint/60'
+                className={`w-full rounded-xl border border-dashed px-3.5 py-3 flex items-center gap-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-brand ${
+                    isDragOver ? 'border-brand bg-brand-tint' : 'border-line hover:border-brand/50 hover:bg-brand-tint/60'
                 }`}
             >
-                <UploadIcon className="w-[22px] h-[22px] text-muted" />
-                <p className="mt-[7px] text-[12px] font-medium text-muted">
-                    클릭 또는 드래그해서 추가
-                </p>
-                <p className="mt-[3px] text-[10px] text-muted/70">PDF · Word · PowerPoint · Excel · 한글(hwp·hwpx) · 이미지</p>
-            </div>
+                <span className="w-9 h-9 shrink-0 rounded-lg bg-brand-pale text-brand flex items-center justify-center">
+                    <UploadIcon className="w-[18px] h-[18px]" />
+                </span>
+                <span className="min-w-0">
+                    <span className="block text-[13px] font-semibold">문서 추가</span>
+                    <span className="block text-[11px] text-muted truncate">끌어다 놓거나 클릭 · PDF·Office·한글·이미지</span>
+                </span>
+            </button>
             <input
                 ref={inputRef}
                 type="file"
@@ -227,27 +199,19 @@ function UploadPanel({ onUploaded }: { onUploaded: (results: UploadResult[]) => 
 
             {selected.length > 0 && (
                 <>
-                    <ul className="mt-2 max-h-[132px] overflow-y-auto space-y-1">
+                    <ul className="mt-2 max-h-[132px] overflow-y-auto">
                         {selected.map((f, i) => (
-                            <li
-                                key={`${f.name}-${i}`}
-                                className="h-8 flex items-center gap-1.5 rounded-lg border border-line bg-white pl-2.5 pr-2"
-                            >
-                                <span
-                                    className="flex-1 min-w-0 truncate text-[11px] font-medium"
-                                    title={f.name}
-                                >
+                            <li key={`${f.name}-${i}`} className="h-8 flex items-center gap-2 px-1.5 rounded-lg hover:bg-surface">
+                                <span className="flex-1 min-w-0 truncate text-[12px] font-medium" title={f.name}>
                                     {f.name}
                                 </span>
-                                <span className="shrink-0 text-[10px] text-muted tabular-nums">
-                                    {(f.size / 1024).toFixed(0)}KB
-                                </span>
+                                <span className="shrink-0 text-[10px] text-muted tabular-nums">{(f.size / 1024).toFixed(0)}KB</span>
                                 <button
                                     type="button"
                                     onClick={() => setSelected((p) => p.filter((_, x) => x !== i))}
                                     disabled={uploading}
                                     aria-label="선택 해제"
-                                    className="shrink-0 text-muted hover:text-danger disabled:opacity-40 transition-colors"
+                                    className="shrink-0 w-5 h-5 rounded flex items-center justify-center text-muted hover:text-danger disabled:opacity-40 transition-colors"
                                 >
                                     <CloseIcon />
                                 </button>
@@ -259,27 +223,21 @@ function UploadPanel({ onUploaded }: { onUploaded: (results: UploadResult[]) => 
                         type="button"
                         onClick={upload}
                         disabled={uploading}
-                        className="mt-2 w-full h-8 rounded-[9px] bg-brand text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 enabled:hover:bg-brand-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        className="mt-2 w-full h-9 rounded-xl bg-brand text-white text-[12.5px] font-bold inline-flex items-center justify-center gap-2 enabled:hover:bg-brand-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
-                        {uploading && (
-                            <span className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                        )}
-                        {uploading ? '처리 중...' : `${selected.length}개 업로드`}
+                        {uploading && <span className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />}
+                        {uploading ? '처리 중…' : `${selected.length}개 업로드`}
                     </button>
                 </>
             )}
 
-            {error && (
-                <p className="mt-2 rounded-lg border border-danger bg-danger-surface px-2.5 py-1.5 text-[11px] leading-[15px] text-danger break-words">
-                    {error}
-                </p>
-            )}
+            {error && <InlineError>{error}</InlineError>}
         </section>
     );
 }
 
 /* ================================================================== */
-/*  사이드바 — 문서 목록                                               */
+/*  왼쪽 — 문서 목록                                                   */
 /* ================================================================== */
 
 function DocumentList({
@@ -316,68 +274,63 @@ function DocumentList({
     };
 
     return (
-        <section className="mt-[30px] flex-1 min-h-0 flex flex-col">
-            <div className="shrink-0 flex items-center justify-between gap-2">
-                <h2 className="text-[13px] font-semibold">업로드된 문서 ({docs.length})</h2>
+        <section className="flex-1 min-h-0 flex flex-col border-t border-divide">
+            <div className="shrink-0 px-4 pt-3.5 pb-2 flex items-center justify-between gap-2">
+                <h2 className="text-[13px] font-bold">
+                    업로드된 문서 <span className="text-muted tabular-nums">{docs.length}</span>
+                </h2>
                 <button
                     type="button"
                     onClick={onRefresh}
                     disabled={loading}
-                    className="h-6 px-2 rounded-lg border border-line bg-white text-[11px] text-muted hover:text-ink hover:border-brand disabled:opacity-40 transition-colors"
+                    className="h-7 px-2.5 rounded-lg text-[12px] font-semibold text-muted hover:text-ink hover:bg-chip disabled:opacity-40 transition-colors"
                 >
                     {loading ? '불러오는 중' : '새로고침'}
                 </button>
             </div>
 
-            {error && (
-                <p className="shrink-0 mt-2 rounded-lg border border-danger bg-danger-surface px-2.5 py-1.5 text-[11px] leading-[15px] text-danger break-words">
-                    목록을 불러오지 못했습니다: {error}
-                </p>
-            )}
-            {deleteError && (
-                <p className="shrink-0 mt-2 rounded-lg border border-danger bg-danger-surface px-2.5 py-1.5 text-[11px] leading-[15px] text-danger break-words">
-                    {deleteError}
-                </p>
+            {(error || deleteError) && (
+                <div className="shrink-0 px-4">
+                    {error && <InlineError>목록을 불러오지 못했습니다: {error}</InlineError>}
+                    {deleteError && <InlineError>{deleteError}</InlineError>}
+                </div>
             )}
 
-            <div className="mt-[7px] flex-1 min-h-0 overflow-y-auto">
+            <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-3">
                 {docs.length === 0 ? (
-                    <div className="h-14 rounded-xl border border-line bg-white flex items-center justify-center text-[11px] text-muted">
-                        {loading ? '불러오는 중...' : '아직 업로드된 문서가 없습니다.'}
-                    </div>
+                    <p className="px-3 py-8 text-center text-[12px] text-muted">
+                        {loading ? '불러오는 중…' : '아직 업로드된 문서가 없습니다.'}
+                    </p>
                 ) : (
-                    <ul className="space-y-1.5">
+                    <ul>
                         {docs.map((d) => (
-                            <li
-                                key={d.file_id}
-                                className="rounded-xl border border-line bg-white px-2.5 py-2 hover:border-brand/50 transition-colors"
-                            >
-                                <div className="flex items-center gap-2">
-                                    <div className="w-[26px] h-[26px] shrink-0 rounded-md bg-chip text-muted flex items-center justify-center text-[9px] font-bold">
-                                        {fileExt(d.original_name).slice(1, 5).toUpperCase() || 'FILE'}
-                                    </div>
-                                    {/* 한 줄로 두고, 넘치면 오른쪽 끝을 흐리게 (전체 이름은 title로) */}
-                                    <p
-                                        className="flex-1 min-w-0 overflow-hidden whitespace-nowrap text-[12px] font-semibold leading-[16px] [mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)]"
-                                        title={d.original_name}
-                                    >
-                                        {d.original_name}
-                                    </p>
-                                    <button
-                                        type="button"
-                                        onClick={() => void remove(d)}
-                                        disabled={deletingId !== null}
-                                        aria-label={`${d.original_name} 삭제`}
-                                        title="삭제"
-                                        className="w-6 h-6 shrink-0 rounded-md flex items-center justify-center text-muted hover:text-danger hover:bg-danger-surface disabled:opacity-40 transition-colors"
-                                    >
-                                        {deletingId === d.file_id ? (
-                                            <span className="w-3 h-3 rounded-full border-2 border-line border-t-danger animate-spin" />
-                                        ) : (
-                                            <TrashIcon />
-                                        )}
-                                    </button>
-                                </div>
+                            <li key={d.file_id} className="group flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-surface transition-colors">
+                                <span className="w-8 h-8 shrink-0 rounded-lg bg-chip text-muted flex items-center justify-center text-[9px] font-bold">
+                                    {fileExt(d.original_name).slice(1, 5).toUpperCase() || 'FILE'}
+                                </span>
+                                {/* 한 줄로 두고, 넘치면 오른쪽 끝을 흐리게 (전체 이름은 title로) */}
+                                <p
+                                    className="flex-1 min-w-0 overflow-hidden whitespace-nowrap text-[12.5px] font-semibold leading-[16px] [mask-image:linear-gradient(to_right,black_calc(100%-24px),transparent)]"
+                                    title={d.original_name}
+                                >
+                                    {d.original_name}
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => void remove(d)}
+                                    disabled={deletingId !== null}
+                                    aria-label={`${d.original_name} 삭제`}
+                                    title="삭제"
+                                    className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-muted hover:text-danger hover:bg-danger-surface disabled:opacity-40 transition focus-visible:opacity-100 ${
+                                        deletingId === d.file_id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                    }`}
+                                >
+                                    {deletingId === d.file_id ? (
+                                        <span className="w-3 h-3 rounded-full border-2 border-line border-t-danger animate-spin" />
+                                    ) : (
+                                        <TrashIcon />
+                                    )}
+                                </button>
                             </li>
                         ))}
                     </ul>
@@ -388,7 +341,7 @@ function DocumentList({
 }
 
 /* ================================================================== */
-/*  워크스페이스 — 질의응답                                            */
+/*  오른쪽 — 질의응답                                                  */
 /* ================================================================== */
 
 interface QaTurn {
@@ -430,12 +383,12 @@ function Workspace({
         logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
     }, [turns]);
 
-    // 입력창 높이를 내용에 맞춰 늘린다 (최대 120px)
+    // 입력창 높이를 내용에 맞춰 늘린다 (최대 160px)
     useEffect(() => {
         const el = inputRef.current;
         if (!el) return;
         el.style.height = 'auto';
-        el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+        el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }, [question]);
 
     const ask = async () => {
@@ -471,68 +424,69 @@ function Workspace({
     };
 
     return (
-        <main className="flex-1 min-w-0 pt-7 pr-7 pb-7 pl-[18px]">
-            <div className="h-full flex flex-col rounded-2xl border border-line bg-surface overflow-hidden">
-                {/* 헤더 */}
-                <header className="h-[66px] shrink-0 px-5 flex items-center justify-between gap-4 border-b border-divide">
-                    <div className="min-w-0">
-                        <h1 className="text-[15px] font-bold leading-none">질의응답</h1>
-                        <p className="mt-[7px] text-[13px] leading-none text-muted truncate">
-                            {turns.length > 0
-                                ? `${turns.length}개 질문 · 문서 ${docCount}건`
-                                : '업로드된 문서를 근거로 에이전트가 답변합니다'}
-                        </p>
-                    </div>
-                    {turns.length > 0 && (
-                        <button
-                            type="button"
-                            onClick={() => setTurns([])}
-                            disabled={busy}
-                            className="shrink-0 h-7 px-3 rounded-lg border border-line bg-white text-[12px] text-muted hover:text-ink hover:border-brand disabled:opacity-40 transition-colors"
-                        >
-                            기록 지우기
-                        </button>
-                    )}
-                </header>
-
-                {/* 로그 */}
-                <div ref={logRef} className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
-                    {turns.length === 0 ? (
-                        <EmptyWorkspace docCount={docCount} lastUpload={lastUpload} />
-                    ) : (
-                        <div className="space-y-7">
+        <main className="flex-1 min-w-0 min-h-0 flex flex-col">
+            {/* 대화 로그 */}
+            <div ref={logRef} className="flex-1 min-h-0 overflow-y-auto">
+                {turns.length === 0 ? (
+                    <EmptyWorkspace docCount={docCount} lastUpload={lastUpload} />
+                ) : (
+                    <div className="mx-auto w-full max-w-[760px] px-5 sm:px-10 pt-6 pb-4">
+                        <div className="flex items-center gap-3 text-[12px] text-muted">
+                            <span>
+                                질문 {turns.length}개 · 문서 {docCount}건
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setTurns([])}
+                                disabled={busy}
+                                className="ml-auto h-7 px-2.5 rounded-lg font-semibold hover:text-ink hover:bg-chip disabled:opacity-40 transition-colors"
+                            >
+                                기록 지우기
+                            </button>
+                        </div>
+                        <div className="mt-4 flex flex-col gap-10">
                             {turns.map((t) => (
                                 <TurnView key={t.id} turn={t} />
                             ))}
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
+            </div>
 
-                {/* 입력 (하단 고정) */}
-                <div className="shrink-0 border-t border-divide bg-white px-5 py-3.5">
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                        <div className="flex items-center gap-1 p-[3px] rounded-[10px] bg-track">
+            {/* 떠 있는 입력창 */}
+            <div className="shrink-0 px-4 pb-4 pt-1">
+                <div className="mx-auto w-full max-w-[760px] rounded-2xl bg-white border border-divide shadow-[0_8px_30px_rgba(20,28,43,0.10)] focus-within:border-brand/50 transition-colors">
+                    <textarea
+                        ref={inputRef}
+                        rows={1}
+                        value={question}
+                        onChange={(e) => setQuestion(e.target.value)}
+                        onKeyDown={(e) => {
+                            // Enter 전송 · Shift+Enter 줄바꿈 (IME 조합 중에는 무시)
+                            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                                e.preventDefault();
+                                void ask();
+                            }
+                        }}
+                        placeholder={docCount > 0 ? '문서에 대해 질문하세요' : '문서를 올리거나, 서버에 있는 문서로 바로 질문하세요'}
+                        className="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14px] leading-[22px] placeholder:text-muted focus:outline-none"
+                    />
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 pb-2.5 pt-1">
+                        <div className="flex p-0.5 rounded-lg bg-chip">
                             {(['claude', 'local'] as const).map((m) => (
                                 <button
                                     key={m}
                                     type="button"
                                     onClick={() => setMode(m)}
-                                    className={`h-6 px-3 rounded-lg text-[12px] transition-colors ${
-                                        mode === m
-                                            ? 'bg-white border border-brand font-semibold text-ink'
-                                            : 'font-medium text-muted hover:text-ink'
+                                    className={`h-6 px-2.5 rounded-md text-[11.5px] font-semibold transition-colors ${
+                                        mode === m ? 'bg-white text-ink shadow-[0_1px_2px_rgba(20,28,43,0.10)]' : 'text-muted hover:text-ink'
                                     }`}
                                 >
                                     {MODE_LABEL[m]}
                                 </button>
                             ))}
                         </div>
-                        <NumberField
-                            label="검색"
-                            hint="query_top_n"
-                            value={queryTopN}
-                            onChange={setQueryTopN}
-                        />
+                        <NumberField label="검색" hint="query_top_n" value={queryTopN} onChange={setQueryTopN} />
                         <NumberField
                             label="리랭킹"
                             hint="rerank_top_n"
@@ -540,41 +494,17 @@ function Workspace({
                             onChange={setRerankTopN}
                             invalid={paramInvalid}
                         />
-                        {paramInvalid && (
-                            <span className="text-[11px] text-warn">
-                                ⚠ 리랭킹은 검색 개수보다 작거나 같아야 합니다
-                            </span>
-                        )}
-                    </div>
-
-                    <div className="mt-2.5 flex items-end gap-2">
-                        <textarea
-                            ref={inputRef}
-                            rows={1}
-                            value={question}
-                            onChange={(e) => setQuestion(e.target.value)}
-                            onKeyDown={(e) => {
-                                // Enter 전송 · Shift+Enter 줄바꿈 (IME 조합 중에는 무시)
-                                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                                    e.preventDefault();
-                                    void ask();
-                                }
-                            }}
-                            placeholder="문서에 대해 질문하세요"
-                            className="flex-1 min-w-0 resize-none px-3 py-2 rounded-lg border border-line bg-white text-[13px] leading-[20px] placeholder:text-muted focus:border-brand focus:outline-none transition-colors"
-                        />
+                        {paramInvalid && <span className="text-[11px] text-warn">리랭킹은 검색 개수 이하여야 합니다</span>}
+                        <span className="hidden sm:inline ml-auto text-[10px] text-muted">Enter 전송 · Shift+Enter 줄바꿈</span>
                         <button
                             type="button"
                             onClick={ask}
                             disabled={!canSend}
-                            className="h-9 px-4 shrink-0 rounded-[9px] bg-brand text-white text-[12px] font-semibold enabled:hover:bg-brand-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            className="ml-auto sm:ml-0 h-8 px-4 shrink-0 rounded-xl bg-brand text-white text-[12.5px] font-bold enabled:hover:bg-brand-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
-                            {busy ? '생성 중' : '질문'}
+                            {busy ? '생성 중…' : '질문'}
                         </button>
                     </div>
-                    <p className="mt-1.5 text-[10px] text-muted">
-                        Enter 전송 · Shift+Enter 줄바꿈
-                    </p>
                 </div>
             </div>
         </main>
@@ -592,16 +522,14 @@ function EmptyWorkspace({
     if (lastUpload.length > 0) {
         const ok = lastUpload.filter((r) => !r.error);
         return (
-            <div>
-                <h2 className="text-[13px] font-semibold">
-                    업로드 완료 · {ok.length}/{lastUpload.length}건
+            <div className="mx-auto w-full max-w-[760px] px-5 sm:px-10 pt-8 pb-4">
+                <h2 className="text-[18px] font-bold">
+                    업로드 완료 <span className="text-muted tabular-nums">{ok.length}/{lastUpload.length}</span>
                 </h2>
-                <p className="mt-[5px] text-[11px] text-muted">
-                    아래에서 청크를 확인하고, 하단 입력창으로 질문해보세요.
-                </p>
-                <ul className="mt-3 space-y-2.5">
+                <p className="mt-1 text-[12px] text-muted">청크를 확인하고, 아래 입력창으로 질문해보세요.</p>
+                <ul className="mt-4 divide-y divide-divide">
                     {lastUpload.map((r, i) => (
-                        <UploadResultCard key={`${r.filename}-${i}`} result={r} />
+                        <UploadResultRow key={`${r.filename}-${i}`} result={r} />
                     ))}
                 </ul>
             </div>
@@ -609,16 +537,16 @@ function EmptyWorkspace({
     }
 
     return (
-        <div className="h-full flex flex-col items-center justify-center text-center">
-            <div className="w-[76px] h-[76px] rounded-full bg-brand-pale flex items-center justify-center">
-                <DocumentIcon className="w-8 h-8 text-brand" />
+        <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-center px-6">
+            <div className="w-14 h-14 rounded-2xl bg-brand-pale flex items-center justify-center">
+                <DocumentIcon className="w-7 h-7 text-brand" />
             </div>
-            <p className="mt-6 text-[15px] font-medium">
-                {docCount > 0 ? '무엇이든 물어보세요' : '왼쪽에서 문서를 업로드하세요'}
+            <p className="mt-5 text-[20px] font-bold tracking-tight">
+                {docCount > 0 ? '무엇이든 물어보세요' : '문서를 올리고 질문해보세요'}
             </p>
-            <p className="mt-2 text-[12px] text-muted max-w-[320px]">
+            <p className="mt-2 text-[13px] text-muted max-w-[360px] leading-relaxed">
                 {docCount > 0
-                    ? '하단 입력창에 질문을 적으면 문서를 검색해 근거와 함께 답합니다.'
+                    ? `업로드된 문서 ${docCount}건을 검색해 근거와 함께 답합니다.`
                     : '업로드한 문서를 근거로 답변합니다. 이미 서버에 문서가 있다면 바로 질문해도 됩니다.'}
             </p>
         </div>
@@ -630,57 +558,51 @@ function TurnView({ turn }: { turn: QaTurn }) {
     return (
         <article>
             {/* 질문 */}
-            <div className="flex justify-end">
-                <p className="max-w-[80%] rounded-2xl rounded-br-md bg-brand px-4 py-2.5 text-[13px] leading-[19px] text-white whitespace-pre-wrap break-words">
+            <div className="flex flex-col items-end">
+                <p className="max-w-[85%] rounded-2xl rounded-br-md bg-chip px-4 py-2.5 text-[14px] leading-[21px] whitespace-pre-wrap break-words">
                     {turn.question}
                 </p>
-            </div>
-            <div className="mt-1.5 flex justify-end items-center gap-2 text-[10px] text-muted tabular-nums">
-                <span>{MODE_LABEL[turn.mode]}</span>
-                <span>·</span>
-                <span>
-                    top {turn.queryTopN}/{turn.rerankTopN}
+                <span className="mt-1.5 text-[10.5px] text-muted tabular-nums">
+                    {MODE_LABEL[turn.mode]} · top {turn.queryTopN}/{turn.rerankTopN} · {fmtTime(turn.askedAt)}
                 </span>
-                <span>·</span>
-                <span>{fmtTime(turn.askedAt)}</span>
             </div>
 
             {/* 답변 */}
-            <div className="mt-3">
-                {turn.status === 'pending' && (
-                    <div className="flex items-center gap-2.5 text-[13px] text-muted">
-                        <span className="w-4 h-4 rounded-full border-2 border-brand-pale border-t-brand animate-spin" />
-                        답변 생성 중...
-                    </div>
-                )}
+            <div className="mt-4 flex gap-3">
+                <span className="w-8 h-8 shrink-0 rounded-full bg-brand text-white text-[10px] font-extrabold flex items-center justify-center">
+                    AI
+                </span>
+                <div className="min-w-0 flex-1 pt-1">
+                    {turn.status === 'pending' && (
+                        <div className="flex items-center gap-2.5 text-[13px] text-muted">
+                            <span className="w-4 h-4 rounded-full border-2 border-brand-pale border-t-brand animate-spin" />
+                            문서를 찾아 답변을 만드는 중…
+                        </div>
+                    )}
 
-                {turn.status === 'error' && (
-                    <ErrorBox title="답변 생성 실패" message={turn.error ?? ''} />
-                )}
+                    {turn.status === 'error' && <ErrorLine title="답변 생성 실패" message={turn.error ?? ''} />}
 
-                {turn.status === 'done' && (
-                    <>
-                        <div className="rounded-xl border border-line bg-white px-5 py-4">
+                    {turn.status === 'done' && (
+                        <>
                             {turn.answer ? (
-                                <div className="prose prose-slate prose-sm max-w-none prose-pre:bg-chip prose-pre:text-ink prose-code:before:content-none prose-code:after:content-none prose-code:bg-chip prose-code:px-1 prose-code:py-0.5 prose-code:rounded">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                        {turn.answer}
-                                    </ReactMarkdown>
+                                <div className="prose prose-slate max-w-none text-[15px] leading-[1.8] prose-pre:bg-chip prose-pre:text-ink prose-code:before:content-none prose-code:after:content-none prose-code:bg-chip prose-code:px-1 prose-code:py-0.5 prose-code:rounded">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.answer}</ReactMarkdown>
                                 </div>
                             ) : (
                                 <p className="text-[13px] text-muted">(답변이 비어 있습니다)</p>
                             )}
-                        </div>
-                        {!!turn.sources?.length && <SourceList sources={turn.sources} />}
-                    </>
-                )}
+                            {!!turn.sources?.length && <SourceList sources={turn.sources} />}
+                        </>
+                    )}
+                </div>
             </div>
         </article>
     );
 }
 
-/** 참고한 청크. 긴 청크는 클릭해서 펼친다 */
+/** 참고한 청크. 접어 두고, 긴 청크는 클릭해서 펼친다 */
 function SourceList({ sources }: { sources: AskSource[] }) {
+    const [open, setOpen] = useState(false);
     const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
     const toggle = (i: number) =>
@@ -692,34 +614,41 @@ function SourceList({ sources }: { sources: AskSource[] }) {
         });
 
     return (
-        <details className="mt-2 rounded-xl border border-line bg-white px-4 py-2.5">
-            <summary className="cursor-pointer text-[12px] font-medium text-brand hover:text-brand-hover list-none">
-                참고한 청크 ({sources.length}개)
-            </summary>
-            <ul className="mt-1.5 divide-y divide-divide">
-                {sources.map((s, i) => {
-                    const isLong = s.text.length > PREVIEW_LEN;
-                    const isOpen = expanded.has(i);
-                    return (
-                        <li
-                            key={`${s.source}-${s.page}-${i}`}
-                            onClick={() => isLong && toggle(i)}
-                            title={isLong ? (isOpen ? '접기' : '전체 보기') : undefined}
-                            className={`py-1.5 text-[12px] leading-[17px] rounded transition-colors ${
-                                isLong ? 'cursor-pointer hover:bg-brand-tint' : ''
-                            }`}
-                        >
-                            <span className="mr-1.5 text-muted">
-                                {s.source} p{s.page}
-                            </span>
-                            <span className="whitespace-pre-wrap">
-                                {isOpen ? s.text : truncate(s.text)}
-                            </span>
-                        </li>
-                    );
-                })}
-            </ul>
-        </details>
+        <div className="mt-3">
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                aria-expanded={open}
+                className="h-7 -ml-2 px-2 rounded-lg inline-flex items-center gap-1.5 text-[12px] font-semibold text-muted hover:text-ink hover:bg-chip transition-colors"
+            >
+                <DocumentIcon className="w-3.5 h-3.5" />
+                참고한 청크 {sources.length}개
+                <span aria-hidden className={`transition-transform ${open ? 'rotate-90' : ''}`}>
+                    ›
+                </span>
+            </button>
+            {open && (
+                <ul className="mt-1 divide-y divide-divide">
+                    {sources.map((s, i) => {
+                        const isLong = s.text.length > PREVIEW_LEN;
+                        const isOpen = expanded.has(i);
+                        return (
+                            <li
+                                key={`${s.source}-${s.page}-${i}`}
+                                onClick={() => isLong && toggle(i)}
+                                title={isLong ? (isOpen ? '접기' : '전체 보기') : undefined}
+                                className={`py-2.5 text-[12.5px] leading-[19px] ${isLong ? 'cursor-pointer' : ''}`}
+                            >
+                                <span className="block text-[11px] font-semibold text-muted truncate">
+                                    {s.source} · p.{s.page}
+                                </span>
+                                <span className="mt-0.5 block whitespace-pre-wrap text-ink/80">{isOpen ? s.text : truncate(s.text)}</span>
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
+        </div>
     );
 }
 
@@ -727,27 +656,25 @@ function SourceList({ sources }: { sources: AskSource[] }) {
 /*  공용 조각                                                          */
 /* ================================================================== */
 
-function UploadResultCard({ result }: { result: UploadResult }) {
+function UploadResultRow({ result }: { result: UploadResult }) {
     if (result.error) {
         return (
-            <li className="rounded-xl border border-danger bg-danger-surface px-4 py-3">
-                <p className="text-[13px] font-semibold truncate">
-                    {result.filename || '(파일명 없음)'}
-                </p>
-                <p className="mt-1 text-[12px] text-danger break-words">{result.error}</p>
+            <li className="py-3">
+                <p className="text-[13px] font-semibold truncate">{result.filename || '(파일명 없음)'}</p>
+                <p className="mt-0.5 text-[12px] text-danger break-words">{result.error}</p>
             </li>
         );
     }
 
     return (
-        <li className="rounded-xl border border-line bg-white px-4 py-3">
+        <li className="py-3">
             <p className="text-[13px] font-semibold truncate">{result.filename}</p>
-            <p className="mt-1 text-[11px] text-muted">
+            <p className="mt-0.5 text-[11px] text-muted">
                 청크 {result.num_chunks ?? 0}개 · 저장 위치: {result.chunks_saved_to ?? '—'}
             </p>
             {!!result.chunks?.length && (
-                <details className="mt-2">
-                    <summary className="cursor-pointer text-[12px] font-medium text-brand hover:text-brand-hover list-none">
+                <details className="mt-1.5">
+                    <summary className="cursor-pointer text-[12px] font-semibold text-brand-hover hover:underline list-none">
                         청크 미리보기 ({result.chunks.length}개)
                     </summary>
                     <ul className="mt-1.5 divide-y divide-divide">
@@ -780,7 +707,7 @@ function NumberField({
     invalid?: boolean;
 }) {
     return (
-        <label className="flex items-center gap-1.5 text-[11px] text-muted" title={hint}>
+        <label className="flex items-center gap-1.5 text-[11.5px] text-muted" title={hint}>
             <span>{label}</span>
             <input
                 type="number"
@@ -792,21 +719,29 @@ function NumberField({
                     const n = Number(e.target.value);
                     onChange(Number.isFinite(n) && n >= 1 ? Math.min(Math.trunc(n), 50) : 1);
                 }}
-                className={`w-14 h-7 px-2 rounded-lg border bg-white text-[12px] text-ink tabular-nums focus:outline-none transition-colors ${
-                    invalid ? 'border-warn' : 'border-line focus:border-brand'
+                className={`w-12 h-6 px-1.5 rounded-md bg-chip text-[12px] text-ink tabular-nums focus:outline-none focus:bg-white focus:ring-2 transition ${
+                    invalid ? 'ring-2 ring-warn/60' : 'focus:ring-brand/30'
                 }`}
             />
         </label>
     );
 }
 
-function ErrorBox({ title, message }: { title: string; message: string }) {
+function InlineError({ children }: { children: ReactNode }) {
     return (
-        <div className="rounded-xl border border-danger bg-danger-surface px-5 py-3 flex gap-4">
-            <AlertIcon className="w-5 h-5 shrink-0 text-danger" />
-            <div className="min-w-0 text-[13px] leading-[18px]">
+        <p role="alert" className="mt-2 text-[11.5px] leading-[16px] text-danger break-words">
+            {children}
+        </p>
+    );
+}
+
+function ErrorLine({ title, message }: { title: string; message: string }) {
+    return (
+        <div role="alert" className="flex gap-2.5 text-[13px] leading-[19px]">
+            <AlertIcon className="w-[18px] h-[18px] shrink-0 mt-px text-danger" />
+            <div className="min-w-0">
                 <p className="font-bold text-danger">{title}</p>
-                <p className="text-danger break-words">{message}</p>
+                <p className="text-danger/90 break-words">{message}</p>
             </div>
         </div>
     );

@@ -28,19 +28,26 @@ import {
 export function MarkdownEditor({
                             markdown,
                             onChange,
+                            onError,
+                            contentEditableClassName = 'mdx-content prose prose-slate prose-sm max-w-none',
                         }: {
     markdown: string;
-    onChange: (md: string) => void;
+    /** initialMarkdownNormalize: 마운트 직후 에디터가 원본을 정규화하며 발생한 변경이면 true */
+    onChange: (md: string, initialMarkdownNormalize: boolean) => void;
+    onError?: (payload: { error: string; source: string }) => void;
+    contentEditableClassName?: string;
 }) {
-    console.log(markdown);
     const html_to_markdown = convertHtmlTablesToMarkdown(markdown);
 
     return (
         <MDXEditor
             markdown={html_to_markdown}
             onChange={onChange}
-            onError={(e) => console.warn('MDXEditor parse:', e)}
-            contentEditableClassName="mdx-content prose prose-slate prose-sm max-w-none"
+            onError={(e) => {
+                console.warn('MDXEditor parse:', e);
+                onError?.(e);
+            }}
+            contentEditableClassName={contentEditableClassName}
             plugins={[
                 headingsPlugin(),
                 listsPlugin(),

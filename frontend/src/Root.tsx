@@ -1,7 +1,7 @@
 import { Suspense, lazy, useSyncExternalStore } from 'react'
-import { MailApprovalDashboard } from './mail/MailApprovalDashboard.tsx'
+import { MailSection } from './mail/MailSection.tsx'
 import { RagConsole } from './rag/RagConsole.tsx'
-import { getRoute, normalizeLegacyHash, subscribeRoute } from './lib/router'
+import { getRoute, normalizeLegacyHash, normalizeLegacyMailLink, subscribeRoute } from './lib/router'
 
 /**
  * OCR 화면은 MDXEditor(→ @lexical/code → prismjs)를 끌고 온다.
@@ -18,6 +18,7 @@ const OcrTool = lazy(async () => {
 })
 
 normalizeLegacyHash() // 최초 로드 시 1회
+normalizeLegacyMailLink() // 승인 요청 메일의 /mail?task_id=… 링크 → 메일 검토 페이지
 
 function LoadingScreen() {
   return (
@@ -29,7 +30,7 @@ function LoadingScreen() {
 
 export function Root() {
   const route = useSyncExternalStore(subscribeRoute, getRoute)
-  if (route === 'mail') return <MailApprovalDashboard />
+  if (route === 'mail' || route.startsWith('mail/')) return <MailSection route={route} />
   if (route === 'ocr') {
     return (
       <Suspense fallback={<LoadingScreen />}>

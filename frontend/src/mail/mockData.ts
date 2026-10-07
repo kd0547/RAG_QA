@@ -2,10 +2,15 @@
  * 백엔드가 아직 없거나 연결이 안 될 때 화면을 채우는 예시 데이터.
  * 대시보드는 API 호출이 실패하면 자동으로 이 데이터로 폴백하고 상단에 배지를 띄운다.
  */
-import type { MailDetail, MailStats, MailSummary } from './types';
+import type { MailDetail, MailStats, MailStatus, MailSummary } from './types';
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const at = (hhmm: string) => `${TODAY}T${hhmm}:00+09:00`;
+const daysAgo = (n: number, hhmm: string) => {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    return `${d.toISOString().slice(0, 10)}T${hhmm}:00+09:00`;
+};
 
 export const MOCK_ROWS: MailSummary[] = [
     {
@@ -52,6 +57,60 @@ export const MOCK_ROWS: MailSummary[] = [
     },
 ];
 
+/** 검토가 끝났거나 아직 초안이 없는 메일 — 메일(전체) 페이지에서만 보인다 */
+const MOCK_ARCHIVE: MailSummary[] = [
+    {
+        task_id: 'TASK-9s0t1u',
+        subject: 'X1 Carbon 도킹 스테이션 호환 목록 요청',
+        sender: 'han.ys@partner.co.kr',
+        received_at: at('15:02'),
+        status: 'pending',
+    },
+    {
+        task_id: 'TASK-2v3w4x',
+        subject: 'A650 BIOS 업데이트 후 팬 소음 증가 문의',
+        sender: 'oh.sj@trigem.co.kr',
+        received_at: at('10:47'),
+        status: 'sent',
+    },
+    {
+        task_id: 'TASK-5y6z7a',
+        subject: '교육기관 대량 구매 견적 요청 (200대)',
+        sender: 'admin@hanbit.ac.kr',
+        received_at: at('08:55'),
+        status: 'rejected',
+    },
+    {
+        task_id: 'TASK-8b9c0d',
+        subject: 'RMA 접수 절차와 소요 기간 안내 요청',
+        sender: 'cs@arrowtech.com',
+        received_at: daysAgo(1, '17:20'),
+        status: 'sent',
+    },
+    {
+        task_id: 'TASK-1e2f3g',
+        subject: 'Windows 11 24H2 드라이버 패키지 배포 일정',
+        sender: 'lim.jw@trigem.co.kr',
+        received_at: daysAgo(1, '14:05'),
+        status: 'sent',
+    },
+];
+
+/** 전체 예시 메일 (최신순) */
+export const MOCK_ALL_ROWS: MailSummary[] = [...MOCK_ROWS, ...MOCK_ARCHIVE].sort((a, b) =>
+    b.received_at.localeCompare(a.received_at),
+);
+
+/** API가 없을 때 GET /mails 를 흉내 낸다 (상태 · 검색어 필터) */
+export function mockList(statuses: MailStatus[], q?: string): MailSummary[] {
+    const needle = q?.trim().toLowerCase();
+    return MOCK_ALL_ROWS.filter(
+        (r) =>
+            statuses.includes(r.status) &&
+            (!needle || r.subject.toLowerCase().includes(needle) || r.sender.toLowerCase().includes(needle)),
+    );
+}
+
 export const MOCK_STATS: MailStats = {
     date: TODAY,
     pending_review: 5,
@@ -82,6 +141,31 @@ const KIM_DRAFT = `김지현 님,
 감사합니다.`;
 
 const MOCK_DETAIL_EXTRA: Record<string, Partial<MailDetail>> = {
+    'TASK-2v3w4x': {
+        assignee: '나',
+        body: 'A650 BIOS 1.08 업데이트 이후 유휴 상태에서도 팬이 자주 돌아 소음이 커졌다는 사용자 제보가 있습니다. 설정으로 조정 가능한지 문의드립니다.',
+        draft: '오세진 님,\n\nBIOS 1.08에서 기본 팬 커브가 **성능 모드**로 변경되었습니다. BIOS 설정 > Advanced > Fan Profile 에서 `Quiet` 로 바꾸면 이전과 같은 소음 수준으로 돌아갑니다.\n\n감사합니다.',
+        model: 'qwen3.8:27b',
+        sources: [{ source: 'A650_BIOS_릴리스노트_1.08.pdf', page: 2, text: '기본 팬 프로파일 변경: Balanced → Performance' }],
+    },
+    'TASK-5y6z7a': {
+        body: '교육기관 대상으로 A650 200대 구매를 검토 중입니다. 견적과 납기를 알려주세요.',
+        draft: '안녕하세요,\n\n200대 기준 단가는 대당 1,290,000원이며 납기는 4주입니다.\n\n감사합니다.',
+        model: 'qwen3.8:27b',
+        sources: [],
+    },
+    'TASK-8b9c0d': {
+        body: 'RMA 접수는 어디서 하고 처리까지 얼마나 걸리나요?',
+        draft: '안녕하세요,\n\nRMA는 파트너 포털의 **서비스 > RMA 접수** 메뉴에서 신청하실 수 있으며, 입고 후 영업일 기준 5일 이내에 처리됩니다.\n\n감사합니다.',
+        model: 'qwen3.8:27b',
+        sources: [{ source: '파트너_서비스_정책_2026.pdf', page: 8, text: 'RMA 처리 기준: 입고 후 5영업일' }],
+    },
+    'TASK-1e2f3g': {
+        body: 'Windows 11 24H2용 통합 드라이버 패키지는 언제 배포되나요?',
+        draft: '임재원 님,\n\n24H2 통합 드라이버 패키지는 이번 달 셋째 주에 지원 페이지로 배포될 예정입니다.\n\n감사합니다.',
+        model: 'qwen3.8:27b',
+        sources: [],
+    },
     'TASK-1a2b3c': {
         body: `안녕하세요. 개발본부 김지현입니다.
 A650 16인치(Jirisan, Kraken Point) 모델 관련 고객사 문의가 들어왔습니다.
@@ -145,8 +229,10 @@ RTX5070 탑재 모델 기준으로 확인 부탁드립니다. 감사합니다.`,
 
 export function mockDetail(row: MailSummary): MailDetail {
     const extra = MOCK_DETAIL_EXTRA[row.task_id] ?? {};
+    // 주소의 task_id만으로 연 경우(제목·발신자 없음)는 예시 목록에서 나머지 필드를 채운다.
+    const base = row.subject ? row : (MOCK_ALL_ROWS.find((r) => r.task_id === row.task_id) ?? row);
     return {
-        ...row,
+        ...base,
         assignee: extra.assignee ?? null,
         recipient: 'support-ai@trigem.co.kr',
         body: extra.body ?? '(원문 없음)',
@@ -154,7 +240,7 @@ export function mockDetail(row: MailSummary): MailDetail {
         model: extra.model ?? null,
         retrieval: extra.retrieval ?? null,
         sources: extra.sources ?? [],
-        created_at: row.received_at,
-        updated_at: row.received_at,
+        created_at: base.received_at,
+        updated_at: base.received_at,
     };
 }

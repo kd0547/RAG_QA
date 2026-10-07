@@ -3,7 +3,14 @@
  * 백엔드 명세: docs/mail_approval_api.md
  */
 
-export type MailStatus = 'pending' | 'drafted' | 'in_review' | 'sent' | 'failed';
+export type MailStatus =
+    | 'pending'      // 메일 수신, AI 초안 생성 대기
+    | 'drafted'      // 초안 생성 완료, 검토 대기
+    | 'in_review'    // 담당자 검토 중
+    | 'rejected'     // 반려 → 재작성 대기
+    | 'approved'     // 승인, 전송 대기
+    | 'sent'         // 전송 완료
+    | 'failed';      // 전송 실패 (재시도 대상)
 
 /** 목록(GET /mails)의 행 */
 export interface MailSummary {
