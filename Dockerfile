@@ -33,7 +33,7 @@ COPY . .
 COPY --from=frontend /frontend/dist ./frontend/dist
 
 # 실행 중 쓰는 디렉터리 (storage/schema.sql은 이미지에 포함됨)
-RUN mkdir -p storage data/uploads temp markdown
+RUN mkdir -p storage data/uploads temp
 
 EXPOSE 8000
 

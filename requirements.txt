@@ -31,3 +31,7 @@ beautifulsoup4
 # PDF 레이아웃 파싱 / 이미지
 pymupdf4llm
 pillow
+
+# 검토 메일 본문(마크다운 -> HTML). 루트의 markdown/ 폴더와 이름이 같아,
+# 설치되지 않으면 import가 그 폴더로 잡혀 AttributeError가 난다.
+Markdown
