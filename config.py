@@ -18,7 +18,7 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3:latest")
 
 # ---------- 메일 ----------
 # 검토 요청 메일에 넣는 링크의 기준 주소 (담당자가 브라우저로 여는 주소)
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://14.38.199.190:8000")
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://14.38.199.190:9092")
 # 검토 담당자 메일 주소
 REVIEWER_EMAIL = os.getenv("REVIEWER_EMAIL", "dongwook.kim@trigem.co.kr")
 

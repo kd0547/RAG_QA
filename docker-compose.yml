@@ -2,7 +2,8 @@ services:
   ragqa:
     build: .
     ports:
-      - "8000:8000"
+      # 서버 9092 -> 컨테이너 8000
+      - "9092:8000"
     volumes:
       # mail.db, ChromaDB(storage/chroma), 메일 토큰 캐시(token_cache.bin)
       # schema.sql도 이 폴더에 있어야 하므로 프로젝트의 storage/를 그대로 붙인다.
