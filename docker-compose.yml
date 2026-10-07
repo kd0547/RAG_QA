@@ -30,14 +30,14 @@ services:
     volumes:
       - ollama_models:/root/.ollama
     restart: unless-stopped
-    # GPU로 돌리려면 주석 해제 (nvidia-container-toolkit 필요, vLLM과 VRAM을 나눠 씀)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    # GPU 사용 (서버에 nvidia-container-toolkit 필요). vLLM과 VRAM을 나눠 쓴다.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   hf_cache:
