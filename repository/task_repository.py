@@ -66,6 +66,20 @@ def _row_to_dashboard_detail(row: sqlite3.Row) -> DashboardDetail:
     )
 
 
+def _dedupe_sources(sources: list[dict]) -> list[dict]:
+    """search/rerank 결과에 같은 청크가 반복되므로 청크 ID(없으면 문서·페이지·본문) 기준으로 한 번만 남긴다."""
+    seen = set()
+    result = []
+    for doc in sources:
+        if not isinstance(doc, dict):
+            continue
+        key = doc.get("id") or (doc.get("source"), doc.get("page"), doc.get("text"))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(doc)
+    return result
+
 
 class TaskRepository:
     def __init__(self, db: Database):
@@ -110,12 +124,52 @@ class TaskRepository:
                 (state.value, datetime.now().isoformat(), task_id),
             )
 
-    def save_draft(self, task_id: str, answer: str) -> None:
+    def save_draft(self, task_id: str, answer: str, sources: list[dict] | None = None) -> None:
+        """초안과 참조 문서를 한 트랜잭션으로 저장한다. sources가 None이면 출처는 건드리지 않는다."""
         with self.db.transaction() as conn:
             conn.execute(
                 "UPDATE tasks SET draft_answer = ?, status = ?, updated_at = ? WHERE task_id = ?",
                 (answer, TaskStatus.DRAFTED.value, datetime.now().isoformat(), task_id),
             )
+            if sources is not None:
+                self._replace_sources(task_id, sources, conn)
+
+    def _replace_sources(self, task_id: str, sources: list[dict], conn: sqlite3.Connection) -> None:
+        # 재처리 시 이전 출처가 남지 않도록 지우고 다시 넣는다.
+        conn.execute("DELETE FROM task_sources WHERE task_id = ?", (task_id,))
+        conn.executemany(
+            """
+            INSERT INTO task_sources
+            (task_id, chunk_id, file_id, source, page, chunk_index, text, score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    task_id,
+                    doc.get("id"),
+                    doc.get("file_id"),
+                    doc.get("source") or "",
+                    doc.get("page"),
+                    doc.get("chunk_index"),
+                    doc.get("text") or "",
+                    doc.get("score"),
+                )
+                for doc in _dedupe_sources(sources)
+            ],
+        )
+
+    def get_sources(self, task_id: str) -> list[dict]:
+        with self.db.lock, self.db.get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT chunk_id, file_id, source, page, chunk_index, text, score
+                FROM task_sources
+                WHERE task_id = ?
+                ORDER BY source_id
+                """,
+                (task_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
     def update_draft_answer(self, task_id: str, answer: str) -> None:
         with self.db.transaction() as conn:
             conn.execute(
@@ -165,6 +219,69 @@ class TaskRepository:
                 "UPDATE tasks SET assignee = ?, updated_at = ? WHERE task_id = ?",
                 (assignee, datetime.now().isoformat(), task_id),
             )
+
+    def get_task(self, task_id: str) -> TaskEntity | None:
+        with self.db.lock, self.db.get_conn() as conn:
+            row = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+        return _row_to_task(row) if row else None
+
+    def reject(
+        self,
+        task_id: str,
+        reason: str,
+        next_status: TaskStatus,
+        allowed: list[TaskStatus],
+    ) -> bool:
+        """allowed 상태일 때만 next_status로 바꾸고 반려 이력을 남긴다.
+        그사이 다른 요청(승인 등)이 상태를 바꿨으면 아무것도 하지 않고 False."""
+        now = datetime.now().isoformat()
+        placeholders = ",".join("?" for _ in allowed)
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                f"UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ? AND status IN ({placeholders})",
+                (next_status.value, now, task_id, *(s.value for s in allowed)),
+            )
+            if cursor.rowcount != 1:
+                return False
+            conn.execute(
+                """
+                INSERT INTO task_reviews (task_id, action, reason, requeue, reviewed_at)
+                VALUES (?, 'reject', ?, ?, ?)
+                """,
+                (task_id, reason, int(next_status == TaskStatus.PENDING), now),
+            )
+        return True
+
+    def get_source_files(self, task_id: str) -> list[dict]:
+        """답변이 참고한 문서 원본 파일 목록. 청크가 여러 개여도 파일은 한 번만, 처음 참조된 순서로.
+        업로드가 같은 이름이면 같은 경로에 덮어쓰므로 file_id가 아니라 stored_path로 중복을 거른다."""
+        with self.db.lock, self.db.get_conn() as conn:
+            rows = conn.execute(
+                """
+                -- SQLite는 MIN()과 같이 쓴 나머지 컬럼을 MIN 행에서 가져온다 → 처음 참조된 file_id
+                SELECT f.file_id, f.original_name, f.stored_path, f.mime_type, MIN(s.source_id) AS first_ref
+                FROM task_sources s
+                JOIN file f ON f.file_id = s.file_id
+                WHERE s.task_id = ?
+                GROUP BY f.stored_path
+                ORDER BY first_ref
+                """,
+                (task_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_reject_reasons(self, task_id: str) -> list[str]:
+        """재작성 요청(requeue)으로 반려된 사유를 오래된 순으로 돌려준다."""
+        with self.db.lock, self.db.get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT reason FROM task_reviews
+                WHERE task_id = ? AND action = 'reject' AND requeue = 1 AND reason IS NOT NULL
+                ORDER BY review_id
+                """,
+                (task_id,),
+            ).fetchall()
+        return [row["reason"] for row in rows]
 
     def approve(self, task_id):
         select_sql = """

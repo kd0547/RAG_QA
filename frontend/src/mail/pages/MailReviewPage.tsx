@@ -6,7 +6,16 @@ import { ApiError, mailApi } from '../api';
 import { fmtReceived, reviewPath } from '../format';
 import { mockDetail } from '../mockData';
 import type { MailDetail, MailSummary } from '../types';
-import { CenterNote, MailSubject, ReceivedMessage, ReplyHeader, SegmentedFilter, SourceList, StatusChip } from '../ui';
+import {
+    AttachmentPicker,
+    CenterNote,
+    MailSubject,
+    ReceivedMessage,
+    ReplyHeader,
+    SegmentedFilter,
+    SourceList,
+    StatusChip,
+} from '../ui';
 import type { MailList } from '../useMailList';
 
 type Filter = 'all' | 'drafted' | 'in_review' | 'failed';
@@ -51,6 +60,8 @@ export function MailReviewPage({
     const [editorFailed, setEditorFailed] = useState(false);
     const [rejecting, setRejecting] = useState(false);
     const [rejectReason, setRejectReason] = useState('');
+    // 답장에 첨부할 참고 문서 (file_id). 메일을 바꾸면 비운다 — 기본은 첨부 없음.
+    const [attachIds, setAttachIds] = useState<ReadonlySet<string>>(() => new Set());
     const [busy, setBusy] = useState<Busy>('');
 
     const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
@@ -78,6 +89,7 @@ export function MailReviewPage({
         setEditorFailed(false);
         setRejecting(false);
         setRejectReason('');
+        setAttachIds(new Set());
         setDirty(false);
         setDetailLoading(!!row);
         if (!row) setDetail(null);
@@ -169,6 +181,14 @@ export function MailReviewPage({
 
     const editedFlag = !!detail && draftText.trim() !== (detail.draft ?? '').trim();
 
+    const toggleAttachment = (fileId: string) =>
+        setAttachIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(fileId)) next.delete(fileId);
+            else next.add(fileId);
+            return next;
+        });
+
     const toggleEditing = () => {
         if (!detail) return;
         if (editing) {
@@ -189,9 +209,14 @@ export function MailReviewPage({
         }
         setBusy('approve');
         try {
-            const res = await mailApi.approve(taskId, editedFlag ? { body: draftText, edited: true } : {});
+            // 상세에 없는 ID(이전 메일에서 남은 선택 등)는 보내지 않는다
+            const attachment_file_ids = (detail.attachments ?? []).filter((a) => attachIds.has(a.file_id)).map((a) => a.file_id);
+            const res = await mailApi.approve(taskId, {
+                ...(editedFlag ? { body: draftText, edited: true } : {}),
+                attachment_file_ids,
+            });
             dropRow(taskId);
-            notify('ok', `전송 완료 → ${res.to}`);
+            notify('ok', `전송 완료 → ${res.to}${attachment_file_ids.length ? ` · 첨부 ${attachment_file_ids.length}개` : ''}`);
             refreshAll();
         } catch (e) {
             notify('err', e instanceof ApiError ? e.message : '전송 실패');
@@ -466,6 +491,18 @@ export function MailReviewPage({
                                     )}
                                 </div>
                             </section>
+
+                            {/* 승인과 함께 나가는 것이므로 초안 바로 아래에 둔다 */}
+                            {detail.status !== 'failed' && (
+                                <div className="mt-8">
+                                    <AttachmentPicker
+                                        attachments={detail.attachments ?? []}
+                                        selected={attachIds}
+                                        onToggle={toggleAttachment}
+                                        disabled={busy !== ''}
+                                    />
+                                </div>
+                            )}
 
                             <div className="mt-8">
                                 <SourceList sources={detail.sources} />

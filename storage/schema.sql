@@ -42,6 +42,36 @@ CREATE TABLE IF NOT EXISTS tasks (
     FOREIGN KEY (mail_uid) REFERENCES mails(uid)
 );
 
+-- task_sources: 답변 생성 시 에이전트가 참조한 문서 청크 (task 1 : 출처 N)
+CREATE TABLE IF NOT EXISTS task_sources (
+    source_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id     TEXT NOT NULL,
+    chunk_id    TEXT,                   -- 벡터DB 청크 ID
+    file_id     TEXT,                   -- file.file_id (문서가 삭제될 수 있어 FK는 걸지 않음)
+    source      TEXT NOT NULL,          -- 문서명
+    page        INTEGER,
+    chunk_index INTEGER,
+    text        TEXT NOT NULL,          -- 근거 스니펫
+    score       REAL,                   -- 유사도 점수
+    created_at  TEXT NOT NULL DEFAULT current_timestamp,
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_task_sources_task_id ON task_sources(task_id);
+
+
+-- task_reviews: 담당자 검토 이력 (반려 사유·처리 시각). 한 task가 여러 번 반려될 수 있다.
+CREATE TABLE IF NOT EXISTS task_reviews (
+    review_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id     TEXT NOT NULL,
+    action      TEXT NOT NULL CHECK (action IN ('reject')),
+    reason      TEXT,
+    requeue     INTEGER NOT NULL DEFAULT 1,   -- 반려 후 재작성 대기로 돌렸는지 (0/1)
+    reviewed_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_task_reviews_task_id ON task_reviews(task_id);
+
+
 create table if not exists file (
     file_id       text primary key,              -- uuid, Chroma 메타데이터의 file_id와 같은 값
     original_name text not null,                 -- 사용자가 올린 파일명 (화면 표시, 검색 결과 출처용)

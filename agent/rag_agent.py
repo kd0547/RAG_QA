@@ -67,6 +67,7 @@ def run_agent_temp_attachments(
         question: str,
         mode: Literal["claude", "local"] = "claude",
         attachments: list[Attachment] | None = None,
+        review_feedback: str | None = None,
 ) -> dict:
     agent = get_agent(mode)
 
@@ -75,6 +76,10 @@ def run_agent_temp_attachments(
         block = _attachment_to_block(attachment)
         if block is not None:
             content.append(block)
+
+    # 담당자 반려 피드백은 질문과 섞이지 않도록 별도 블록으로 붙인다.
+    if review_feedback:
+        content.append({"type": "text", "text": review_feedback})
 
     result = agent.invoke(
         {"messages": [{"role": "user", "content": content}]},

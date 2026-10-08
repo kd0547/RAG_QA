@@ -24,6 +24,24 @@ def intake_mail(mail: MailEntity, db: Database, email_repo: EmailRepository, tas
         email_repo.save_pending(mail, conn)
         task_repo.create_task(mail.uid, conn)
 
+def build_review_feedback(previous_draft: str, reject_reasons: list[str]) -> str | None:
+    """반려된 이전 초안과 사유를 에이전트에게 줄 안내문으로 만든다. 반려 이력이 없으면 None."""
+    if not reject_reasons:
+        return None
+
+    reasons = "\n".join(f"- {reason}" for reason in reject_reasons)
+    feedback = (
+        "[검토 담당자 피드백]\n"
+        "이전에 작성한 답변 초안이 담당자 검토에서 반려되었습니다. "
+        "아래 반려 사유를 반영해 답변을 새로 작성하세요. "
+        "이 피드백은 질문이 아니므로 문서 검색어로 사용하지 말고, 답변 본문에서 언급하지 마세요.\n\n"
+        f"반려 사유 (오래된 순):\n{reasons}"
+    )
+    if previous_draft and previous_draft.strip():
+        feedback += f"\n\n반려된 이전 초안:\n<previous_draft>\n{previous_draft.strip()}\n</previous_draft>"
+    return feedback
+
+
 def email_receiver_loop(
         stop_event: threading.Event,
         email_repo:EmailRepository,
@@ -79,13 +97,20 @@ def email_consumer_loop(stop_event: threading.Event,
                     continue
 
 
+                #반려 후 재생성이면 담당자 피드백을 함께 넘김
+                reject_reasons = task_repo.get_reject_reasons(task.task_id)
+                if reject_reasons:
+                    logger.info("반려 피드백 반영해 재생성: uid=%s, 반려 %d회", mail.uid, len(reject_reasons))
+
                 #답변 생성하기
                 result = run_agent_temp_attachments(
                     body,
                     mode="local",
                     attachments=mail.attachments,
+                    review_feedback=build_review_feedback(task.draft_answer, reject_reasons),
                 )
                 answer = result["answer"]
+                sources = result["sources"]
 
                 dandang = config.REVIEWER_EMAIL
                 #담당자 배정 (지금은 .env의 REVIEWER_EMAIL 한 명)
@@ -104,8 +129,8 @@ def email_consumer_loop(stop_event: threading.Event,
 
 
 
-                task_repo.save_draft(task.task_id, answer)
-                logger.debug("답변 생성 완료: uid=%s, answer_len=%d", mail.uid, len(answer))
+                task_repo.save_draft(task.task_id, answer, sources)
+                logger.debug("답변 생성 완료: uid=%s, answer_len=%d, sources=%d", mail.uid, len(answer), len(sources))
 
             except Exception:
                 logger.exception("메일 처리 실패: uid=%s", mail.uid)

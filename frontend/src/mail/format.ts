@@ -47,6 +47,13 @@ export const fmtDuration = (sec: number | null) => {
 };
 export const pct = (n: number | null | undefined) => (n == null ? null : Math.round(n * 100));
 
+export const fmtBytes = (n: number | null) => {
+    if (n == null) return '—';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+};
+
 /** 원문이 4줄을 넘을 만큼 길면 접어서 보여준다. */
 export const isLongBody = (body: string) => body.split('\n').length > 4 || body.length > 240;
 

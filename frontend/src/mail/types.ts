@@ -27,6 +27,15 @@ export interface MailSource {
     text: string;                   // 근거 스니펫
 }
 
+/** 답장에 첨부할 수 있는 참고 문서 원본 (같은 파일은 한 번만) */
+export interface MailAttachment {
+    file_id: string;
+    filename: string;
+    mime_type: string | null;
+    size_bytes: number | null;      // 파일이 없으면 null
+    available: boolean;             // 서버 디스크에 파일이 있는지
+}
+
 /** 상세(GET /mails/{task_id}) */
 export interface MailDetail extends MailSummary {
     assignee: string | null;        // 검토 담당자
@@ -36,6 +45,7 @@ export interface MailDetail extends MailSummary {
     model: string | null;
     retrieval: { query_top_k: number | null; rerank_top_n: number | null } | null;
     sources: MailSource[];
+    attachments?: MailAttachment[]; // 첨부 후보. 승인할 때 고른 것만 전송된다 (이전 버전 서버는 보내지 않음)
     created_at: string;
     updated_at: string;
 }

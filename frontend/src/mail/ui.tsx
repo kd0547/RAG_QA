@@ -1,8 +1,8 @@
 /** 메일 화면 공통 UI 조각 (대시보드 · 메일 · 메일 검토 페이지가 함께 쓴다) */
 import { useState, type ReactNode } from 'react';
 import { DocumentIcon } from '../components/icons';
-import { fmtDateTime, fmtTime, isLongBody, STATUS_META } from './format';
-import type { MailDetail, MailSource, MailStatus } from './types';
+import { fmtBytes, fmtDateTime, fmtTime, isLongBody, STATUS_META } from './format';
+import type { MailAttachment, MailDetail, MailSource, MailStatus } from './types';
 
 export function StatusChip({ status }: { status: MailStatus }) {
     const m = STATUS_META[status] ?? { label: status, chip: 'bg-chip text-muted' };
@@ -130,6 +130,78 @@ export function SourceList({ sources }: { sources: MailSource[] }) {
                         </li>
                     ))}
                 </ul>
+            )}
+        </section>
+    );
+}
+
+/**
+ * 답장에 첨부할 참고 문서 고르기. 사내 문서가 외부로 나가지 않도록 기본은 아무것도 고르지 않는다.
+ * 서버 디스크에 없는 파일은 고를 수 없다.
+ */
+export function AttachmentPicker({
+    attachments,
+    selected,
+    onToggle,
+    disabled = false,
+}: {
+    attachments: MailAttachment[];
+    selected: ReadonlySet<string>;
+    onToggle: (fileId: string) => void;
+    disabled?: boolean;
+}) {
+    const chosen = attachments.filter((a) => selected.has(a.file_id));
+    const total = chosen.reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
+    return (
+        <section>
+            <div className="flex items-baseline justify-between gap-3">
+                <h2 className="text-[12px] font-bold text-muted">
+                    답장 첨부 <span className="tabular-nums">{chosen.length}</span>
+                    <span className="font-normal"> / {attachments.length}</span>
+                </h2>
+                {chosen.length > 0 && <span className="text-[11px] text-muted tabular-nums">합계 {fmtBytes(total)}</span>}
+            </div>
+            {attachments.length === 0 ? (
+                <p className="mt-2 text-[12px] text-muted">첨부할 수 있는 참고 문서가 없습니다.</p>
+            ) : (
+                <>
+                    <p className="mt-1 text-[11px] text-muted">체크한 문서만 답장에 첨부됩니다. 사내 전용 문서는 고르지 마세요.</p>
+                    <ul className="mt-1.5 flex flex-col gap-1">
+                        {attachments.map((a) => {
+                            const on = selected.has(a.file_id);
+                            return (
+                                <li key={a.file_id}>
+                                    <label
+                                        className={`flex items-center gap-3 min-w-0 px-3 py-2 rounded-xl transition-colors ${
+                                            !a.available || disabled
+                                                ? 'opacity-55 cursor-not-allowed'
+                                                : on
+                                                  ? 'bg-brand-pale cursor-pointer'
+                                                  : 'hover:bg-surface cursor-pointer'
+                                        }`}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={on}
+                                            disabled={!a.available || disabled}
+                                            onChange={() => onToggle(a.file_id)}
+                                            className="shrink-0 w-4 h-4 accent-brand"
+                                        />
+                                        <span className="shrink-0 w-7 h-7 rounded-lg bg-brand-pale text-brand flex items-center justify-center">
+                                            <DocumentIcon className="w-3.5 h-3.5" />
+                                        </span>
+                                        <span className="min-w-0 flex-1 text-[12.5px] font-semibold truncate" title={a.filename}>
+                                            {a.filename}
+                                        </span>
+                                        <span className="shrink-0 text-[11px] text-muted tabular-nums">
+                                            {a.available ? fmtBytes(a.size_bytes) : '파일 없음'}
+                                        </span>
+                                    </label>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </>
             )}
         </section>
     );

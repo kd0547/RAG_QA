@@ -52,7 +52,7 @@ export const mailApi = {
     /** 승인 후 실제 전송. body 생략 시 저장된 draft 그대로 전송 */
     approve(
         taskId: string,
-        payload: { body?: string; subject?: string; edited?: boolean } = {},
+        payload: { body?: string; subject?: string; edited?: boolean; attachment_file_ids?: string[] } = {},
     ): Promise<ApproveResult> {
         return request<ApproveResult>(`/mails/${encodeURIComponent(taskId)}/approve`, {
             method: 'POST',

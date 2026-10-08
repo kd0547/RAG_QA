@@ -240,6 +240,14 @@ export function mockDetail(row: MailSummary): MailDetail {
         model: extra.model ?? null,
         retrieval: extra.retrieval ?? null,
         sources: extra.sources ?? [],
+        // 예시 데이터는 근거 문서마다 같은 이름의 원본이 있다고 가정한다
+        attachments: [...new Set((extra.sources ?? []).map((s) => s.source))].map((name, i) => ({
+            file_id: `mock-file-${i}`,
+            filename: name,
+            mime_type: 'application/pdf',
+            size_bytes: 1_200_000 + i * 850_000,
+            available: true,
+        })),
         created_at: base.received_at,
         updated_at: base.received_at,
     };
