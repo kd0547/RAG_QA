@@ -4,14 +4,81 @@ from urllib.parse import quote
 
 import html as html_lib
 import json
+import re
 
 from entity.type import MailEntity
 import markdown
 
 
+_FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+_LIST_ITEM_RE = re.compile(r"^\s{0,3}([-*+]|\d+[.)])\s+\S")
+_ANY_LIST_ITEM_RE = re.compile(r"^([ \t]*)(?:[-*+]|\d+[.)])\s+\S")
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$")
+
+
+def _ensure_block_spacing(text: str) -> str:
+    """GFM(웹 화면의 remark-gfm)으로 쓴 마크다운을 Python-Markdown이 같은 모양으로 그리도록 고친다.
+
+    LLM 답변에서 자주 나오는 두 가지가 메일에서 깨진다.
+    1. `**제목**` 바로 다음 줄에 붙은 표·`- ` 목록: Python-Markdown은 앞에 빈 줄이 없으면 문단으로 보고
+       `| 항목 | 사양 | |---|---|` 처럼 한 줄로 이어 붙인다 → 빈 줄을 넣는다.
+    2. 2~3칸 들여쓴 하위 목록(`1. 항목` 아래 `   * 세부`): Python-Markdown은 4칸 단위만 하위 목록으로 봐서
+       `* 세부`가 글자 그대로 나온다 → 단계마다 4칸으로 맞춘다.
+    """
+    lines = text.splitlines()
+    out: list[str] = []
+    fence: str | None = None
+    list_indents: list[int] = []  # 현재 목록에서 단계별 원래 들여쓰기
+
+    for i, line in enumerate(lines):
+        fence_match = _FENCE_RE.match(line)
+        if fence_match:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = marker[0]
+            elif marker[0] == fence:
+                fence = None
+            out.append(line)
+            continue
+        if fence is not None:  # 코드 블록 안은 건드리지 않는다
+            out.append(line)
+            continue
+
+        prev = out[-1] if out else ""
+
+        item = _ANY_LIST_ITEM_RE.match(line)
+        if item:
+            indent = len(item.group(1).expandtabs(4))
+            if list_indents or indent < 4:  # 목록 밖의 4칸 들여쓰기는 코드 블록이므로 그대로
+                while list_indents and list_indents[-1] > indent:
+                    list_indents.pop()
+                if not list_indents or list_indents[-1] < indent:
+                    list_indents.append(indent)
+                level = len(list_indents) - 1
+                if level > 0:
+                    line = " " * (4 * level) + line.lstrip()
+        elif line.strip() and not line.startswith((" ", "\t")) and not prev.strip():
+            list_indents = []  # 빈 줄 뒤에 들여쓰지 않은 문단이 오면 목록이 끝난 것
+        if prev.strip():
+            next_line = lines[i + 1] if i + 1 < len(lines) else ""
+            starts_table = "|" in line and "|" not in prev and _TABLE_SEPARATOR_RE.match(next_line)
+            # 이전 줄이 목록 항목이거나 들여쓴 줄(항목의 이어지는 내용)이면 같은 목록이므로 그대로 둔다
+            starts_list = (
+                _LIST_ITEM_RE.match(line)
+                and not _LIST_ITEM_RE.match(prev)
+                and not prev.startswith((" ", "\t"))
+            )
+            if starts_table or starts_list:
+                out.append("")
+
+        out.append(line)
+
+    return "\n".join(out)
+
+
 def _markdown_to_email_html(text: str) -> str:
     html = markdown.markdown(
-        text,
+        _ensure_block_spacing(text),
         extensions=[
             "tables",
             "fenced_code",
