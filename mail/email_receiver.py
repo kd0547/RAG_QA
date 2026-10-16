@@ -36,9 +36,38 @@ ALLOWED_TYPES = {
     "application/pdf",
     "image/jpeg",
     "image/png",
-    "image/gif",
-    "image/webp",
+#    "image/gif",
+#    "image/webp",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 }
+
+MIME_TO_EXT = {
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+#    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+#    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+#    "application/vnd.ms-powerpoint": ".ppt",
+    # hwp/hwpx는 정식 MIME이 없어 클라이언트마다 다르게 붙는다
+    "application/x-hwp": ".hwp",
+    "application/haansofthwp": ".hwp",
+    "application/vnd.hancom.hwp": ".hwp",
+    "application/x-hwpx": ".hwpx",
+    "application/haansofthwpx": ".hwpx",
+    "application/vnd.hancom.hwpx": ".hwpx",
+}
+ALLOWED_EXTS = set(MIME_TO_EXT.values())
+
+
+def _resolve_ext(filename: str, content_type: str) -> str | None:
+    """첨부의 확장자를 정한다. 파일명 확장자를 우선하고, 없으면 MIME으로 판단. 허용 형식이 아니면 None."""
+    ext = Path(filename).suffix.lower()
+    if ext in ALLOWED_EXTS:
+        return ext
+    return MIME_TO_EXT.get(content_type)
 
 
 def decode_mime_header(value: str) -> str:
@@ -204,9 +233,12 @@ def _get_attachments(
 
         filename = decode_mime_header(part.get_filename() or "")
         content_type = part.get_content_type()
+        is_image = content_type.startswith("image/") and content_type in ALLOWED_TYPES
+        ext = _resolve_ext(filename, content_type)
 
         # 허용하지 않는 파일 형식은 제외
-        if content_type not in ALLOWED_TYPES:
+        # (hwp처럼 MIME이 application/octet-stream으로 오는 파일은 확장자로 판단)
+        if not is_image and ext is None:
             continue
 
         # 첨부파일 내용을 bytes 형태로 디코딩
@@ -216,7 +248,7 @@ def _get_attachments(
             continue
 
         # 이미지 파일 처리
-        if content_type.startswith("image/"):
+        if is_image:
 
             # bytes 데이터를 Base64 문자열로 변환
             encoded_image = base64.b64encode(content_byte).decode("utf-8")
@@ -232,24 +264,24 @@ def _get_attachments(
                 "path": None,
             }
 
-        # PDF 파일 처리
-        elif content_type == "application/pdf":
+        # 파일 처리
+        else:
 
-            # PDF 저장 디렉터리가 없으면 생성
+            # 저장 디렉터리가 없으면 생성
             os.makedirs(pdf_save_dir, exist_ok=True)
 
             # 파일명이 없는 경우 기본 파일명 지정
             if not filename:
-                filename = "attachment.pdf"
+                filename = f"attachment{ext}"
 
             save_path = os.path.join(pdf_save_dir, filename)
 
-            # PDF 파일 저장
+            # 파일 저장
             with open(save_path, "wb") as f:
                 f.write(content_byte)
 
             yield {
-                "type": "pdf",
+                "type": ext.lstrip("."),       # DocumentType 값과 맞춘다 (예: "docx")
                 "filename": filename,
                 "content_type": content_type,
                 "image": None,

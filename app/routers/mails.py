@@ -90,8 +90,8 @@ def view_mail_detail(task_id: str):
         "model": None,
         "retrieval": None,
         "sources": [
-            {"source": s["source"], "page": s["page"], "text": s["text"]}
-            for s in task_repo.get_sources(task_id)
+        #    {"source": s["source"], "page": s["page"], "text": s["text"]}
+        #    for s in task_repo.get_sources(task_id)
         ],
         # 디스크 경로는 화면에 내보내지 않는다
         "attachments": [

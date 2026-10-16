@@ -16,6 +16,12 @@ class TaskStatus(Enum):
 class DocumentType(Enum):
     PDF = "pdf"
     IMAGE = "image"
+    DOCX = "docx"
+    PPTX = "pptx"
+    XLSX = "xlsx"
+    HWP = "hwp"
+    HWPX = "hwpx"
+
 
 
 def parse_status_filter(status:str)-> list[TaskStatus] | None:

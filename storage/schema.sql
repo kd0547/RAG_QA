@@ -14,16 +14,16 @@ CREATE TABLE IF NOT EXISTS mails (
 CREATE TABLE IF NOT EXISTS mail_attachments (
     attachment_id INTEGER PRIMARY KEY AUTOINCREMENT,
     mail_uid      TEXT NOT NULL,
-    type          TEXT NOT NULL CHECK (type IN ('pdf', 'image')),
+    type          TEXT NOT NULL,        -- 'image', 'pdf', 'docx', 'xlsx' 등
     filename      TEXT NOT NULL,
     content_type  TEXT NOT NULL,
     image_data    TEXT,                 -- 이미지: data URL(base64)
-    stored_path   TEXT,                 -- PDF: 저장 경로
+    stored_path   TEXT,                 -- 이미지 외 파일: 저장 경로
     created_at    TEXT NOT NULL DEFAULT current_timestamp,
     FOREIGN KEY (mail_uid) REFERENCES mails(uid) ON DELETE CASCADE,
     CHECK (
-        (type = 'image' AND image_data  IS NOT NULL) OR
-        (type = 'pdf'   AND stored_path IS NOT NULL)
+        (type =  'image' AND image_data  IS NOT NULL) OR
+        (type <> 'image' AND stored_path IS NOT NULL)
     )
 );
 CREATE INDEX IF NOT EXISTS idx_mail_attachments_mail_uid ON mail_attachments(mail_uid);

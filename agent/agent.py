@@ -3,14 +3,15 @@ from typing import Literal
 
 from langchain.agents import create_agent
 from dotenv import load_dotenv
+from pathlib import Path
 
 from agent.llm_provider import get_llm_model
-from agent.prompt import SYSTEM_PROMPT
+from agent.prompt import _build_prompt
 from entity.type import Attachment, DocumentType
-from parser.pdf import pdf_parser
+from parser.file_parser import parse_file
 from tools.tool import search_documents, rerank_documents, check_answerability
 import logging
-
+import yaml
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -20,12 +21,24 @@ TOOLS = [search_documents, rerank_documents, check_answerability]
 
 # ---------- Agent ----------
 
+ALIAS_PATH = Path(__file__).parents[1] / "aliases.yaml"
+
+def load_aliases(path=ALIAS_PATH) -> dict[str, list[str]]:
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+ALIASES = load_aliases()
+
+system_prompt = _build_prompt(ALIASES)
+
+
+
 def build_agent(mode: Literal["claude", "local"]):
     llm = get_llm_model(mode)
     return create_agent(
         model=llm,
         tools=TOOLS,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
     )
 
 
@@ -93,7 +106,7 @@ def run_agent_temp_attachments(
 
 def _attachment_to_block(attachment: Attachment) -> dict | None:
     """첨부 하나를 메시지 content 블록으로 바꾼다. 처리할 수 없으면 None."""
-    # 메일 수신부는 type을 "image"/"pdf" 문자열로 넣으므로 Enum으로 맞춘다.
+    # 메일 수신부는 type을 "image"/"pdf"/"docx" 등 문자열로 넣으므로 Enum으로 맞춘다.
     try:
         doc_type = DocumentType(attachment.type)
     except ValueError:
@@ -105,19 +118,17 @@ def _attachment_to_block(attachment: Attachment) -> dict | None:
             return None
         return {"type": "image_url", "image_url": {"url": attachment.image}}
 
-    if doc_type == DocumentType.PDF:
-        name = attachment.filename or "attachment.pdf"
-        try:
-            text = pdf_parser.parser_pdf_md(attachment.path)
-        except Exception:
-            logger.exception("첨부 PDF 파싱 실패: %s", name)
-            # 모델이 첨부가 있었다는 사실은 알도록 남긴다.
-            return {"type": "text", "text": f"[첨부 파일: {name}]\n(파일을 읽지 못했습니다)"}
+    # 이미지 외 문서(pdf, docx, xlsx, pptx, hwp, hwpx)는 확장자별 파서로 텍스트를 뽑는다.
+    name = attachment.filename or f"attachment.{doc_type.value}"
+    try:
+        pages = parse_file(attachment.path)
+    except Exception:
+        logger.exception("첨부 파일 파싱 실패: %s", name)
+        # 모델이 첨부가 있었다는 사실은 알도록 남긴다.
+        return {"type": "text", "text": f"[첨부 파일: {name}]\n(파일을 읽지 못했습니다)"}
 
-
-        return {"type": "text", "text": f"[첨부 파일: {name}]\n{text}"}
-
-    return None
+    text = "\n\n".join(page.text for page in pages if page.text)
+    return {"type": "text", "text": f"[첨부 파일: {name}]\n{text}"}
 
 
 def _collect_sources(messages: list) -> list:

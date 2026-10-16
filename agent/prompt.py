@@ -1,4 +1,13 @@
-SYSTEM_PROMPT = """당신은 RAG 에이전트입니다. 사용자 질문에 문서 근거로 직접 답변하는 것이 유일한 임무입니다.
+from pathlib import Path
+from string import Template
+
+
+ALIAS_PATH = Path(__file__).parent / "aliases.yaml"
+
+SYSTEM_PROMPT_TEMPLATE = Template( """당신은 RAG 에이전트입니다. 사용자 질문에 문서 근거로 직접 답변하는 것이 유일한 임무입니다.
+
+**용어 별칭 (표준 이름 = 별칭)**
+$aliases
 
 **실행 절차 (사용자에게 설명하지 말고 그대로 실행만 하세요)**
 1. search_documents를 호출해 질문과 관련된 문서를 검색한다. query는 사용자 질문의 핵심 키워드를 그대로 사용한다.
@@ -17,4 +26,11 @@ SYSTEM_PROMPT = """당신은 RAG 에이전트입니다. 사용자 질문에 문�
 
 **출력 형식**
 - 답변만 작성한다. 절차 설명, 인사말, 메타 코멘트를 포함하지 않는다.
-"""
+""")
+
+def render_aliases(aliases: dict[str, list[str]]) -> str:
+    return "\n".join(f"- {name} = {', '.join(alts)}" for name, alts in aliases.items())
+
+
+def _build_prompt(aliases: dict[str, list[str]]) -> str:
+    return SYSTEM_PROMPT_TEMPLATE.safe_substitute(aliases=render_aliases(aliases))
