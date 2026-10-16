@@ -17,7 +17,10 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 COLLECTION_NAME = "rag_chunks"
 
 _client = chromadb.PersistentClient(path=str(DATA_DIR))
-_collection = _client.get_or_create_collection(name=COLLECTION_NAME)
+_collection = _client.get_or_create_collection(
+    name=COLLECTION_NAME,
+    configuration={"hnsw": {"space": "cosine"}},
+)
 
 
 def save_embeddings(chunks: list[EmbeddedChunk]) -> Path:

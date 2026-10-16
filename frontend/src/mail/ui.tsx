@@ -152,6 +152,11 @@ export function AttachmentPicker({
 }) {
     const chosen = attachments.filter((a) => selected.has(a.file_id));
     const total = chosen.reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
+    const sortedAttachments = [...attachments].sort((a, b) => {
+        if (a.average_score == null) return b.average_score == null ? 0 : 1;
+        if (b.average_score == null) return -1;
+        return b.average_score - a.average_score;
+    });
     return (
         <section>
             <div className="flex items-baseline justify-between gap-3">
@@ -165,9 +170,9 @@ export function AttachmentPicker({
                 <p className="mt-2 text-[12px] text-muted">첨부할 수 있는 참고 문서가 없습니다.</p>
             ) : (
                 <>
-                    <p className="mt-1 text-[11px] text-muted">체크한 문서만 답장에 첨부됩니다. 사내 전용 문서는 고르지 마세요.</p>
+                    <p className="mt-1 text-[11px] text-muted">평균 유사도가 높은 순서입니다. 체크한 문서만 답장에 첨부됩니다. 사내 전용 문서는 고르지 마세요.</p>
                     <ul className="mt-1.5 flex flex-col gap-1">
-                        {attachments.map((a) => {
+                        {sortedAttachments.map((a) => {
                             const on = selected.has(a.file_id);
                             return (
                                 <li key={a.file_id}>
@@ -193,8 +198,15 @@ export function AttachmentPicker({
                                         <span className="min-w-0 flex-1 text-[12.5px] font-semibold truncate" title={a.filename}>
                                             {a.filename}
                                         </span>
-                                        <span className="shrink-0 text-[11px] text-muted tabular-nums">
-                                            {a.available ? fmtBytes(a.size_bytes) : '파일 없음'}
+                                        <span className="shrink-0 text-right text-[11px] tabular-nums">
+                                            <span className="block font-semibold text-brand" title="검색된 청크의 평균 유사도">
+                                                {a.average_score != null
+                                                    ? `평균 유사도 ${(a.average_score * 100).toFixed(1)}%`
+                                                    : '유사도 없음'}
+                                            </span>
+                                            <span className="block text-muted">
+                                                {a.available ? fmtBytes(a.size_bytes) : '파일 없음'}
+                                            </span>
                                         </span>
                                     </label>
                                 </li>

@@ -253,18 +253,20 @@ class TaskRepository:
         return True
 
     def get_source_files(self, task_id: str) -> list[dict]:
-        """답변이 참고한 문서 원본 파일 목록. 청크가 여러 개여도 파일은 한 번만, 처음 참조된 순서로.
+        """답변이 참고한 문서 원본 파일 목록. 저장된 청크의 평균 유사도가 높은 순서로 반환한다.
+        점수가 없는 청크는 평균에서 제외하고, 파일의 점수가 모두 없으면 마지막에 둔다.
         업로드가 같은 이름이면 같은 경로에 덮어쓰므로 file_id가 아니라 stored_path로 중복을 거른다."""
         with self.db.lock, self.db.get_conn() as conn:
             rows = conn.execute(
                 """
                 -- SQLite는 MIN()과 같이 쓴 나머지 컬럼을 MIN 행에서 가져온다 → 처음 참조된 file_id
-                SELECT f.file_id, f.original_name, f.stored_path, f.mime_type, MIN(s.source_id) AS first_ref
+                SELECT f.file_id, f.original_name, f.stored_path, f.mime_type,
+                       MIN(s.source_id) AS first_ref, AVG(s.score) AS average_score
                 FROM task_sources s
                 JOIN file f ON f.file_id = s.file_id
                 WHERE s.task_id = ?
                 GROUP BY f.stored_path
-                ORDER BY first_ref
+                ORDER BY average_score DESC, first_ref
                 """,
                 (task_id,),
             ).fetchall()

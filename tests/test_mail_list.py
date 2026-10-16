@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
+import sqlite3
 
 import pytest
 from fastapi import FastAPI
@@ -9,13 +10,24 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def mail_client(tmp_path, monkeypatch):
+def mail_data(tmp_path, monkeypatch):
     # 라우터 임포트 시 생성되는 DB와 SMTP 설정을 테스트 경로로 격리한다.
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
     (tmp_path / "storage").mkdir()
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAIL_ID", "sender@example.com")
     monkeypatch.setenv("MAIL_PW", "test-only")
+
+    # repository의 전역 DB도 운영 데이터 대신 임시 DB를 사용하게 한다.
+    production_db = Path(__file__).resolve().parents[1] / "storage" / "mail.db"
+    original_connect = sqlite3.connect
+
+    def isolated_connect(database, *args, **kwargs):
+        if Path(database).resolve() == production_db:
+            database = str(tmp_path / "mail-global.db")
+        return original_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", isolated_connect)
 
     from app.routers import mail_links, mails
     from entity.type import TaskStatus
@@ -44,11 +56,18 @@ def mail_client(tmp_path, monkeypatch):
         task_repo.update_status(ids[status.value], status)
     task_repo.save_draft(ids["drafted"], "초안 답변")
 
+    return ids
+
+
+@pytest.fixture
+def mail_client(mail_data):
+    from app.routers import mail_links, mails
+
     app = FastAPI()
     app.include_router(mails.router)
     app.include_router(mail_links.router)
     with TestClient(app) as client:
-        yield client, ids
+        yield client, mail_data
 
 
 def test_mails_default_statuses(mail_client):
@@ -94,7 +113,7 @@ def test_mail_detail_returns_mail_and_task_fields(mail_client):
     assert set(body) == {
         "task_id", "subject", "sender", "received_at", "status", "assignee",
         "body", "draft", "created_at", "updated_at", "recipient",
-        "model", "retrieval", "sources",
+        "model", "retrieval", "sources", "attachments",
     }
     assert body["task_id"] == ids["drafted"]
     assert body["subject"] == "drafted"
@@ -107,6 +126,7 @@ def test_mail_detail_returns_mail_and_task_fields(mail_client):
     assert body["model"] is None
     assert body["retrieval"] is None
     assert body["sources"] == []
+    assert body["attachments"] == []
     for field in ("received_at", "created_at", "updated_at"):
         datetime.fromisoformat(body[field])
 
@@ -144,6 +164,7 @@ def test_approve_uses_task_id(mail_client, monkeypatch):
         "subject": "[응답] drafted",
         "body": render_answer_email("초안 답변"),
         "html": True,
+        "attachments": [],
     }]
     assert client.get(f"/mails/{ids['drafted']}").json()["status"] == "sent"
 
@@ -209,3 +230,72 @@ def test_review_email_send_button_points_to_send_page():
     assert 'href="http://host:9092/mails/task%201/send"' in html
     assert 'href="http://host:9092/mail?task_id=task%201"' in html
     assert "action=send" not in html
+
+
+def test_attachments_sorted_by_average_similarity(mail_data, tmp_path):
+    ids = mail_data
+    from app.routers import mails
+
+    repo = mails.task_repo
+    scores_by_file = {
+        "low": [0.95, 0.15],
+        "high": [0.8, None],
+        "zero": [0.0],
+        "negative": [-0.2],
+        "unknown": [None],
+    }
+    sources = []
+    with repo.db.transaction() as conn:
+        for file_id, scores in scores_by_file.items():
+            path = tmp_path / f"{file_id}.pdf"
+            path.write_bytes(b"test attachment")
+            conn.execute(
+                "INSERT INTO file (file_id, original_name, stored_path) VALUES (?, ?, ?)",
+                (file_id, path.name, str(path)),
+            )
+            sources.extend(
+                {"id": f"{file_id}-{i}", "file_id": file_id,
+                 "source": path.name, "text": f"chunk {i}", "score": score}
+                for i, score in enumerate(scores)
+            )
+    # 검색과 리랭킹에 같은 청크가 나와도 평균에 두 번 포함하지 않는다.
+    sources.append(dict(sources[0]))
+    repo.save_draft(ids["drafted"], "초안", sources)
+    # 다른 메일의 점수가 이 메일의 평균에 포함되면 안 된다.
+    repo.save_draft(ids["sent"], "다른 초안", [
+        {"id": "other-task", "file_id": "low", "source": "low.pdf", "text": "other", "score": 1.0},
+    ])
+    (tmp_path / "unknown.pdf").unlink()
+
+    attachments = mails.view_mail_detail(ids["drafted"])["attachments"]
+    assert [a["file_id"] for a in attachments] == ["high", "low", "zero", "negative", "unknown"]
+    assert [a["average_score"] for a in attachments[:-1]] == pytest.approx([0.8, 0.55, 0.0, -0.2])
+    assert attachments[-1]["average_score"] is None
+    assert attachments[-1]["available"] is False
+    assert all("path" not in a and "stored_path" not in a for a in attachments)
+
+
+def test_attachment_similarity_groups_same_path_and_keeps_tie_order(mail_data, tmp_path):
+    ids = mail_data
+    from app.routers import mails
+
+    repo = mails.task_repo
+    shared_path = tmp_path / "shared.pdf"
+    shared_path.write_bytes(b"shared")
+    with repo.db.transaction() as conn:
+        for file_id in ("first", "alias", "tied"):
+            path = shared_path if file_id != "tied" else tmp_path / "tied.pdf"
+            conn.execute(
+                "INSERT INTO file (file_id, original_name, stored_path) VALUES (?, ?, ?)",
+                (file_id, path.name, str(path)),
+            )
+    repo.save_draft(ids["drafted"], "초안", [
+        {"id": "one", "file_id": "first", "source": "shared.pdf", "text": "one", "score": 0.25},
+        {"id": "two", "file_id": "alias", "source": "shared.pdf", "text": "two", "score": 0.75},
+        {"id": "three", "file_id": "tied", "source": "tied.pdf", "text": "three", "score": 0.5},
+    ])
+
+    attachments = mails.view_mail_detail(ids["drafted"])["attachments"]
+
+    assert [a["file_id"] for a in attachments] == ["first", "tied"]
+    assert [a["average_score"] for a in attachments] == pytest.approx([0.5, 0.5])

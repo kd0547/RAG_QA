@@ -34,6 +34,7 @@ def _attachment_candidates(task_id: str) -> list[dict]:
             "mime_type": f["mime_type"],
             "size_bytes": path.stat().st_size if available else None,
             "available": available,
+            "average_score": f["average_score"],
             "path": f["stored_path"],
         })
     return candidates

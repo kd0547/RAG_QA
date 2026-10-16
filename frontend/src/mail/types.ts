@@ -34,6 +34,7 @@ export interface MailAttachment {
     mime_type: string | null;
     size_bytes: number | null;      // 파일이 없으면 null
     available: boolean;             // 서버 디스크에 파일이 있는지
+    average_score?: number | null;  // 검색된 청크의 평균 유사도. 점수가 없으면 null
 }
 
 /** 상세(GET /mails/{task_id}) */
