@@ -3,7 +3,7 @@ import logging
 from entity.type import MailEntity, TaskStatus, TaskEntity
 from repository.email_repository import EmailRepository
 from repository.task_repository import TaskRepository
-from agent.rag_agent import get_agent, run_agent
+from agent.agent import get_agent, run_agent
 
 RETRY_MAX_COUNT = 3
 

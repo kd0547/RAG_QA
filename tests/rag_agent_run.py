@@ -4,7 +4,7 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_openai import ChatOpenAI
 
 from agent.llm_provider import set_llm_model
-from agent.rag_agent import run_agent
+from agent.agent import run_agent
 from retrieval.embedder import set_embedding_model
 
 embedding_model = OllamaEmbeddings(

@@ -19,7 +19,7 @@ from app.routers.search import router as search_router
 from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_llm_model
-from agent.rag_agent import get_agent
+from agent.agent import get_agent
 from repository import db, email_repo, task_repo
 
 # 프론트엔드는 frontend/ 의 React(Vite) 앱이다.

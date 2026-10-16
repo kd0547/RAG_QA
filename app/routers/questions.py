@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from agent.rag_agent import get_agent
+from agent.agent import get_agent
 from typing import Literal
 
 router = APIRouter()
@@ -16,7 +16,7 @@ class QuestionRequest(BaseModel):
     rerank_top_n:int
     query_top_n:int
 
-from agent.rag_agent import run_agent
+from agent.agent import run_agent
 
 @router.post("/ask")
 async def ask_question(payload: QuestionRequest) -> dict:

@@ -1,7 +1,7 @@
 import threading
 
 import config
-from agent.rag_agent import run_agent, run_agent_temp_attachments
+from agent.agent import run_agent, run_agent_temp_attachments
 from entity.type import MailEntity
 from repository.email_repository import EmailRepository
 from repository.repo_connect import Database
