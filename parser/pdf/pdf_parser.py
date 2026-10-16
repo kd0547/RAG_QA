@@ -3,11 +3,12 @@ import os
 import re
 from pathlib import Path
 
+import pymupdf
 from pymupdf4llm import to_json,to_markdown
 from pypdf import PdfReader
 
 from ocr.llm_ocr import ocr_image
-from parser.pdf.type import Document, Page, PageText
+from parser.pdf.type import Box, Document, Page, PageText
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -63,7 +64,29 @@ def _load_layout(pdf_path: Path) -> Document:
         image_format="png",
         dpi=200,
     )
-    return Document.model_validate(_json.loads(raw))
+
+    document = Document.model_validate(_json.loads(raw))
+
+    # 페이지 전체가 이미지 한 장인 경우(스캔본 등) to_json은 boxes를 비워 반환한다.
+    # 페이지를 통째로 렌더해 페이지 크기의 picture 박스로 넣어 _describe_images()가 OCR하게 한다.
+    with pymupdf.open(pdf_path) as pdf:
+        for page in document.pages:
+            if page.boxes:
+                continue
+
+            pdf_page = pdf[page.page_number - 1]
+            if not pdf_page.get_images():
+                continue  # 실제 빈 페이지는 OCR하지 않음
+
+            image_path = os.path.join(image_dir_rel, f"{pdf_path.stem}-{page.page_number}-full.png")
+            pdf_page.get_pixmap(dpi=200).save(image_path)
+            page.boxes.append(Box(
+                x0=0, y0=0, x1=page.width, y1=page.height,
+                boxclass="picture",
+                image=image_path,
+            ))
+
+    return document
 
 
 def _describe_images(page: Page) -> None:
