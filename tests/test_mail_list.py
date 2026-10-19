@@ -162,7 +162,7 @@ def test_approve_uses_task_id(mail_client, monkeypatch):
     assert sent == [{
         "to_addr": "sender@example.com",
         "subject": "[응답] drafted",
-        "body": render_answer_email("초안 답변"),
+        "body": render_answer_email("초안 답변", question="질문"),
         "html": True,
         "attachments": [],
     }]
@@ -184,7 +184,7 @@ def test_approve_with_edited_body_sends_and_saves_it(mail_client, monkeypatch):
 
     assert response.status_code == 200
     # 검토자가 고친 본문이 저장된 초안 대신 전송되고, task 의 초안도 수정본으로 바뀐다
-    assert [m["body"] for m in sent] == [render_answer_email("수정한 **답변**")]
+    assert [m["body"] for m in sent] == [render_answer_email("수정한 **답변**", question="질문")]
     assert client.get(f"/mails/{ids['drafted']}").json()["draft"] == "수정한 **답변**"
 
 

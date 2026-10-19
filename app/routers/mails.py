@@ -183,7 +183,7 @@ def mail_approve(task_id: str, request: Request, payload:ApproveBody | None = No
         send_email(
             to_addr=task.get("sender"),
             subject=subject,
-            body=render_answer_email(answer),
+            body=render_answer_email(answer, question=task.get("body") or ""),
             html=True,
             attachments=attachments,
         )

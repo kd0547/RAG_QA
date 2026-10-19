@@ -89,7 +89,7 @@ def _markdown_to_email_html(text: str) -> str:
     styles = {
         "<table>": (
             '<table style="width:100%; border-collapse:collapse; '
-            'margin:16px 0; font-size:13px;">'
+            'margin:16px 0; font-size:14px;">'
         ),
         "<th>": (
             '<th style="border:1px solid #e5e7eb; padding:8px 10px; '
@@ -120,10 +120,40 @@ def _markdown_to_email_html(text: str) -> str:
     return html
 
 
-def render_answer_email(answer: str) -> str:
-    """질문자에게 전달할 AI 답변 메일 HTML."""
+def render_answer_email(answer: str, question: str = "") -> str:
+    """질문자에게 전달할 AI 답변 메일 HTML. question 이 있으면 답변 위에 문의 원문을 함께 보여준다."""
 
     answer_html = _markdown_to_email_html(answer)
+    question_section = ""
+    if question.strip():
+        question_html = html_lib.escape(question.strip()).replace("\n", "<br>")
+        question_section = f"""
+                    <!-- Question -->
+                    <tr>
+                        <td style="padding:24px 32px 0;">
+                            <p style="
+                                margin:0 0 8px;
+                                font-size:12px;
+                                font-weight:600;
+                                color:#6b7280;
+                            ">
+                                문의하신 내용
+                            </p>
+                            <div style="
+                                padding:16px;
+                                background:#f9fafb;
+                                border:1px solid #e5e7eb;
+                                border-radius:5px;
+                                font-size:15px;
+                                line-height:1.7;
+                                color:#4b5563;
+                                word-break:break-word;
+                            ">
+                                {question_html}
+                            </div>
+                        </td>
+                    </tr>
+"""
 
     return f"""
 <!DOCTYPE html>
@@ -148,7 +178,7 @@ def render_answer_email(answer: str) -> str:
         style="background:#f5f5f5;"
     >
         <tr>
-            <td align="center" style="padding:32px 16px;">
+            <td align="center" style="padding:24px 8px;">
 
                 <table
                     role="presentation"
@@ -157,7 +187,7 @@ def render_answer_email(answer: str) -> str:
                     cellspacing="0"
                     border="0"
                     style="
-                        max-width:640px;
+                        max-width:1100px;
                         background:#ffffff;
                         border:1px solid #e5e7eb;
                         border-radius:6px;
@@ -166,7 +196,7 @@ def render_answer_email(answer: str) -> str:
 
                     <!-- Header -->
                     <tr>
-                        <td style="padding:24px 28px 18px;">
+                        <td style="padding:24px 32px 18px;">
                             <h1 style="
                                 margin:0 0 6px;
                                 font-size:18px;
@@ -190,7 +220,7 @@ def render_answer_email(answer: str) -> str:
 
                     <!-- Divider -->
                     <tr>
-                        <td style="padding:0 28px;">
+                        <td style="padding:0 32px;">
                             <div style="
                                 border-top:1px solid #e5e7eb;
                                 height:1px;
@@ -198,11 +228,20 @@ def render_answer_email(answer: str) -> str:
                         </td>
                     </tr>
 
+{question_section}
                     <!-- Answer -->
                     <tr>
-                        <td style="padding:24px 28px;">
+                        <td style="padding:24px 32px;">
+                            <p style="
+                                margin:0 0 8px;
+                                font-size:12px;
+                                font-weight:600;
+                                color:#6b7280;
+                            ">
+                                답변
+                            </p>
                             <div style="
-                                font-size:14px;
+                                font-size:15px;
                                 line-height:1.7;
                                 color:#374151;
                                 word-break:break-word;
@@ -215,7 +254,7 @@ def render_answer_email(answer: str) -> str:
                     <!-- Footer -->
                     <tr>
                         <td style="
-                            padding:16px 28px;
+                            padding:16px 32px;
                             background:#fafafa;
                             border-top:1px solid #e5e7eb;
                         ">
@@ -286,7 +325,7 @@ def render_mail_review_email(
         style="background:#f5f5f5;"
     >
         <tr>
-            <td align="center" style="padding:32px 16px;">
+            <td align="center" style="padding:24px 8px;">
 
                 <table
                     role="presentation"
@@ -295,7 +334,7 @@ def render_mail_review_email(
                     cellspacing="0"
                     border="0"
                     style="
-                        max-width:640px;
+                        max-width:1100px;
                         background:#ffffff;
                         border:1px solid #e5e7eb;
                         border-radius:6px;
@@ -304,7 +343,7 @@ def render_mail_review_email(
 
                     <!-- Header -->
                     <tr>
-                        <td style="padding:24px 28px 18px;">
+                        <td style="padding:24px 32px 18px;">
                             <h1 style="
                                 margin:0 0 6px;
                                 font-size:18px;
@@ -328,14 +367,14 @@ def render_mail_review_email(
 
                     <!-- Divider -->
                     <tr>
-                        <td style="padding:0 28px;">
+                        <td style="padding:0 32px;">
                             <div style="border-top:1px solid #e5e7eb;"></div>
                         </td>
                     </tr>
 
                     <!-- Mail Info -->
                     <tr>
-                        <td style="padding:22px 28px 0;">
+                        <td style="padding:22px 32px 0;">
                             <table
                                 role="presentation"
                                 width="100%"
@@ -385,7 +424,7 @@ def render_mail_review_email(
 
                     <!-- Content -->
                     <tr>
-                        <td style="padding:24px 28px;">
+                        <td style="padding:24px 32px;">
 
                             <p style="
                                 margin:0 0 8px;
@@ -402,7 +441,7 @@ def render_mail_review_email(
                                 background:#f9fafb;
                                 border:1px solid #e5e7eb;
                                 border-radius:5px;
-                                font-size:14px;
+                                font-size:15px;
                                 line-height:1.7;
                                 color:#374151;
                                 word-break:break-word;
@@ -424,7 +463,7 @@ def render_mail_review_email(
                                 background:#ffffff;
                                 border:1px solid #d1d5db;
                                 border-radius:5px;
-                                font-size:14px;
+                                font-size:15px;
                                 line-height:1.7;
                                 color:#374151;
                                 word-break:break-word;
@@ -439,7 +478,7 @@ def render_mail_review_email(
                     <tr>
                         <td
                             align="center"
-                            style="padding:0 28px 28px;"
+                            style="padding:0 32px 28px;"
                         >
                             <table
                                 role="presentation"
@@ -508,7 +547,7 @@ def render_mail_review_email(
                     <!-- Footer -->
                     <tr>
                         <td style="
-                            padding:14px 28px;
+                            padding:14px 32px;
                             background:#fafafa;
                             border-top:1px solid #e5e7eb;
                         ">

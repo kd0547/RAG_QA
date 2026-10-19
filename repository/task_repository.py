@@ -287,7 +287,7 @@ class TaskRepository:
 
     def approve(self, task_id):
         select_sql = """
-                     select t.task_id, t.status, t.draft_answer, m.sender, m.subject
+                     select t.task_id, t.status, t.draft_answer, m.sender, m.subject, m.body
                      from tasks t
                               inner join main.mails m on m.uid = t.mail_uid
                      where t.task_id = ?;
@@ -299,4 +299,4 @@ class TaskRepository:
         if row is None:
             return None  # 라우터(app/routers/mails.py)에서 404 처리
 
-        return dict(row)  # {"task_id": ..., "status": ..., "draft_answer": ..., "sender": ..., "subject": ...}
+        return dict(row)  # {"task_id": ..., "status": ..., "draft_answer": ..., "sender": ..., "subject": ..., "body": ...}
