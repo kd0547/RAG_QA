@@ -25,3 +25,6 @@ markdown/
 .pytest_cache/
 identifier.sqlite
 temp/
+
+# 실행 로그
+logs/

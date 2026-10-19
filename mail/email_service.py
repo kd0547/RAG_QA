@@ -12,6 +12,7 @@ from entity.type import TaskStatus
 import logging
 
 from mail.email_send import send_email
+from logging_config import mask_email
 from mail.templates import render_mail_review_email
 
 
@@ -19,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 
 def intake_mail(mail: MailEntity, db: Database, email_repo: EmailRepository, task_repo: TaskRepository) -> None:
-    print("저장 실행중...")
     with db.transaction() as conn:
         email_repo.save_pending(mail, conn)
         task_repo.create_task(mail.uid, conn)
@@ -62,9 +62,13 @@ def email_receiver_loop(
                 try:
                     intake_mail(mail=mail,db=db, email_repo=email_repo,task_repo=task_repo)
                 except Exception:
-                    logger.exception("개별 메일 처리 실패: uid=%s", mail.uid)
+                    logger.exception("메일 저장 실패: uid=%s", mail.uid)
+                    continue
 
-                logger.debug("Queue 적재 완료: uid=%s, subject=%s", mail.uid, mail.subject)
+                logger.info(
+                    "메일 저장 완료: uid=%s, subject=%s, attachments=%d",
+                    mail.uid, mail.subject, len(mail.attachments),
+                )
         except Exception:
             logger.exception("메일 수신 루프 오류")
 
@@ -79,28 +83,47 @@ def email_consumer_loop(stop_event: threading.Event,
     logger.info("메일 처리 루프 시작")
 
     while not stop_event.is_set():
-        pending_tasks = task_repo.get_pending_tasks()
+        # DB 조회가 실패해도 스레드가 죽지 않도록 잡고 다음 주기에 다시 시도한다
+        try:
+            pending_tasks = task_repo.get_pending_tasks()
+        except Exception:
+            logger.exception("대기 작업 조회 실패")
+            stop_event.wait(10)
+            continue
 
         for task in pending_tasks:
-            mail = email_repo.get_mail_by_id(task.mail_uid)
-            if mail is None:
-                logger.warning("메일을 찾을 수 없음: mail_uid=%s", task.mail_uid)
-                continue
-
-            logger.info("메일 처리 시작: uid=%s, sender=%s, subject=%s", mail.uid, mail.sender, mail.subject)
-
             try:
+                # 처리할 수 없는 작업은 pending에서 빼야 10초마다 같은 경고가 반복되지 않는다.
+                # failed로 두면 대시보드 기본 목록에 보여 담당자가 직접 확인할 수 있다.
+                mail = email_repo.get_mail_by_id(task.mail_uid)
+                if mail is None:
+                    logger.warning("메일을 찾을 수 없어 failed 처리: task_id=%s, mail_uid=%s", task.task_id, task.mail_uid)
+                    task_repo.update_status(task.task_id, TaskStatus.FAILED)
+                    continue
+
+                logger.info(
+                    "메일 처리 시작: task_id=%s, uid=%s, sender=%s, subject=%s",
+                    task.task_id, mail.uid, mask_email(mail.sender), mail.subject,
+                )
+
                 #메일 읽기
                 body = mail.body
                 if not body or not body.strip():
-                    logger.warning("본문이 비어있어 처리 건너뜀: uid=%s, subject=%s", mail.uid, mail.subject)
+                    logger.warning(
+                        "본문이 비어있어 failed 처리: task_id=%s, uid=%s, subject=%s, attachments=%d",
+                        task.task_id, mail.uid, mail.subject, len(mail.attachments),
+                    )
+                    task_repo.update_status(task.task_id, TaskStatus.FAILED)
                     continue
 
 
                 #반려 후 재생성이면 담당자 피드백을 함께 넘김
                 reject_reasons = task_repo.get_reject_reasons(task.task_id)
                 if reject_reasons:
-                    logger.info("반려 피드백 반영해 재생성: uid=%s, 반려 %d회", mail.uid, len(reject_reasons))
+                    logger.info(
+                        "반려 피드백 반영해 재생성: task_id=%s, uid=%s, 반려 %d회",
+                        task.task_id, mail.uid, len(reject_reasons),
+                    )
 
                 #답변 생성하기
                 result = run_agent_temp_attachments(
@@ -130,11 +153,18 @@ def email_consumer_loop(stop_event: threading.Event,
 
 
                 task_repo.save_draft(task.task_id, answer, sources)
-                logger.debug("답변 생성 완료: uid=%s, answer_len=%d, sources=%d", mail.uid, len(answer), len(sources))
+                logger.info(
+                    "초안 저장·검토 요청 완료: task_id=%s, uid=%s, reviewer=%s, answer_len=%d, sources=%d",
+                    task.task_id, mail.uid, dandang, len(answer), len(sources),
+                )
 
             except Exception:
-                logger.exception("메일 처리 실패: uid=%s", mail.uid)
-                task_repo.update_status(task.task_id, TaskStatus.FAILED)
+                logger.exception("메일 처리 실패: task_id=%s, mail_uid=%s", task.task_id, task.mail_uid)
+                # 상태 갱신까지 실패하면 다음 주기에 다시 처리된다 (스레드는 유지)
+                try:
+                    task_repo.update_status(task.task_id, TaskStatus.FAILED)
+                except Exception:
+                    logger.exception("실패 상태 저장 실패: task_id=%s", task.task_id)
 
         stop_event.wait(10)
 
@@ -147,11 +177,14 @@ def email_consumer_loop(stop_event: threading.Event,
 def email_loop_build(email_repo: EmailRepository, task_repo: TaskRepository,db:Database):
 
     stop_event = threading.Event()
+    # 로그의 [threadName]으로 어느 루프에서 난 로그인지 구분한다
     producer = threading.Thread(
+        name="mail-receiver",
         target=email_receiver_loop,
         args=(stop_event, email_repo,task_repo,db),
     )
     consumer = threading.Thread(
+        name="mail-consumer",
         target=email_consumer_loop,
         args=(stop_event, email_repo ,task_repo),
     )

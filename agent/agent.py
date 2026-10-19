@@ -1,4 +1,6 @@
 import json
+import time
+from collections import Counter
 from typing import Literal
 
 from langchain.agents import create_agent
@@ -49,9 +51,8 @@ def run_agent(
 ) -> dict:
     agent = get_agent(mode)
 
-    result = agent.invoke(
-        {"messages": [{"role": "user", "content": question}]},
-        config={"recursion_limit": 40},
+    result = _invoke_logged(
+        agent, [{"role": "user", "content": question}], mode, label="질문",
     )
 
     final_message = result["messages"][-1]
@@ -94,15 +95,39 @@ def run_agent_temp_attachments(
     if review_feedback:
         content.append({"type": "text", "text": review_feedback})
 
-    result = agent.invoke(
-        {"messages": [{"role": "user", "content": content}]},
-        config={"recursion_limit": 40},
+    result = _invoke_logged(
+        agent, [{"role": "user", "content": content}], mode,
+        label=f"메일(첨부 {len(attachments or [])}건, 반려피드백 {'있음' if review_feedback else '없음'})",
     )
 
     return {
         "answer": result["messages"][-1].content,
         "sources": _collect_sources(result["messages"]),
     }
+
+
+def _invoke_logged(agent, messages: list[dict], mode: str, label: str) -> dict:
+    """에이전트를 실행하고 소요시간·도구 호출 수를 로그로 남긴다. 예외는 호출부가 처리하도록 다시 던진다."""
+    started = time.perf_counter()
+    try:
+        result = agent.invoke({"messages": messages}, config={"recursion_limit": 40})
+    except Exception as exc:
+        # 트레이스백은 호출부(소비자 루프, uvicorn)가 남기므로 여기서는 소요시간과 예외 종류만 남긴다
+        logger.warning(
+            "에이전트 실행 실패: %s, mode=%s, %.1f초, %s: %s",
+            label, mode, time.perf_counter() - started, type(exc).__name__, exc,
+        )
+        raise
+
+    tool_calls = Counter(
+        msg.name for msg in result["messages"] if getattr(msg, "type", None) == "tool"
+    )
+    logger.info(
+        "에이전트 실행 완료: %s, mode=%s, %.1f초, messages=%d, tools=%s",
+        label, mode, time.perf_counter() - started, len(result["messages"]),
+        dict(tool_calls) or "없음",
+    )
+    return result
 
 def _attachment_to_block(attachment: Attachment) -> dict | None:
     """첨부 하나를 메시지 content 블록으로 바꾼다. 처리할 수 없으면 None."""

@@ -121,7 +121,7 @@ def _serialize_block(
     headers = [_compose_header([grid[r][c] for r in header_rows]) for c in cols]
 
     prefix = f"[{prefix_base} / {title}]" if title else f"[{prefix_base}]"
-    logger.info(
+    logger.debug(
         "xlsx 표 판별: %s rows=%d~%d header_rows=%d data_rows=%d cols=%d",
         prefix, rows[0] + 1, rows[-1] + 1, len(header_rows), len(data_rows), len(cols),
     )

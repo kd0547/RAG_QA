@@ -20,7 +20,7 @@ class TaskService():
 
         if task.retry_count >= RETRY_MAX_COUNT:
             self.task_repo.update_status(task.task_id, TaskStatus.FAILED)
-            logger.warning("최대 재시도 초과: uid=%s", task.task_id)
+            logger.warning("최대 재시도 초과: task_id=%s", task.task_id)
             return
 
         #Email조회

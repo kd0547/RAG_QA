@@ -336,7 +336,6 @@ export default function App() {
             }
             const data: OcrResponse = await response.json();
             const result = data.results[0];
-            console.log(data);
 
             const pages: OcrPageInfo[] = result?.fileinfo ?? [];
 

@@ -4,6 +4,7 @@
 키 목록은 .env.example 참고.
 """
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -35,3 +36,11 @@ REVIEWER_EMAIL = os.getenv("REVIEWER_EMAIL", "dongwook.kim@trigem.co.kr")
 # ---------- 청킹 ----------
 DEFAULT_CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "2000"))
 DEFAULT_CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
+
+# ---------- 로그 ----------
+# 로그 파일 폴더 (기본: 프로젝트 루트의 logs/). 상대 경로면 프로젝트 루트 기준.
+LOG_DIR = Path(__file__).resolve().parent / os.getenv("LOG_DIR", "logs")
+# DEBUG / INFO / WARNING / ERROR
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+# 날짜별로 교체된 로그 파일을 며칠치 남길지
+LOG_BACKUP_DAYS = int(os.getenv("LOG_BACKUP_DAYS", "30"))

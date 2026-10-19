@@ -88,6 +88,8 @@ def get_access_token():
     cache = msal.SerializableTokenCache()
     if os.path.exists(TOKEN_CACHE_FILE):
         cache.deserialize(open(TOKEN_CACHE_FILE, "r").read())
+    else:
+        logger.warning("토큰 캐시 파일 없음: %s", TOKEN_CACHE_FILE)
 
     app = msal.PublicClientApplication(
         CLIENT_ID, authority=AUTHORITY, token_cache=cache
@@ -98,15 +100,22 @@ def get_access_token():
     if accounts:
         # 캐시된 계정으로 조용히 갱신 시도
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
+        if not result:
+            logger.warning("캐시된 토큰으로 갱신 실패 (refresh token 만료 가능)")
+    else:
+        logger.warning("토큰 캐시에 계정이 없음")
 
     if not result:
         # 최초 1회: 브라우저가 열리고 로그인 + 동의 화면
+        # 서버·컨테이너에는 브라우저가 없어 여기서 멈출 수 있으므로, 수신이 멈췄을 때 이 로그를 확인한다
+        logger.warning("대화형 로그인 시작: 브라우저 로그인이 끝날 때까지 메일 수신이 대기합니다")
         result = app.acquire_token_interactive(SCOPES)
 
     # 캐시 저장
     if cache.has_state_changed:
         with open(TOKEN_CACHE_FILE, "w") as f:
             f.write(cache.serialize())
+        logger.debug("토큰 캐시 저장: %s", TOKEN_CACHE_FILE)
 
     if "access_token" not in result:
         raise RuntimeError(

@@ -1,3 +1,5 @@
+import logging
+
 from langchain_core.tools import tool
 
 from agent.llm_provider import get_llm_model
@@ -5,6 +7,8 @@ from agent.type import AnswerabilityCheck
 from retrieval.embedder import get_embedding_model
 from repository.embedding_repository import search
 from agent.reranker import rerank
+
+logger = logging.getLogger(__name__)
 # ---------- Tools ----------
 
 @tool
@@ -103,14 +107,9 @@ Returns:
         file_id=file_id,
     )
 
-    print(
-        f"[search_documents] "
-        f"query={query!r} "
-        f"file_id={file_id!r} "
-        f"page={page} "
-        f"top_k={top_k} "
-        f"score_threshold={score_threshold}"
-        f"-> {len(docs)}건"
+    logger.info(
+        "[search_documents] query=%r file_id=%r page=%d top_k=%d score_threshold=%s -> %d건",
+        query, file_id, page, top_k, score_threshold, len(docs),
     )
 
     return [
@@ -145,7 +144,7 @@ def rerank_documents(query: str, documents: list[dict], top_n: int = 3) -> list[
         추가되지 않습니다. 재정렬 모델을 사용할 수 없으면 빈 목록입니다.
     """
     results = rerank(query, documents, top_n)
-    print(f"[rerank_documents] {len(documents)}건 -> {len(results)}건")
+    logger.info("[rerank_documents] %d건 -> %d건", len(documents), len(results))
     return results
 
 
@@ -197,7 +196,7 @@ def check_answerability(question: str, documents: list[dict]) -> dict:
         ]
     )
 
-    print(f"[check_answerability] is_answerable={result.is_answerable}, reason={result.reason}")
+    logger.info("[check_answerability] is_answerable=%s, reason=%s", result.is_answerable, result.reason)
     return {
         "is_answerable": result.is_answerable,
         "reason": result.reason

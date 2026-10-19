@@ -42,7 +42,7 @@ if (-not $DryRun -and -not $Server) {
 # 최상위에서 통째로 빼는 항목
 $topLevelExcludes = @(
     ".venv", ".git", ".idea", ".claude", "__pycache__", ".pytest_cache", ".jbeval",
-    ".env", "temp", "markdown", "chroma_data", "identifier.sqlite",
+    ".env", "temp", "logs", "markdown", "chroma_data", "identifier.sqlite",
     $archiveName
 )
 

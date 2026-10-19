@@ -5,6 +5,7 @@ storage/chroma 를 persist 디렉터리로 쓰는 단일 컬렉션에 청크를 
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import chromadb
@@ -15,6 +16,8 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "storage" / "chroma"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 COLLECTION_NAME = "rag_chunks"
+
+logger = logging.getLogger(__name__)
 
 _client = chromadb.PersistentClient(path=str(DATA_DIR))
 _collection = _client.get_or_create_collection(
@@ -110,6 +113,7 @@ def search(
         ],
     )
     docs = []
+    filtered = 0
 
     for (chunk_id, embedding, document, metadata, distance, ) in zip(
         result["ids"][0],
@@ -122,15 +126,12 @@ def search(
         score = 1 - distance
 
         if score < score_threshold:
-            print(
-                "[FILTERED] "
-                f"id={chunk_id}, "
-                f"source={metadata.get('source')}, "
-                f"page={metadata.get('page')}, "
-                f"distance={distance:.4f}, "
-                f"score={score:.4f}, "
-                f"threshold={score_threshold:.4f}"
+            # 검색 한 번에 후보가 최대 candidate_k개라 청크별 로그는 DEBUG로만 남긴다
+            logger.debug(
+                "[FILTERED] id=%s, source=%s, page=%s, distance=%.4f, score=%.4f, threshold=%.4f",
+                chunk_id, metadata.get("source"), metadata.get("page"), distance, score, score_threshold,
             )
+            filtered += 1
             continue
 
         docs.append({
@@ -145,4 +146,8 @@ def search(
             "score": score,
         })
 
+    logger.debug(
+        "벡터 검색: 후보 %d건 중 threshold(%.2f) 미만 %d건 제외 -> %d건",
+        len(result["ids"][0]), score_threshold, filtered, len(docs),
+    )
     return docs

@@ -1,4 +1,5 @@
 import json as _json
+import logging
 import os
 import re
 from pathlib import Path
@@ -11,6 +12,8 @@ from ocr.llm_ocr import ocr_image
 from parser.pdf.type import Box, Document, Page, PageText
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+logger = logging.getLogger(__name__)
 
 
 def parser_pdf_md(
@@ -56,7 +59,7 @@ def _load_layout(pdf_path: Path) -> Document:
 
     image_dir_rel = os.path.relpath(image_dir_abs, Path.cwd())
 
-    print(image_dir_abs)
+    logger.debug("PDF 이미지 추출 폴더: %s", image_dir_abs)
     raw = to_json(
         pdf_path,
         write_images=True,
@@ -96,7 +99,7 @@ def _describe_images(page: Page) -> None:
             continue
 
         if not os.path.isfile(box.image):
-            print(f"{box.image}파일이 존재하지 않습니다.")
+            logger.warning("PDF 이미지 파일이 없어 OCR 건너뜀: %s", box.image)
             continue
 
         with open(box.image, "rb") as f:
@@ -140,7 +143,7 @@ def _render_page(page: Page) -> str:
         elif box.boxclass in ("page-header", "page-footer"):
             pass  # 반복 요소, RAG 컨텍스트에서 노이즈이므로 제외
         else:
-            print(box.boxclass)
+            logger.debug("처리하지 않는 박스 유형: %s", box.boxclass)
 
     return "\n\n".join(parts)
 

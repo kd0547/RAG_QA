@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -15,6 +17,9 @@ from parser.file_parser import SUPPORTED_EXTENSIONS, parse_file
 from retrieval.chunker import chunk_pages, dump_chunks_markdown
 from repository.embedding_repository import save_embeddings,delete_embeddings
 from retrieval.type import Chunk
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(
 
 )
@@ -44,6 +49,7 @@ def delete_file(file_id:str):
 
     file_repo.delete_file(file_id)
     delete_embeddings(file_id)
+    logger.info("문서 삭제: file_id=%s, name=%s", file_id, file.original_name)
 
     return {"message": "File deleted successfully"}
 
@@ -63,6 +69,7 @@ async def upload_files(files: list[UploadFile]) -> dict:
     for file in files:
         #파일 업로드
         if not file.filename or Path(file.filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
+            logger.info("업로드 거부(지원하지 않는 형식): %s", file.filename)
             results.append({
                 "filename": file.filename,
                 "error": f"지원하지 않는 파일 형식입니다. (지원: {', '.join(sorted(SUPPORTED_EXTENSIONS))})",
@@ -75,12 +82,14 @@ async def upload_files(files: list[UploadFile]) -> dict:
 
         content = await file.read()
         dest_path.write_bytes(content)
+        started = time.perf_counter()
 
         try:
             sha256 = hashlib.sha256(content).hexdigest()
 
             #파일이 이미 존재하면 건너뜀 여기서 무언가 액션을 클라이언트에 보냄(구현은 나중에)
             if file_repo.exists_by_sha256(sha256):
+                logger.info("업로드 건너뜀(같은 내용의 문서 존재): %s, sha256=%s", file.filename, sha256[:12])
                 continue
 
             db_file = create_file(
@@ -103,6 +112,7 @@ async def upload_files(files: list[UploadFile]) -> dict:
 
 
         except Exception as exc:  # 개별 파일 실패는 건너뛰고 나머지는 계속 처리
+            logger.exception("업로드 처리 실패: %s", file.filename)
             results.append({"filename": file.filename, "error": f"처리 실패: {exc}"})
             continue
 
@@ -110,6 +120,11 @@ async def upload_files(files: list[UploadFile]) -> dict:
 
         saved_path = save_embeddings(embedded_chunks)
         file_repo.file_save(db_file)
+        logger.info(
+            "문서 업로드 완료: %s, file_id=%s, pages=%d, chunks=%d, size=%d, %.1f초",
+            file.filename, db_file.file_id, len(pages), len(embedded_chunks), len(content),
+            time.perf_counter() - started,
+        )
 
 
         # 응답에는 임베딩 벡터는 빼고 미리보기용 필드만 담는다

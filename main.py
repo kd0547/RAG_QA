@@ -1,6 +1,8 @@
 """RAG 웹 앱 진입점 (FastAPI). 앱 조립만 담당하고 API 라우터는 app/routers/ 에 있다."""
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,6 +25,11 @@ from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
 from agent.agent import get_agent
 from repository import db, email_repo, task_repo
+from logging_config import setup_logging
+
+# uvicorn이 앱을 import할 때 한 번 실행된다. 이후 메일 스레드·라우터 로그가 logs/에 남는다.
+setup_logging()
+logger = logging.getLogger(__name__)
 
 # 프론트엔드는 frontend/ 의 React(Vite) 앱이다.
 # - 개발: `npm run dev` (5173) + vite proxy로 이 서버를 호출
@@ -32,6 +39,15 @@ FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 환경마다 .env가 달라 "어떤 설정으로 떴는지"가 장애 분석의 출발점이다. 비밀값은 유무만 남긴다.
+    logger.info(
+        "서버 시작: llm=%s @ %s, embedding=%s @ %s, claude=%s, public_base_url=%s, reviewer=%s, chunk=%d/%d",
+        config.LLM_MODEL, config.LLM_BASE_URL,
+        config.EMBEDDING_MODEL, os.getenv("OLLAMA_HOST", "(기본값)"),
+        config.CLAUDE_MODEL if config.CLAUDE_API_KEY else "비활성(ANTHROPIC_API_KEY 없음)",
+        config.PUBLIC_BASE_URL, config.REVIEWER_EMAIL,
+        config.DEFAULT_CHUNK_SIZE, config.DEFAULT_CHUNK_OVERLAP,
+    )
 
     embedding_model = OllamaEmbeddings(
         model=config.EMBEDDING_MODEL)
@@ -54,16 +70,23 @@ async def lifespan(app: FastAPI):
 
         set_claude_model(claude_llm)
 
-    load_rerank()
+    reranker_ready = load_rerank()
 
     graph = get_agent()
     producer, consumer, stop_event = email_loop_build(email_repo, task_repo,db)
+    logger.info("서버 준비 완료: reranker=%s", "사용" if reranker_ready else "미사용(로드 실패)")
     yield
 
     # 서버 종료 시 정리
+    logger.info("서버 종료 시작: 메일 스레드 정지 요청")
     stop_event.set()
     producer.join(timeout=5)
     consumer.join(timeout=5)
+    # 답변 생성 중이던 스레드는 5초 안에 끝나지 않을 수 있다 (프로세스는 끝날 때까지 기다린다)
+    still_running = [t.name for t in (producer, consumer) if t.is_alive()]
+    if still_running:
+        logger.warning("종료 대기 시간 안에 끝나지 않은 스레드: %s", still_running)
+    logger.info("서버 종료")
 
 
 app = FastAPI(title="RAG PDF Uploader", lifespan=lifespan)

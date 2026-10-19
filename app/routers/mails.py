@@ -1,14 +1,18 @@
+import logging
 from dataclasses import asdict
 from datetime import datetime, date
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from entity.type import parse_status_filter, TaskStatus
 from mail.email_send import SENDER_EMAIL, send_email
 from mail.templates import render_answer_email
 from repository import task_repo
+from logging_config import mask_email
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -43,6 +47,11 @@ def _attachment_candidates(task_id: str) -> list[dict]:
 class RejectBody(BaseModel):
     reason: str
     requeue: bool = True
+
+
+def _client_ip(request: Request) -> str | None:
+    """감사 로그용 요청자 IP. 로그인 기능이 없어 담당자를 구분할 수 있는 값은 이것뿐이다."""
+    return request.client.host if request.client else None
 
 
 # 검토 대기 중인 초안만 반려할 수 있다
@@ -102,7 +111,7 @@ def view_mail_detail(task_id: str):
     }
 
 @router.post("/mails/{task_id}/reject")
-def mail_reject(task_id: str, payload: RejectBody):
+def mail_reject(task_id: str, payload: RejectBody, request: Request):
     task = task_repo.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="not_found")
@@ -118,12 +127,17 @@ def mail_reject(task_id: str, payload: RejectBody):
     next_status = TaskStatus.PENDING if payload.requeue else TaskStatus.FAILED
     if not task_repo.reject(task_id, reason, next_status, REJECTABLE):
         # 조회와 갱신 사이에 다른 요청이 상태를 바꾼 경우
+        logger.warning("반려 충돌(상태가 이미 변경됨): task_id=%s, client=%s", task_id, _client_ip(request))
         raise HTTPException(status_code=409, detail="상태가 변경되어 반려할 수 없습니다")
 
+    logger.info(
+        "답변 반려: task_id=%s, %s -> %s, requeue=%s, client=%s, reason=%s",
+        task_id, task.status.value, next_status.value, payload.requeue, _client_ip(request), reason[:200],
+    )
     return {"task_id": task_id, "status": next_status.value}
 
 @router.post("/mails/{task_id}/approve")
-def mail_approve(task_id: str,payload:ApproveBody | None = None):
+def mail_approve(task_id: str, request: Request, payload:ApproveBody | None = None):
     #먼저 task를 가져옴
     task = task_repo.approve(task_id)
     if task is None:
@@ -131,6 +145,11 @@ def mail_approve(task_id: str,payload:ApproveBody | None = None):
 
     #상태 체크
     if task.get("status") != "drafted":
+        # 버튼을 두 번 누르거나 이미 보낸 메일을 다시 승인한 경우. 중복 전송 시도를 추적할 수 있게 남긴다.
+        logger.warning(
+            "승인 거부(상태 불일치): task_id=%s, status=%s, client=%s",
+            task_id, task.get("status"), _client_ip(request),
+        )
         raise HTTPException(status_code=409, detail=f"승인할 수 없는 상태입니다: {task.get('status')}")
 
     #수정된 답변
@@ -169,11 +188,20 @@ def mail_approve(task_id: str,payload:ApproveBody | None = None):
             attachments=attachments,
         )
     except Exception:
+        # 클라이언트에는 smtp_error만 가므로 원인(인증 실패, 연결 끊김 등)은 여기서 남긴다
+        logger.exception(
+            "답변 메일 전송 실패: task_id=%s, to=%s, attachments=%d, client=%s",
+            task_id, mask_email(task.get("sender")), len(attachments), _client_ip(request),
+        )
         task_repo.update_status(task_id, TaskStatus.FAILED)
         raise HTTPException(status_code=502, detail="smtp_error")
 
     #상태 변경
     task_repo.update_status(task_id, TaskStatus.SENT)
+    logger.info(
+        "답변 승인·전송 완료: task_id=%s, to=%s, edited=%s, attachments=%d, client=%s",
+        task_id, mask_email(task.get("sender")), bool(payload and payload.body), len(attachments), _client_ip(request),
+    )
 
     return {
         "task_id": task_id,

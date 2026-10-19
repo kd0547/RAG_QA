@@ -21,3 +21,6 @@ data/uploads/
 data/images/
 temp/
 markdown/
+
+# 실행 로그는 볼륨(./logs)으로 남긴다
+logs/

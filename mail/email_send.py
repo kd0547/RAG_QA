@@ -1,6 +1,7 @@
 import logging
 import mimetypes
 import smtplib
+import time
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
@@ -9,6 +10,9 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+from logging_config import mask_email
+
 load_dotenv()  # 같은 폴더의 .env 파일을 읽어옴
 
 logger = logging.getLogger(__name__)
@@ -33,12 +37,19 @@ def send_email(to_addr: str, subject: str, body: str, html: bool = False,
         if part is not None:
             msg.attach(part)
 
+    started = time.perf_counter()
     with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
         server.ehlo()
         server.starttls()   # TLS 암호화 시작
         server.ehlo()
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
+    # 실패는 예외로 호출부(소비자 루프, 승인 API)에서 남긴다
+    attached = len(msg.get_payload()) - 1  # 본문 파트를 뺀 실제 첨부 수 (없는 파일은 건너뜀)
+    logger.info(
+        "메일 발송 완료: to=%s, subject=%s, attachments=%d, %.1f초",
+        mask_email(to_addr), subject, attached, time.perf_counter() - started,
+    )
 
 
 def _build_attachment(attachment: dict) -> MIMEBase | None:
