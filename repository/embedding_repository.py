@@ -75,7 +75,7 @@ def search(
         score_threshold:float = 0.4, #유사도가 너무 낮은 청크 제거
         page = -1,
         file_id: str | None = None,
-
+        candidate_k: int = 30,
 ) -> list[dict]:
     """쿼리 임베딩과 가장 유사한 청크를 top_k개 반환한다 (거리 오름차순)."""
 
@@ -100,7 +100,7 @@ def search(
 
     result = _collection.query(
         query_embeddings=[query_embedding],
-        n_results=top_k,
+        n_results=max(top_k, candidate_k),
         where=where,
         include=[
             "embeddings",
@@ -119,7 +119,6 @@ def search(
         result["distances"][0],
     ):
 
-        # cosine distance 기준이라고 가정
         score = 1 - distance
 
         if score < score_threshold:
