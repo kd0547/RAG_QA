@@ -80,8 +80,13 @@ def chunk_pages(
     file_path = Path(file_path)
 
     chunks: list[Chunk] = []
+    # xlsx는 한 시트(page)가 여러 PageText로 나뉘어 오므로, 청크 번호를 page별로 이어서 매긴다.
+    next_index: dict[int, int] = {}
     for page in pages:
-        for i, chunk in enumerate(split_chunks(page.text, size=chunk_size, overlap=chunk_overlap)):
+        pieces = split_chunks(page.text, size=chunk_size, overlap=chunk_overlap)
+        start = next_index.get(page.page, 0)
+        next_index[page.page] = start + len(pieces)
+        for i, chunk in enumerate(pieces, start=start):
             chunks.append(
                 Chunk(
                     id=f"{file_path.stem}-p{page.page}-c{i}",

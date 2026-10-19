@@ -9,7 +9,7 @@ from parser.pdf.type import PageText
 _PAGED_PARSERS = {
     ".pdf": ("parser.pdf.pdf_parser", "parser_pdf_pages"),
     ".pptx": ("parser.pptx.pptx_parser", "parser_pptx_pages"),
-    ".xlsx": ("parser.xlsx.xlsx_parser", "parser_xlsx_pages"),
+    ".xlsx": ("parser.xlsx.xlsx_record_parser", "parser_xlsx_record_pages"),
 }
 _MARKDOWN_PARSERS = {
     ".docx": ("parser.docx.docx_parser", "parser_docx_md"),
