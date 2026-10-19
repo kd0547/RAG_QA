@@ -2,7 +2,7 @@
  * 백엔드(FastAPI) 공용 HTTP 클라이언트.
  *
  * 기본값은 same-origin이다.
- *  - 개발: vite dev server가 /upload, /files, /ask, /search, /mails 를 백엔드로 프록시 (vite.config.ts)
+ *  - 개발: vite dev server가 /config, /upload, /files, /ask, /search, /mails 를 백엔드로 프록시 (vite.config.ts)
  *  - 배포: FastAPI가 frontend/dist 를 같이 서빙 (main.py)
  * 백엔드가 다른 호스트에 있으면 VITE_API_BASE 로 덮어쓴다.
  */

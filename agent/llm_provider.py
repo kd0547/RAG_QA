@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from langchain_ollama import ChatOllama
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 
@@ -17,22 +16,28 @@ _local_llm: ChatOpenAI | None = None
 _claude_llm: ChatAnthropic | None = None
 
 
-def set_llm_model(model: ChatOpenAI) -> None:
+def set_local_model(model: ChatOpenAI) -> None:
     global _local_llm
     _local_llm = model
 
 
-def get_llm_model(mode: Literal["local", "claude"]) -> ChatOllama | ChatAnthropic:
+def set_claude_model(model: ChatAnthropic) -> None:
     global _claude_llm
+    _claude_llm = model
 
+
+def get_llm_model(mode: Literal["local", "claude"]) -> ChatOpenAI | ChatAnthropic:
     if mode == "local":
         if _local_llm is None:
             raise RuntimeError(
                 "로컬 LLM이 아직 로드되지 않았습니다. "
-                "서버 시작 시 set_llm_model()로 모델을 주입해주세요."
+                "서버 시작 시 set_local_model()로 모델을 주입해주세요."
             )
         return _local_llm
 
     if _claude_llm is None:
-        _claude_llm = ChatAnthropic(model="claude-sonnet-5")
+        raise RuntimeError(
+            "Claude LLM이 아직 로드되지 않았습니다. "
+            "서버 시작 시 set_claude_model()로 모델을 주입해주세요."
+        )
     return _claude_llm

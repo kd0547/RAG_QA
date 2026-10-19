@@ -150,7 +150,7 @@ def _collect_sources(messages: list) -> list:
 _agents: dict[str, object] = {}
 
 
-def get_agent(mode: Literal["claude", "local"] = "claude"):
+def get_agent(mode: Literal["claude", "local"] = "local"):
     """모드별로 에이전트를 최초 1회 빌드해 재사용한다."""
     if mode not in _agents:
         _agents[mode] = build_agent(mode)

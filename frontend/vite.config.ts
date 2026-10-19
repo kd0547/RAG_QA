@@ -19,6 +19,7 @@ export default defineConfig({
   ],
   server: {
     proxy: {
+      '/config': API_TARGET,
       '/upload': API_TARGET,
       '/files': API_TARGET,
       '/file/': API_TARGET,

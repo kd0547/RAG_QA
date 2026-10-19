@@ -3,7 +3,7 @@ import json
 from langchain_ollama import OllamaEmbeddings
 from langchain_openai import ChatOpenAI
 
-from agent.llm_provider import set_llm_model
+from agent.llm_provider import set_local_model
 from agent.agent import run_agent
 from retrieval.embedder import set_embedding_model
 
@@ -18,7 +18,7 @@ llm = ChatOpenAI(
         api_key="dummy",  # vLLM은 인증 안 하지만 파라미터는 필수라 아무 값이나 넣어야 함
         max_tokens=65536,  # num_ctx 대신 이렇게, 필요시 조정
     )
-set_llm_model(llm)
+set_local_model(llm)
 
 
 agent = run_agent(

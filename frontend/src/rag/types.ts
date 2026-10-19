@@ -32,6 +32,11 @@ export interface UploadResponse {
     results: UploadResult[];
 }
 
+/** GET /config — 서버에 ANTHROPIC_API_KEY가 있으면 claude_available = true */
+export interface AppConfig {
+    claude_available: boolean;
+}
+
 /** claude = Claude API, local = 로컬(vLLM/Ollama) 모델 */
 export type AskMode = 'claude' | 'local';
 

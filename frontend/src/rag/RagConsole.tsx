@@ -366,7 +366,19 @@ function Workspace({
 }) {
     const [turns, setTurns] = useState<QaTurn[]>([]);
     const [question, setQuestion] = useState('');
-    const [mode, setMode] = useState<AskMode>('claude');
+    const [mode, setMode] = useState<AskMode>('local');
+    // 서버에 ANTHROPIC_API_KEY가 없으면 Claude 버튼을 잠근다.
+    // GET /config로 먼저 확인하고, 그래도 Claude 모드 /ask가 503을 주면 그때 잠근다.
+    const [claudeUnavailable, setClaudeUnavailable] = useState(false);
+
+    useEffect(() => {
+        ragApi
+            .getConfig()
+            .then((cfg) => setClaudeUnavailable(!cfg.claude_available))
+            .catch(() => {
+                /* /config가 없는 구버전 서버면 버튼을 그대로 둔다 */
+            });
+    }, []);
     const [queryTopN, setQueryTopN] = useState(5);
     const [rerankTopN, setRerankTopN] = useState(3);
 
@@ -420,6 +432,10 @@ function Workspace({
             patch({ status: 'done', answer: res.answer, sources: res.sources });
         } catch (e) {
             patch({ status: 'error', error: errMessage(e) });
+            if (mode === 'claude' && e instanceof ApiError && e.status === 503) {
+                setClaudeUnavailable(true);
+                setMode('local');
+            }
         }
     };
 
@@ -478,8 +494,14 @@ function Workspace({
                                     key={m}
                                     type="button"
                                     onClick={() => setMode(m)}
-                                    className={`h-6 px-2.5 rounded-md text-[11.5px] font-semibold transition-colors ${
-                                        mode === m ? 'bg-white text-ink shadow-[0_1px_2px_rgba(20,28,43,0.10)]' : 'text-muted hover:text-ink'
+                                    disabled={m === 'claude' && claudeUnavailable}
+                                    title={
+                                        m === 'claude' && claudeUnavailable
+                                            ? '서버에 ANTHROPIC_API_KEY가 없어 사용할 수 없습니다'
+                                            : undefined
+                                    }
+                                    className={`h-6 px-2.5 rounded-md text-[11.5px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                                        mode === m ? 'bg-white text-ink shadow-[0_1px_2px_rgba(20,28,43,0.10)]' : 'text-muted enabled:hover:text-ink'
                                     }`}
                                 >
                                     {MODE_LABEL[m]}

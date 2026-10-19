@@ -12,7 +12,7 @@ router = APIRouter()
 
 class QuestionRequest(BaseModel):
     question: str
-    mode: Literal['claude', 'local'] = 'claude'
+    mode: Literal['claude', 'local'] = 'local'
     rerank_top_n:int
     query_top_n:int
 

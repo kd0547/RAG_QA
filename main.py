@@ -6,11 +6,13 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
+from langchain_anthropic import ChatAnthropic
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_openai import ChatOpenAI
 
 import config
 from agent.reranker import load_rerank
+from app.routers.app_config import router as config_router
 from app.routers.files import router as file_router
 from app.routers.mail_links import router as mail_link_router
 from app.routers.mails import router as mail_router
@@ -18,7 +20,7 @@ from app.routers.questions import router as question_router
 from app.routers.search import router as search_router
 from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
-from agent.llm_provider import set_llm_model
+from agent.llm_provider import set_local_model, set_claude_model
 from agent.agent import get_agent
 from repository import db, email_repo, task_repo
 
@@ -36,13 +38,21 @@ async def lifespan(app: FastAPI):
 
     set_embedding_model(embedding_model)
 
-    llm = ChatOpenAI(
+    local_llm = ChatOpenAI(
         model=config.LLM_MODEL,  # vLLM 실행 시 지정한 served-model-name
         base_url=config.LLM_BASE_URL,
-        api_key="dummy",  # vLLM은 인증 안 하지만 파라미터는 필수라 아무 값이나 넣어야 함
+        api_key=config.VLLM_API_KEY,  # vLLM은 인증 안 하지만 파라미터는 필수라 아무 값이나 넣어야 함
         #max_tokens=65536,  # num_ctx 대신 이렇게, 필요시 조정
     )
-    set_llm_model(llm)
+    set_local_model(local_llm)
+
+    if config.CLAUDE_API_KEY:
+        claude_llm = ChatAnthropic(
+            model=config.CLAUDE_MODEL,  # API 키는 .env의 ANTHROPIC_API_KEY를 자동으로 읽는다
+            api_key=config.CLAUDE_API_KEY,
+        )
+
+        set_claude_model(claude_llm)
 
     load_rerank()
 
@@ -57,6 +67,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="RAG PDF Uploader", lifespan=lifespan)
+app.include_router(config_router)
 app.include_router(file_router)
 app.include_router(search_router)
 app.include_router(question_router)
