@@ -11,14 +11,14 @@ from agent.llm_provider import get_llm_model
 from agent.prompt import _build_prompt
 from entity.type import Attachment, DocumentType
 from parser.file_parser import parse_file
-from tools.tool import search_documents, rerank_documents, check_answerability
+from tools.tool import search_documents, rerank_documents, check_answerability, read_source_document
 import logging
 import yaml
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-TOOLS = [search_documents, rerank_documents, check_answerability]
+TOOLS = [search_documents, rerank_documents, check_answerability, read_source_document]
 
 
 # ---------- Agent ----------

@@ -1,4 +1,6 @@
 import logging
+from functools import lru_cache
+from pathlib import Path
 
 from langchain_core.tools import tool
 
@@ -7,6 +9,7 @@ from agent.type import AnswerabilityCheck
 from retrieval.embedder import get_embedding_model
 from repository.embedding_repository import search
 from agent.reranker import rerank
+from parser.file_parser import parse_file
 
 logger = logging.getLogger(__name__)
 # ---------- Tools ----------
@@ -87,7 +90,7 @@ Returns:
     각 항목은 다음 값을 포함합니다.
     - id: 청크 ID
     - file_id: 파일 ID
-    - source: 문서명
+    - source: 원본 문서 경로 (read_source_document에 그대로 전달)
     - page: 페이지 번호
     - chunk_index: 청크 번호
     - text: 본문
@@ -202,3 +205,59 @@ def check_answerability(question: str, documents: list[dict]) -> dict:
         "reason": result.reason
     }
 
+# 업로드된 원본 문서 폴더 (app/routers/files.py의 UPLOAD_DIR과 같은 위치)
+DOCS_ROOT = (Path(__file__).resolve().parent.parent / "data" / "uploads").resolve()
+MAX_READ_CHARS = 20000
+
+
+@lru_cache(maxsize=16)
+def _extract_text(path_str: str, mtime_ns: int) -> str:
+    """파일을 파싱해 페이지 구분자를 붙인 전체 텍스트를 반환한다.
+
+    파싱 비용이 크므로 (경로, 수정시각) 기준으로 캐시한다. 파일이 바뀌면 mtime이 달라져 다시 파싱된다.
+    """
+    pages = parse_file(path_str)
+    return "\n\n".join(f"[page {page.page}]\n{page.text}" for page in pages if page.text)
+
+
+@tool
+def read_source_document(source: str, start: int = 0, max_chars: int = 8000) -> str:
+    """검색 결과의 source에 해당하는 원본 문서 전체 텍스트를 순서대로 읽습니다.
+
+    검색된 청크가 잘려 앞뒤 맥락이 부족하거나, 문서 전체 흐름(목차, 표, 여러 페이지에 걸친
+    설명)을 봐야 할 때 사용합니다. 문서를 검색하지는 않으므로 먼저 search_documents로
+    관련 문서를 찾은 뒤 호출합니다.
+
+    Args:
+        source: search_documents 결과의 source 값을 그대로 전달합니다.
+        start: 읽기 시작할 글자 위치. 처음에는 0입니다.
+        max_chars: 한 번에 읽을 최대 글자 수. 기본값은 8000, 최대 20000입니다.
+
+    Returns:
+        본문 일부와 마지막 줄의 위치 정보 [파일명: 시작~끝 / 전체 N자].
+        본문에는 [page N] 표시가 있어 페이지를 알 수 있습니다.
+        끝 < 전체이면 start=끝으로 다시 호출해 이어서 읽습니다.
+    """
+    path = Path(source)
+    if not path.is_absolute():
+        path = DOCS_ROOT / path  # 파일명만 넘어온 경우
+    path = path.resolve()
+    if not path.is_relative_to(DOCS_ROOT) or not path.is_file():
+        logger.info("[read_source_document] 거부: source=%r", source)
+        return "허용되지 않거나 존재하지 않는 경로입니다. search_documents 결과의 source 값을 그대로 전달하세요."
+
+    try:
+        text = _extract_text(str(path), path.stat().st_mtime_ns)
+    except Exception:
+        logger.exception("[read_source_document] 파싱 실패: %s", path)
+        return f"{path.name} 문서를 읽지 못했습니다."
+
+    start = max(0, start)
+    max_chars = min(max(1, max_chars), MAX_READ_CHARS)
+    if start >= len(text):
+        return f"[{path.name}: 읽을 내용이 없습니다. 전체 {len(text)}자]"
+
+    chunk = text[start:start + max_chars]
+    end = start + len(chunk)
+    logger.info("[read_source_document] %s %d~%d / %d자", path.name, start, end, len(text))
+    return f"{chunk}\n\n[{path.name}: {start}~{end} / 전체 {len(text)}자]"
