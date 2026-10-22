@@ -15,6 +15,7 @@ PyMuPDF
 # 문서 파서 (parser/)
 python-docx
 python-pptx
+pyhwp
 openpyxl
 # .hwp(HWP 5.0) 열기를 지원하는 버전
 python-hwpx>=6.7
