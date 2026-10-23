@@ -140,7 +140,7 @@ def email_consumer_loop(stop_event: threading.Event,
                 task_repo.assign_task(task.task_id, dandang)
                 send_email(
                     dandang,
-                    "[테스트] 검토가 필요한 메일이 도착했습니다.",
+                f"[테스트][검토]{mail.subject}",
                     render_mail_review_email(
                         mail=mail,
                         answer=answer,

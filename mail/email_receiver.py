@@ -53,6 +53,7 @@ MIME_TO_EXT = {
 #    "application/vnd.ms-powerpoint": ".ppt",
     # hwp/hwpx는 정식 MIME이 없어 클라이언트마다 다르게 붙는다
     "application/x-hwp": ".hwp",
+    "application/octet-stream": ".hwp",
     "application/haansofthwp": ".hwp",
     "application/vnd.hancom.hwp": ".hwp",
     "application/x-hwpx": ".hwpx",

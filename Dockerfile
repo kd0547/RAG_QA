@@ -14,9 +14,9 @@ RUN npm run build
 # ---------- 2단계: 백엔드 ----------
 FROM python:3.11-slim
 
+# 리랭커(bge-reranker-v2-m3) 등 HF 모델 캐시. 볼륨으로 붙이면 재시작마다 다시 받지 않는다.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    # 리랭커(bge-reranker-v2-m3) 등 HF 모델 캐시. 볼륨으로 붙이면 재시작마다 다시 받지 않는다.
     HF_HOME=/app/.cache/huggingface
 
 WORKDIR /app
