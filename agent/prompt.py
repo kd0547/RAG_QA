@@ -41,5 +41,11 @@ def render_aliases(aliases: dict[str, list[str]]) -> str:
     return "\n".join(f"- {name} = {', '.join(alts)}" for name, alts in aliases.items())
 
 
+def render_prompt(content: str, aliases: dict[str, list[str]]) -> str:
+    """프롬프트의 $aliases 자리를 용어 별칭 목록으로 채운다. DB에 저장된 프롬프트도 이 함수로 채운다.
+    safe_substitute라서 $aliases 외의 $ 표기(예: $100)는 그대로 남고, $aliases가 없으면 원문 그대로다."""
+    return Template(content).safe_substitute(aliases=render_aliases(aliases))
+
+
 def _build_prompt(aliases: dict[str, list[str]]) -> str:
-    return SYSTEM_PROMPT_TEMPLATE.safe_substitute(aliases=render_aliases(aliases))
+    return render_prompt(SYSTEM_PROMPT_TEMPLATE.template, aliases)

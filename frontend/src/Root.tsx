@@ -1,6 +1,7 @@
 import { Suspense, lazy, useSyncExternalStore } from 'react'
 import { MailSection } from './mail/MailSection.tsx'
 import { RagConsole } from './rag/RagConsole.tsx'
+import { PromptSection } from './prompt/PromptSection.tsx'
 import { getRoute, normalizeLegacyHash, normalizeLegacyMailLink, subscribeRoute } from './lib/router'
 
 /**
@@ -30,6 +31,7 @@ function LoadingScreen() {
 
 export function Root() {
   const route = useSyncExternalStore(subscribeRoute, getRoute)
+  if (route === 'prompt') return <PromptSection />
   if (route === 'mail' || route.startsWith('mail/')) return <MailSection route={route} />
   if (route === 'ocr') {
     return (

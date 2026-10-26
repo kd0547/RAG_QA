@@ -5,6 +5,7 @@
  *  - `/mail/inbox`   메일 (전체 메일 조회)
  *  - `/mail/review`  메일 검토 (검토 대기열 + 승인/반려)
  *  - `/ocr`   OCR 도구
+ *  - `/prompt` 프롬프트 설정
  *
  * 서버에 없는 경로이므로 index.html로 fallback 해줘야 한다.
  * (개발: vite SPA fallback 기본 동작 · 배포: main.py 의 catch-all)

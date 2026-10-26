@@ -26,6 +26,8 @@ export default defineConfig({
       '/ask': API_TARGET,
       '/search': API_TARGET,
       '/mails': API_TARGET,
+      // '/prompt'(화면 경로)와 겹치지 않도록 복수형만 프록시한다
+      '/prompts': API_TARGET,
     },
   },
 })

@@ -1,6 +1,7 @@
 import json
 import time
 from collections import Counter
+from dataclasses import dataclass
 from typing import Literal
 
 from langchain.agents import create_agent
@@ -8,10 +9,12 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 from agent.llm_provider import get_llm_model
-from agent.prompt import _build_prompt
+from agent.prompt import render_prompt
 from entity.type import Attachment, DocumentType
 from parser.file_parser import parse_file
+from repository import prompt_repo
 from tools.tool import search_documents, rerank_documents, check_answerability, read_source_document
+from langchain.agents.middleware import dynamic_prompt, ModelRequest
 import logging
 import yaml
 load_dotenv()
@@ -31,16 +34,21 @@ def load_aliases(path=ALIAS_PATH) -> dict[str, list[str]]:
 
 ALIASES = load_aliases()
 
-system_prompt = _build_prompt(ALIASES)
+@dataclass
+class AgentContext:
+    system_prompt: str
 
-
+@dynamic_prompt
+def _system_prompt(request:ModelRequest):
+    return request.runtime.context.system_prompt
 
 def build_agent(mode: Literal["claude", "local"]):
     llm = get_llm_model(mode)
     return create_agent(
         model=llm,
         tools=TOOLS,
-        system_prompt=system_prompt,
+        middleware=[_system_prompt],
+        context_schema=AgentContext,
     )
 
 
@@ -110,7 +118,10 @@ def _invoke_logged(agent, messages: list[dict], mode: str, label: str) -> dict:
     """에이전트를 실행하고 소요시간·도구 호출 수를 로그로 남긴다. 예외는 호출부가 처리하도록 다시 던진다."""
     started = time.perf_counter()
     try:
-        result = agent.invoke({"messages": messages}, config={"recursion_limit": 40})
+        result = agent.invoke(
+            {"messages": messages},
+            context=AgentContext(system_prompt=render_prompt(prompt_repo.get_system_prompt(), ALIASES)),
+            config={"recursion_limit": 40})
     except Exception as exc:
         # 트레이스백은 호출부(소비자 루프, uvicorn)가 남기므로 여기서는 소요시간과 예외 종류만 남긴다
         logger.warning(

@@ -9,9 +9,11 @@ from pathlib import Path
 from repository.file_repository import FileRepository
 from repository.repo_connect import Database
 from repository.email_repository import EmailRepository
+from repository.prompt_repository import PromptRepository
 from repository.task_repository import TaskRepository
 
 db = Database(str(Path(__file__).resolve().parent.parent / "storage" / "mail.db"))
 email_repo = EmailRepository(db)
 task_repo = TaskRepository(db)
 file_repo = FileRepository(db)
+prompt_repo = PromptRepository(db)

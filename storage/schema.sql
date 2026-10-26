@@ -89,5 +89,22 @@ create table if not exists file (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_file_sha256 ON file(sha256);
 
 
+-- prompt: 답변 지침(시스템 프롬프트). 여러 개 저장하고 그중 하나만 선택해 쓴다.
+-- 기본 프롬프트(is_default = 1)는 서버 시작 시 없으면 agent/prompt.py 내용으로 넣는다.
+-- 선택된 프롬프트가 없으면 기본 프롬프트를, DB를 못 읽으면 agent/prompt.py 원문을 쓴다.
+CREATE TABLE IF NOT EXISTS prompt (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,                 -- 목록에서 구분할 이름
+    content     TEXT NOT NULL,
+    is_default  INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
+    is_selected INTEGER NOT NULL DEFAULT 0 CHECK (is_selected IN (0, 1)),
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+-- is_default = 1, is_selected = 1 인 행은 각각 DB 전체에 하나만 허용
+CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_default ON prompt(is_default) WHERE is_default = 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_selected ON prompt(is_selected) WHERE is_selected = 1;
+
+
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_mail_uid ON tasks(mail_uid);

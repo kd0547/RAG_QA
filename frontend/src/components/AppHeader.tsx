@@ -2,17 +2,18 @@ import type { ReactNode } from 'react';
 import { linkProps } from '../lib/router';
 import { LogoMark } from './icons';
 
-type AppKey = 'rag' | 'mail';
+type AppKey = 'rag' | 'mail' | 'prompt';
 
-/** 앱 전환 대상. (OCR 도구는 미구현이라 노출하지 않는다 — /ocr 경로는 그대로 남아 있다) */
+/** 공통 메뉴. OCR 도구는 /ocr 경로로만 제공한다. */
 const APPS: { key: AppKey; label: string; path: string }[] = [
     { key: 'rag', label: 'TG RAG', path: '/' },
     { key: 'mail', label: '메일', path: '/mail' },
+    { key: 'prompt', label: '프롬프트', path: '/prompt' },
 ];
 
 /**
  * 모든 화면 공통 상단 바.
- * 왼쪽: 로고 + 앱 전환 스위치(TG RAG ⇄ 메일) · 가운데: 화면별 탭(children) · 오른쪽: 보조 영역(aside)
+ * 왼쪽: 로고 + 앱 전환 메뉴 · 가운데: 화면별 탭(children) · 오른쪽: 보조 영역(aside)
  */
 export function AppHeader({
     current,

@@ -18,13 +18,14 @@ from app.routers.app_config import router as config_router
 from app.routers.files import router as file_router
 from app.routers.mail_links import router as mail_link_router
 from app.routers.mails import router as mail_router
+from app.routers.prompt import router as prompt_router
 from app.routers.questions import router as question_router
 from app.routers.search import router as search_router
 from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
 from agent.agent import get_agent
-from repository import db, email_repo, task_repo
+from repository import db, email_repo, prompt_repo, task_repo
 from logging_config import setup_logging
 
 # uvicorn이 앱을 import할 때 한 번 실행된다. 이후 메일 스레드·라우터 로그가 logs/에 남는다.
@@ -48,6 +49,13 @@ async def lifespan(app: FastAPI):
         config.PUBLIC_BASE_URL, config.REVIEWER_EMAIL,
         config.DEFAULT_CHUNK_SIZE, config.DEFAULT_CHUNK_OVERLAP,
     )
+
+    # 기본 프롬프트가 DB에 없으면 agent/prompt.py 내용으로 넣는다.
+    # 실패해도 에이전트는 agent/prompt.py 원문으로 동작하므로 서버 시작은 막지 않는다.
+    try:
+        prompt_repo.ensure_default()
+    except Exception:
+        logger.exception("기본 프롬프트 등록 실패")
 
     embedding_model = OllamaEmbeddings(
         model=config.EMBEDDING_MODEL)
@@ -96,6 +104,7 @@ app.include_router(search_router)
 app.include_router(question_router)
 app.include_router(mail_router)
 app.include_router(mail_link_router)
+app.include_router(prompt_router)
 
 if FRONTEND_DIST.is_dir():
     # 라우터보다 뒤에 등록해야 /upload, /ask 등 API 경로가 가려지지 않는다.
