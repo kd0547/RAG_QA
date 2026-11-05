@@ -1,0 +1,30 @@
+ktl Korea Testing Laboratory
+
+신고번호: ZH10003-20001N
+Application No.
+
+□ 첨부 1: 전기용품의 안전관리부품 및 재질목록
+List of Critical Components
+
+부품명(회로기호) Component(Part no.) 	 제조자(상표명) Manufacturer(Brand) 	 모델명(형식) Model(Type) 	 정격 또는 특성 Rating or Characteristics 	 인증마크 Tested by
+
+Cord Set 	 I-Sheng Electronics(Kunshan) Co., Ltd. 	 SP-023/IS-034 	 Plug: 250 V, 16 A Cord: 3 X 0.75 ㎟ Connector: 250 V, 2.5 A 	 KC
+AC/DC adaptor 	 Chicony Power Technology (Suzhou) Co., Ltd. 	 A13-040N3A 	 100 - 240 V~, 50 - 60 Hz, 1 A (O/P: 19 Vdc / 2.1 A) 	 KC
+(Alternate) 	 Lite-On Technology (Changzhou) Co., Ltd. 	 PA-1400-76 	 100 - 240 V~, 50 - 60 Hz, 1.2 A (O/P: 19 Vdc / 2.1 A) 	 KC
+(Alternate) 	 Chicony Power Technology (Suzhou) Co., Ltd. 	 A18-045N2A 	 100 - 240 V~, 50 - 60 Hz, 1.4 A (O/P: 19 Vdc / 2.37 A) 	 KC
+(Alternate) 	 Lite-On Technology (Changzhou) Co., Ltd 	 PA-1450-26 	 100 - 240 V~, 50 - 60 Hz, 1.2 A (O/P: 19 Vdc / 2.37 A) 	 KC
+Battery pack 	 Scud (Fujian) Electronics Co., Ltd. 	 NL40BAT-3 	 11.4 V, 3 175 mAh 	 KC
+(Alternate) 	 Getac Technology (Kunshan) Co., Ltd. 	 NL40BAT-3 	 11.4 V, 3 175 mAh 	 KC
+(Alternate) 	 Scud (Fujian) Electronics Co., Ltd. 	 NL40BAT-4 	 15.2 V, 3 175 mAh 	 KC
+(Alternate) 	 Simplo Technology (Chongqing) Inc. 	 NL40BAT-4 	 15.2 V, 3 175 mAh 	 KC
+(Alternate) 	 BMSPOW GREEN ENERGY (JIANGXI) Limited 	 NL40BAT-4-50 	 15.2 V, 3 290 mAh 	 KC
+RTC Battery 	 VIC-DAWN ENTERPRISE CO., LTD. 	 CR2032 	 3 V, 220 mAh, Max. abnormal charge current 10 mA 	 Tested with appliance
+LCD Panel 	 Innolux 	 N156HGA-EA3 	 344 ㎜(H) X 193 ㎜(V) (15.6 inch) LED Backlight 	 Tested with appliance
+(Alternate) 	 BOE 	 NT156FHM-N61 	 344 ㎜(H) X 193 ㎜(V) (15.6 inch) LED Backlight 	 Tested with appliance
+(Alternate) 	 LG Display 	 LP156WFC 	 344 ㎜(H) X 193 ㎜(V) (15.6 inch) LED Backlight 	 Tested with appliance
+(Alternate) 	 CEC PANDA FPD 	 LM156LF5L06 	 344 ㎜(H) X 193 ㎜(V) (15.6 inch) LED Backlight 	 Tested with appliance
+(Alternate) 	 LG Display 	 LP156WFH-SPD3 	 344 ㎜(H) X 193 ㎜(V) (15.6 inch) LED Backlight 	 Tested with appliance
+
+1/13
+
+※ 위 마크는 추후 전자확인증 대조 프로그램에서 원본대조시 사용되는 2D코드입니다.

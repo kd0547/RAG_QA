@@ -1,0 +1,117 @@
+{
+  "source": "KC인증서_안전확인_신고증명서_노트북_컴퓨터_N5800_20260107.pdf",
+  "source_sha256": "e608b67ec06ce35c1d934fbe8a3ddf07ab83a43865ebc5dcf5b800013407e3ee",
+  "status": "visually_reviewed_ai_assisted",
+  "reference_version": "1.0",
+  "reviewer": "Codex (AI visual review; not independent human verification)",
+  "provenance": "Pages 1-16: existing LLM output seeded, corrected by inspecting all source page images; pages 17-21: document headers and captions visually transcribed. Potential shared-model bias remains.",
+  "scope": "Full document text including tables, headers, footers and captions. Photograph interiors, barcode patterns, decorative border and unreadable seal excluded. Legible logo letters included.",
+  "reading_order": "Top-to-bottom blocks, left-to-right; tables row-major, each cell text together; merged cells once; strike-through old and new values both retained.",
+  "pages": [
+    {
+      "page": 1,
+      "sha256": "021781bb2c0eda47bd0487bf27bbc2794b6b5c636eef0c96585358f3a4943bd4",
+      "review": "신고번호/이면기재/삼보컴퓨터 원본 대조, 도장 장식 제외"
+    },
+    {
+      "page": 2,
+      "sha256": "2367d504f6e37335845e8d02de985244664b4aa839ed803f0b650cea4a8829e6",
+      "review": "인증융합센터와 for m 원본 표기 보존; QR 하단 문장 포함"
+    },
+    {
+      "page": 3,
+      "sha256": "f12ab6f6ee544a9dbb80c971e94a0d605dd7025cd64397c9d8ffbac79eaba113",
+      "review": "병합 셀 1을 첫 행에 전사; QR 하단 문장 포함"
+    },
+    {
+      "page": 4,
+      "sha256": "d7387e8a0f2ba66b826a62f02b7b558caa730ba6f7c8bbcc1ca20bae1a3367e8",
+      "review": "16개 부품 행 대조; 정격, BMSPOW 수정; 단위 mm²"
+    },
+    {
+      "page": 5,
+      "sha256": "fe9754e82955444c38678ae71db58c76b44482b39b12d0c88e86233953bd1b34",
+      "review": "12개 행, 안전 유의사항 대조; 회로기호 수정; Thinkness 원본 철자 유지"
+    },
+    {
+      "page": 6,
+      "sha256": "3567dffc78ae0290caa27b629a8497b6d745cd134eb6348fb01bdd11fe412ee1",
+      "review": "32개 모델 행 및 설명 전수 대조"
+    },
+    {
+      "page": 7,
+      "sha256": "f04e55e710719c25b8aa21dedc6514438fd5423257bc2cd27fe178db4fdfb65e",
+      "review": "32개 모델 행 및 HDD/SSD 유무 대조; GB70-PU10~13 원문 유지"
+    },
+    {
+      "page": 8,
+      "sha256": "d7eae3821c3f32594e509d592ff70645b060168a0b923c682a2733d2226775d5",
+      "review": "24개 모델 행 및 PCB 문장 대조"
+    },
+    {
+      "page": 9,
+      "sha256": "9089deab1a8ec680c9320620ef07110ebd7e00d68cecf14d5089cbd57368d42b",
+      "review": "33개 모델 행 및 SSD 유무 대조"
+    },
+    {
+      "page": 10,
+      "sha256": "5d8c0dc71f51e091344abe209001024bbdf5f29c051f99657bc8109e9fc7645f",
+      "review": "15개 행/제품특기사항/시험조건/연락처 대조"
+    },
+    {
+      "page": 11,
+      "sha256": "891c0664e11954e2232f72bd5fd744351b89d0f21bc873db1f0d1d29ddf3c846",
+      "review": "1~4차 변경 본문, 17+4개 표 행 대조; 원문의 G070-OU01/PU01 반복 유지"
+    },
+    {
+      "page": 12,
+      "sha256": "fe9685254a70bdcfc4212c7242035169a3c04fcd025cfb623a78c4f2f3eb7983",
+      "review": "5차 변경 및 20개 행 대조; componet 원문 철자 유지"
+    },
+    {
+      "page": 13,
+      "sha256": "5e5a8a604c184b8245a05e9609811d381295848790588cd03814fc02c6ce8322",
+      "review": "6~7차 변경 및 10+11개 행 대조"
+    },
+    {
+      "page": 14,
+      "sha256": "659c68f6649e9d29139a6da4c2d7b16aac97d2b953efddfa39c763925795627a",
+      "review": "8~9차 변경 및 취소선 전후 값 모두 전사; 4+29개 행 대조"
+    },
+    {
+      "page": 15,
+      "sha256": "ae33fcd435f810894268e5c27d0670fc465a1aba85e706ff6ba9c856bc5f3f29",
+      "review": "10~14차 변경 및 20+2개 행 대조; ciritical 원문 철자 유지; BMSPOW 수정"
+    },
+    {
+      "page": 16,
+      "sha256": "42ba188924898be37c06a9713a0ce27987f13de30999e4192d8ee67b19bba546",
+      "review": "24개 행 대조; GE70 계열 내 GD70-PU01 원문 오기 유지"
+    },
+    {
+      "page": 17,
+      "sha256": "acb84b0b9b236f0e2a344db73178d5090c25f9e6f9a6f89b6b402371899cf97c",
+      "review": "사진 외 머리글/배터리 캡션/성적서 캡션 전사"
+    },
+    {
+      "page": 18,
+      "sha256": "e83601cd1cda5df45f029a1aa9f3a0d1882b15827b4c541bd12c77e89fbac0cc",
+      "review": "머리글 및 성적서 캡션 2회 전사"
+    },
+    {
+      "page": 19,
+      "sha256": "c56f62037377a575626e19a8dbe887bab738374240a6aebd945537afa9bc4918",
+      "review": "머리글 및 첨부 제품사진 (Photos) 전사"
+    },
+    {
+      "page": 20,
+      "sha256": "434033f6699e111e313eccdce44587beb77d2dab9ebf3c142982b0a96e75a2a1",
+      "review": "머리글 전사"
+    },
+    {
+      "page": 21,
+      "sha256": "8e6bc7fd7709364df6095346befc27f27d7f6a274783ddfd874f97f3491ebc65",
+      "review": "머리글 및 배터리 캡션 전사"
+    }
+  ]
+}

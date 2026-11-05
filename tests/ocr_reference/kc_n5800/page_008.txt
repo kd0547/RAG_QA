@@ -1,0 +1,37 @@
+ktl Korea Testing Laboratory
+
+신고번호: ZH10003-20001N
+Application No.
+
+파생모델명
+Derivative model 	 기본모델과의 차이점
+Differences between the basic and derivative model(s)
+
+N5800-GC50-PU01 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-PU31 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-OU02 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-PU02 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-OU03 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-OU33 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-PU03 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-PU33 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-OU04 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-OU34 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-PU04 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-PU34 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-OU01 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-OU31 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-PU01 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-PU31 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-OU02 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-PU02 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-OU03 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-OU33 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-PU03 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-PU33 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-OU04 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC70-OU34 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+
+5/13
+
+※ 위 마크는 추후 전자확인증 대조 프로그램에서 원본대조시 사용되는 2D코드입니다.

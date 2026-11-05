@@ -1,0 +1,59 @@
+ktl Korea Testing Laboratory
+
+신고번호: ZH10003-20001N
+Application No.
+
+변경발급 내용
+Contents of Certificate Revisions
+
+10th Rev.) Addition of ciritical components and changed of test standard
+(23-006479-01-1 : 2023.04.11.)
+- Battery pack [Simplo Technology (Chongqing) Inc. / NL40BAT-4]
+- Test standard : K 60950-1 → KC 62368-1
+
+11th Rev.) Addition of ciritical components and derivative models (24-001748-01-1 : 2024.01.16.)
+- Added alternate component: LCD panel [Innolux / N156HCA-EAB]
+- Added derivative models
+
+Model 	 CPU 	 MEM 	 SSD 	 OS
+
+N5800-GD50-OU01 	 i5-1335U 	 8GB 	 256GB 	 Win11 Home
+N5800-GD50-PU01 	 i5-1335U 	 8GB 	 256GB 	 Win11 Pro
+N5800-GD50-OU02 	 i5-1335U 	 8GB 	 512GB 	 Win11 Home
+N5800-GD50-PU02 	 i5-1335U 	 8GB 	 512GB 	 Win11 Pro
+N5800-GD50-OU03 	 i5-1335U 	 16GB 	 256GB 	 Win11 Home
+N5800-GD50-PU03 	 i5-1335U 	 16GB 	 256GB 	 Win11 Pro
+N5800-GD50-OU04 	 i5-1335U 	 16GB 	 512GB 	 Win11 Home
+N5800-GD50-PU04 	 i5-1335U 	 16GB 	 512GB 	 Win11 Pro
+N5800-GD50-OU05 	 i5-1335U 	 16GB 	 1TB 	 Win11 Home
+N5800-GD50-PU05 	 i5-1335U 	 16GB 	 1TB 	 Win11 Pro
+N5800-GD70-OU01 	 i7-1355U 	 8GB 	 256GB 	 Win11 Home
+N5800-GD70-PU01 	 i7-1355U 	 8GB 	 256GB 	 Win11 Pro
+N5800-GD70-OU02 	 i7-1355U 	 8GB 	 512GB 	 Win11 Home
+N5800-GD70-PU02 	 i7-1355U 	 8GB 	 512GB 	 Win11 Pro
+N5800-GD70-OU03 	 i7-1355U 	 16GB 	 256GB 	 Win11 Home
+N5800-GD70-PU03 	 i7-1355U 	 16GB 	 256GB 	 Win11 Pro
+N5800-GD70-OU04 	 i7-1355U 	 16GB 	 512GB 	 Win11 Home
+N5800-GD70-PU04 	 i7-1355U 	 16GB 	 512GB 	 Win11 Pro
+N5800-GD70-OU05 	 i7-1355U 	 16GB 	 1TB 	 Win11 Home
+N5800-GD70-PU05 	 i7-1355U 	 16GB 	 1TB 	 Win11 Pro
+
+12th Rev.) Addition of derivative models(24-009350-01-1 : 2024.02.14.)
+- Added derivative models
+
+Model 	 CPU 	 MEM 	 SSD 	 OS
+
+N5800-GD70-OU06 	 i7-1355U 	 32GB 	 1TB 	 Win11 Home
+N5800-GD70-PU06 	 i7-1355U 	 32GB 	 1TB 	 Win11 Pro
+
+13th Rev.) Addition of ciritical component (24-074579-01-1 : 2024.11.20.)
+- Battery pack [BMSPOW GREEN ENERGY (JIANGXI) Limited / NL40BAT-4-50]
+
+14th Rev.) Addition of ciritical components and derivative models(25-077635-01-1 : 2026.01.07.)
+- Standard updated from KC 62368-1(2021-08) to KC 62368-1(2025-10)
+- Added alternate component: LCD panel [BOE / NV156FHM-N23],
+[Shenzhen Goodstar Technology Co., Ltd / LCM156CS017D]
+
+12/13
+
+※ 위 마크는 추후 전자확인증 대조 프로그램에서 원본대조시 사용되는 2D코드입니다.

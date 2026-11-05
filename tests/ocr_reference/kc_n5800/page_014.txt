@@ -1,0 +1,62 @@
+ktl Korea Testing Laboratory
+
+신고번호: ZH10003-20001N
+Application No.
+
+변경발급 내용
+Contents of Certificate Revisions
+
+8th Rev.) Correction of derivative models (22-067141-01-1 : 2022.11.03.)
+
+N5800-GB50-PU10
+N5800-GB70-PU10 	 i5-1135G7
+i7-1165G7 	 8 GB 	 N/A 	 256 GB 	 Win11 Pro
+N5800-GB50-PU11
+N5800-GB70-PU11 	 i5-1135G7
+i7-1165G7 	 8 GB 	 1 TB 	 256 GB 	 Win11 Pro
+N5800-GB50-PU12
+N5800-GB70-PU12 	 i5-1135G7
+i7-1165G7 	 8 GB 	 N/A 	 512 GB 	 Win11 Pro
+N5800-GB50-PU13
+N5800-GB70-PU13 	 i5-1135G7
+i7-1165G7 	 16 GB 	 N/A 	 512 GB 	 Win11 Pro
+
+9th Rev.) Addition of models and alternate components (22-076767-01-1 : 2023.01.11.)
+- Added alternate componet: LCD panel (NV156FHM-N48), Battery pack(NL40BAT-4)
+- Added derivative models (No difference in PCB board between these new models.)
+
+Model 	 CPU 	 MEM 	 HDD 	 SSD 	 Battery 	 OS
+
+N5800-GC70-PU99 	 i7-1255U 	 32G 	 1TB 	 – 	 36Wh 	 Win11 Pro
+N5800-GC50-OU01 	 i5-1235U 	 8G 	 – 	 256G 	 36Wh 	 Win11 Home
+N5800-GC50-OU31 	 i5-1235U 	 8G 	 – 	 256G 	 48Wh 	 Win11 Home
+N5800-GC50-PU01 	 i5-1235U 	 8G 	 – 	 256G 	 36Wh 	 Win11 Pro
+N5800-GC50-PU31 	 i5-1235U 	 8G 	 – 	 256G 	 48Wh 	 Win11 Pro
+N5800-GC50-OU02 	 i5-1235U 	 8G 	 1TB 	 256G 	 36Wh 	 Win11 Home
+N5800-GC50-PU02 	 i5-1235U 	 8G 	 1TB 	 256G 	 36Wh 	 Win11 Pro
+N5800-GC50-OU03 	 i5-1235U 	 8G 	 – 	 512G 	 36Wh 	 Win11 Home
+N5800-GC50-OU33 	 i5-1235U 	 8G 	 – 	 512G 	 48Wh 	 Win11 Home
+N5800-GC50-PU03 	 i5-1235U 	 8G 	 – 	 512G 	 36Wh 	 Win11 Pro
+N5800-GC50-PU33 	 i5-1235U 	 8G 	 – 	 512G 	 48Wh 	 Win11 Pro
+N5800-GC50-OU04 	 i5-1235U 	 16G 	 – 	 512G 	 36Wh 	 Win11 Home
+N5800-GC50-OU34 	 i5-1235U 	 16G 	 – 	 512G 	 48Wh 	 Win11 Home
+N5800-GC50-PU04 	 i5-1235U 	 16G 	 – 	 512G 	 36Wh 	 Win11 Pro
+N5800-GC50-PU34 	 i5-1235U 	 16G 	 – 	 512G 	 48Wh 	 Win11 Pro
+N5800-GC70-OU01 	 i7-1255U 	 8G 	 – 	 256G 	 36Wh 	 Win11 Home
+N5800-GC70-OU31 	 i7-1255U 	 8G 	 – 	 256G 	 48Wh 	 Win11 Home
+N5800-GC70-PU01 	 i7-1255U 	 8G 	 – 	 256G 	 36Wh 	 Win11 Pro
+N5800-GC70-PU31 	 i7-1255U 	 8G 	 – 	 256G 	 48Wh 	 Win11 Pro
+N5800-GC70-OU02 	 i7-1255U 	 8G 	 1TB 	 256G 	 36Wh 	 Win11 Home
+N5800-GC70-PU02 	 i7-1255U 	 8G 	 1TB 	 256G 	 36Wh 	 Win11 Pro
+N5800-GC70-OU03 	 i7-1255U 	 8G 	 – 	 512G 	 36Wh 	 Win11 Home
+N5800-GC70-OU33 	 i7-1255U 	 8G 	 – 	 512G 	 48Wh 	 Win11 Home
+N5800-GC70-PU03 	 i7-1255U 	 8G 	 – 	 512G 	 36Wh 	 Win11 Pro
+N5800-GC70-PU33 	 i7-1255U 	 8G 	 – 	 512G 	 48Wh 	 Win11 Pro
+N5800-GC70-OU04 	 i7-1255U 	 16G 	 – 	 512G 	 36Wh 	 Win11 Home
+N5800-GC70-OU34 	 i7-1255U 	 16G 	 – 	 512G 	 48Wh 	 Win11 Home
+N5800-GC70-PU04 	 i7-1255U 	 16G 	 – 	 512G 	 36Wh 	 Win11 Pro
+N5800-GC70-PU34 	 i7-1255U 	 16G 	 – 	 512G 	 48Wh 	 Win11 Pro
+
+11/13
+
+※ 위 마크는 추후 전자확인증 대조 프로그램에서 원본대조시 사용되는 2D코드입니다.

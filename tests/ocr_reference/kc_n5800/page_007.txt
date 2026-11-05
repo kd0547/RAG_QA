@@ -1,0 +1,43 @@
+ktl Korea Testing Laboratory
+
+신고번호: ZH10003-20001N
+Application No.
+
+파생모델명 Derivative model 	 기본모델과의 차이점 Differences between the basic and derivative model(s)
+
+N5800-GB70-OU02 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-PU02 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-OU03 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-PU03 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-OU04 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-PU04 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-OU05 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-PU05 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-OU06 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-PU06 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-OU07 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-PU07 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-OU08 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-PU08 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-OU09 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-PU09 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-OU99 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-PU99 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-G050-PU05 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-G050-PU06 	 Same as basic model except for specification(CPU, MEM, SSD, OS)
+N5800-G050-PU07 	 Same as basic model except for specification(CPU, MEM, HDD, OS)
+N5800-GB50-PU06 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB50-PU07 	 Same as basic model except for specification(CPU, MEM, SSD, OS)
+N5800-GB50-PU08 	 Same as basic model except for specification(CPU, MEM, HDD, OS)
+N5800-GB50-PU09 	 Same as basic model except for specification(CPU, MEM, HDD, OS)
+N5800-GB70-PU10 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS)
+N5800-GB70-PU11 	 Same as basic model except for specification(CPU, MEM, SSD, OS)
+N5800-GB70-PU12 	 Same as basic model except for specification(CPU, MEM, HDD, OS)
+N5800-GB70-PU13 	 Same as basic model except for specification(CPU, MEM, HDD, OS)
+N5800-GC70-PU99 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-OU01 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+N5800-GC50-OU31 	 Same as basic model except for specification(CPU, MEM, HDD, SSD, OS) and some parts in PCB boards
+
+4/13
+
+※ 위 마크는 추후 전자확인증 대조 프로그램에서 원본대조시 사용되는 2D코드입니다.

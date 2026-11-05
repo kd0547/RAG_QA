@@ -37,7 +37,7 @@ def parse_file(file_path: str | Path) -> list[PageText]:
     if ext in _MARKDOWN_PARSERS:
         return [PageText(page=1, text=_load(*_MARKDOWN_PARSERS[ext])(str(file_path)))]
     if ext in _IMAGE_EXTENSIONS:
-        from ocr.llm_ocr import ocr_image
+        from ocr.provider import ocr_image
         return [PageText(page=1, text=ocr_image(file_path.read_bytes()))]
 
     raise ValueError(

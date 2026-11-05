@@ -1,0 +1,29 @@
+안전인증 및 자율안전확인을 받은 자의 유의사항
+Notification for recipient (license holder) of
+Safety Certification and Confirmation Letter of Declaration
+
+1. 본 인증서 또는 신고증명서는 기재된 제조공장에서 생산된 제품으로서 적용된 안전기준에 적합한 경우에 한하여 유효합니다. (This certificate or confirmation letter of declaration is valid only when the product meets the applied safety standard(s) and is manufactured for m the manufacturing factory that appears on this certificate.)
+
+2. 안전인증 또는 안전확인 마크는 본래의 의미와 다르게 사용자가 오해를 일으킬 수 있는 방법으로 광고, 카탈로그 등에 사용하면 인증정지 또는 취소의 사유가 됩니다. (Termination or cancellation of the certification may occur if the actual meaning of this safety certification mark(KC-mark) or Confirmation Letter of Declaration mark(KC-mark) is misled to the public by false advertisement on a overstated catalog of the product.)
+
+3. 다음과 같은 사유가 발생할 경우에는 사유가 발생한 날로부터 15일 이내에 안전인증기관에 안전인증 또는 안전확인 변경 신청을 하여 안전인증서 또는 안전확인신고 증명서를 재교부 받아야 합니다. (In case of the following events, this safety certificate or Confirmation Letter of Declaration shall be reapplied within 15 days from the events and reissued for revision.)
+
+1) 제조업자, 수입업자, 주소 등 인증서 기재내용의 변경 (Revision in contents of the certificate such as factory name, importer, factory address, etc)
+2) 파생모델의 추가, 변경 또는 삭제 (Adds, changes, or removals of derivative(minor series) model)
+
+3) 안전관리부품의 변경 또는 추가 (Adds or changes in critical components list)
+
+4) 인증서 또는 신고증명서의 분실 또는 훼손 (Losses or damages to this certificate or confirmation letter of declaration)
+
+4. 안전인증 또는 안전확인을 받은 자는 다음 사항을 이행하여야 합니다. (The recipient (license holder) of safety certificate(KC-mark) or confirmation letter of declaration shall comply with the followings.)
+
+1) 안전인증표시 등 인증요건의 유지 관리 (Maintaining and managing the marking of safety certification and other certification requirements)
+※ 안전인증을 받기 이전 또는 정지, 취소된 이후 생산된 제품에 안전 표시를 하면 법에 의거 처벌을 받게 됨 (It will be punished by the Act if the certification mark is used before the issue(or after suspension or cancellation) of the certification)
+2) 자체검사의 실시 및 그 기록관리 (Self Product Verification and record keeping)
+※ 안전인증을 받은 자는 제품검사를 철저히 실시하여 제품의 품질이 안전기준에 미달되지 않도록 유의 (Recipients(license holder) of the safety certification (KC-mark) shall conduct products inspection strictly for products to comply with the safety standard.)
+
+5. 안전인증을 받은 자는 전기용품 및 생활용품 안전관리법 제7조 1항 및 동법 시행령 제9조에 의거 2년에 1회 정기검사를 받아야 합니다. (Recipients(license holder) of the safety certification (KC-mark) shall receive routine(regular) factory inspection once every two years according to the Electrical Appliances and Consumer products Safety Control Act article 7(1) and article 9 of Enforcement decree of the same Act.)
+(연락처: 인증융합센터, Tel 055-791-3400, 3401)
+(Contact point: Certification Evaluation Center Tel: +82 55 791 3400, 3401)
+
+※ 위 마크는 추후 전자확인증 대조 프로그램에서 원본대조시 사용되는 2D코드입니다.

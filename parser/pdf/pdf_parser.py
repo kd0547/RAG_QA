@@ -8,7 +8,7 @@ import pymupdf
 from pymupdf4llm import to_json,to_markdown
 from pypdf import PdfReader
 
-from ocr.llm_ocr import ocr_image
+from ocr.provider import ocr_image
 from parser.pdf.type import Box, Document, Page, PageText
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

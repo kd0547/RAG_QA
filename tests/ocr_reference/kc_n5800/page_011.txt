@@ -1,0 +1,64 @@
+ktl Korea Testing Laboratory
+
+신고번호: ZH10003-20001N
+Application No.
+
+□ 첨부 3: 안전확인신고 내용의 변경 현황
+Revisions Status
+
+변경발급 내용
+Contents of Certificate Revisions
+
+1st Rev.) Addition of alternate AC/DC adaptor (20-034796-01-1 : 2020.06.09.)
+
+2nd Rev.) Addition of derivative models (20-043710-01-1 : 2020.07.16.)
+
+- Added: N5800-G050-OU01, N5800-G050-PU01, N5800-G050-OU02, N5800-G050-PU02
+N5800-G050-OU03, N5800-G050-PU03, N5800-G050-OU04, N5800-G050-PU04,
+N5800-G070-OU01, N5800-G070-PU01, N5800-G070-OU02, N5800-G070-PU02
+N5800-G070-OU03, N5800-G070-PU03, N5800-G070-OU01, N5800-G070-PU01
+
+Model 	 CPU 	 MEM 	 HDD 	 SSD 	 OS
+
+N5800 	 i7-10510U 	 8+8GB 	 1TB 	 512GB 	 Win10 Pro
+N5800-G050-OU01 	 i5-10210U 	 8GB 	 N/A 	 256GB 	 Win10 Home
+N5800-G050-PU01 	 i5-10210U 	 8GB 	 N/A 	 256GB 	 Win10 Pro
+N5800-G050-OU02 	 i5-10210U 	 8GB 	 1TB 	 256GB 	 Win10 Home
+N5800-G050-PU02 	 i5-10210U 	 8GB 	 1TB 	 256GB 	 Win10 Pro
+N5800-G050-OU03 	 i5-10210U 	 8GB 	 N/A 	 512GB 	 Win10 Home
+N5800-G050-PU03 	 i5-10210U 	 8GB 	 N/A 	 512GB 	 Win10 Pro
+N5800-G050-OU04 	 i5-10210U 	 8GB 	 1TB 	 512GB 	 Win10 Home
+N5800-G050-PU04 	 i5-10210U 	 8GB 	 1TB 	 512GB 	 Win10 Pro
+N5800-G070-OU01 	 i7-10510U 	 8GB 	 N/A 	 256GB 	 Win10 Home
+N5800-G070-PU01 	 i7-10510U 	 8GB 	 N/A 	 256GB 	 Win10 Pro
+N5800-G070-OU02 	 i7-10510U 	 8GB 	 1TB 	 256GB 	 Win10 Home
+N5800-G070-PU02 	 i7-10510U 	 8GB 	 1TB 	 256GB 	 Win10 Pro
+N5800-G070-OU03 	 i7-10510U 	 8GB 	 N/A 	 512GB 	 Win10 Home
+N5800-G070-PU03 	 i7-10510U 	 8GB 	 N/A 	 512GB 	 Win10 Pro
+N5800-G070-OU04 	 i7-10510U 	 8GB 	 1TB 	 512GB 	 Win10 Home
+N5800-G070-PU04 	 i7-10510U 	 8GB 	 1TB 	 512GB 	 Win10 Pro
+
+3rd Rev.) Addition of alternate component and derivative models (20-069533-01-1 : 2020.11.06.)
+
+- Added alternate componet: LCD panel (Model: LP156WFC)
+
+- Added derivative models:
+
+N5800-G030-OU01, N5800-G030-PU01, N5800-G030-OU02, N5800-G030-PU02
+
+Model 	 CPU 	 MEM 	 HDD 	 SSD 	 OS
+
+N5800-G030-OU01 	 i3-10110U 	 8GB 	 N/A 	 256GB 	 Win10 Home
+N5800-G030-PU01 	 i3-10110U 	 8GB 	 N/A 	 256GB 	 Win10 Pro
+N5800-G030-OU02 	 i3-10110U 	 8GB 	 1TB 	 256GB 	 Win10 Home
+N5800-G030-PU02 	 i3-10110U 	 8GB 	 1TB 	 256GB 	 Win10 Pro
+
+4th Rev.) Addition of alternate components (21-023085-01-1 : 2021.05.03.)
+
+- LCD panel: LM156LF5L06 (CEC PANDA FPD)
+
+- Battery pack: NL40BAT-3 (Getac Technology (Kunshan) Co., Ltd.)
+
+8/13
+
+※ 위 마크는 추후 전자확인증 대조 프로그램에서 원본대조시 사용되는 2D코드입니다.

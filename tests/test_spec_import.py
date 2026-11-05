@@ -243,11 +243,11 @@ def client(tmp_path, monkeypatch):
 def test_parse_image_uses_vlm_ocr(client, monkeypatch):
     """화면 캡처는 ocr_image 결과(마크다운 표)를 표로 읽는다. 표가 아닌 앞뒤 글은 버린다."""
     c, _ = client
-    fake = ModuleType("ocr.llm_ocr")
+    fake = ModuleType("ocr.provider")
     fake.ocr_image = lambda content: (
         "## SSD 비교표\n\n| 항목 | PM9A1 512GB | 980 PRO 1TB |\n|---|---|---|\n| 용량 | 512GB | 1TB |\n| Req. Read | 6,900MB/s | 7,000MB/s |\n\n(설명: 표 캡처)"
     )
-    monkeypatch.setitem(sys.modules, "ocr.llm_ocr", fake)
+    monkeypatch.setitem(sys.modules, "ocr.provider", fake)
 
     response = c.post(
         "/specs/import/parse",

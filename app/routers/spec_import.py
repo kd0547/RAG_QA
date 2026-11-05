@@ -31,7 +31,7 @@ IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"})
 
 def _recognize_table_image(content: bytes) -> str:
     """화면 캡처 같은 표 이미지를 VLM OCR(ocr/llm_ocr.py)로 읽어 표 텍스트만 돌려준다."""
-    from ocr.llm_ocr import ocr_image  # LLM 모듈은 쓸 때만 불러온다
+    from ocr.provider import ocr_image  # 환경변수로 선택한 OCR 백엔드
 
     return extract_table_text(ocr_image(content))
 

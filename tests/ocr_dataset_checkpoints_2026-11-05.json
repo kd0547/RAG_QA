@@ -1,0 +1,38 @@
+{
+  "method": "Each literal was checked visually on the specified source image; this is a 28-item spot check, not full character accuracy. Whitespace and compatible glyphs are normalized, while spelling and case remain significant.",
+  "checks": [
+    {"source": "AI 제품 및 서비스 확인제 가이드라인(기업용)_통합본(260721).pdf", "page": 2, "expected": "제도 소개"},
+    {"source": "AI 제품 및 서비스 확인제 가이드라인(기업용)_통합본(260721).pdf", "page": 2, "expected": "인정"},
+    {"source": "AI 제품 및 서비스 확인제 가이드라인(기업용)_통합본(260721).pdf", "page": 2, "expected": "인공지능 기능 확인"},
+    {"source": "AI 제품 및 서비스 확인제 가이드라인(기업용)_통합본(260721).pdf", "page": 2, "expected": "기타 28"},
+
+    {"source": "N5800_14세대__Sales_Guide_V1.1_20260922.pdf", "page": 1, "expected": "노트북 컴퓨터 N5800"},
+    {"source": "N5800_14세대__Sales_Guide_V1.1_20260922.pdf", "page": 1, "expected": "관리번호 TG-R&D팀-2602M0001"},
+    {"source": "N5800_14세대__Sales_Guide_V1.1_20260922.pdf", "page": 5, "expected": "오른쪽 면"},
+    {"source": "N5800_14세대__Sales_Guide_V1.1_20260922.pdf", "page": 5, "expected": "왼쪽 면"},
+    {"source": "N5800_14세대__Sales_Guide_V1.1_20260922.pdf", "page": 5, "expected": "RJ-45 LAN 커넥터"},
+    {"source": "N5800_14세대__Sales_Guide_V1.1_20260922.pdf", "page": 5, "expected": "Micro SD 카드리더"},
+
+    {"source": "TG_AI_Board_확인신청서_검토(빨강 보강).pdf", "page": 1, "expected": "TG AI Board"},
+    {"source": "TG_AI_Board_확인신청서_검토(빨강 보강).pdf", "page": 1, "expected": "RAG 기반 정보검색"},
+    {"source": "TG_AI_Board_확인신청서_검토(빨강 보강).pdf", "page": 1, "expected": "세부품명번호 10자리"},
+    {"source": "TG_AI_Board_확인신청서_검토(빨강 보강).pdf", "page": 1, "expected": "물품식별번호 8자리"},
+
+    {"source": "노트북 입찰 사양.jpg", "page": 1, "expected": "2,811대"},
+    {"source": "노트북 입찰 사양.jpg", "page": 1, "expected": "주기억장치(RAM)"},
+    {"source": "노트북 입찰 사양.jpg", "page": 1, "expected": "무선LAN 기능 제거"},
+    {"source": "노트북 입찰 사양.jpg", "page": 1, "expected": "복구모드(Recovery Mode) 기능 제거"},
+    {"source": "노트북 입찰 사양.jpg", "page": 1, "expected": "블루투스, 무선데이터통신(5G, 3G, LTE) 기능 제거"},
+    {"source": "노트북 입찰 사양.jpg", "page": 1, "expected": "2kg 이하"},
+
+    {"source": "시험성적서(LME186-A701).pdf", "page": 2, "expected": "26-061027-01-1"},
+    {"source": "시험성적서(LME186-A701).pdf", "page": 2, "expected": "MI 3325"},
+    {"source": "시험성적서(LME186-A701).pdf", "page": 2, "expected": "RTX 5070"},
+    {"source": "시험성적서(LME186-A701).pdf", "page": 2, "expected": "시험결과"},
+
+    {"source": "진에어 - 2026-10-28.pdf", "page": 1, "expected": "객실 1개 x 4박"},
+    {"source": "진에어 - 2026-10-28.pdf", "page": 1, "expected": "JIN AIR 367"},
+    {"source": "진에어 - 2026-10-28.pdf", "page": 1, "expected": "JIN AIR 368"},
+    {"source": "진에어 - 2026-10-28.pdf", "page": 1, "expected": "스탠다드 더블룸"}
+  ]
+}

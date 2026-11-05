@@ -1,0 +1,42 @@
+ktl Korea Testing Laboratory
+
+신고번호: ZH10003-20001N
+Application No.
+
+변경발급 내용
+Contents of Certificate Revisions
+
+- Added derivative models
+
+Model 	 CPU 	 MEM 	 SSD 	 OS
+
+N5800-GE50-OU01 	 Core 5 120U 	 8GB 	 256GB 	 Win11 Home
+N5800-GE50-PU01 	 Core 5 120U 	 8GB 	 256GB 	 Win11 Pro
+N5800-GE50-OU02 	 Core 5 120U 	 8GB 	 512GB 	 Win11 Home
+N5800-GE50-PU02 	 Core 5 120U 	 8GB 	 512GB 	 Win11 Pro
+N5800-GE50-OU03 	 Core 5 120U 	 16GB 	 256GB 	 Win11 Home
+N5800-GE50-PU03 	 Core 5 120U 	 16GB 	 256GB 	 Win11 Pro
+N5800-GE50-OU04 	 Core 5 120U 	 16GB 	 512GB 	 Win11 Home
+N5800-GE50-PU04 	 Core 5 120U 	 16GB 	 512GB 	 Win11 Pro
+N5800-GE50-OU05 	 Core 5 120U 	 16GB 	 1TB 	 Win11 Home
+N5800-GE50-PU05 	 Core 5 120U 	 16GB 	 1TB 	 Win11 Pro
+N5800-GE50-OU06 	 Core 5 120U 	 32GB 	 1TB 	 Win11 Home
+N5800-GE50-PU06 	 Core 5 120U 	 32GB 	 1TB 	 Win11 Pro
+N5800-GE70-OU01 	 Core 7 150U 	 8GB 	 256GB 	 Win11 Home
+N5800-GD70-PU01 	 Core 7 150U 	 8GB 	 256GB 	 Win11 Pro
+N5800-GE70-OU02 	 Core 7 150U 	 8GB 	 512GB 	 Win11 Home
+N5800-GE70-PU02 	 Core 7 150U 	 8GB 	 512GB 	 Win11 Pro
+N5800-GE70-OU03 	 Core 7 150U 	 16GB 	 256GB 	 Win11 Home
+N5800-GE70-PU03 	 Core 7 150U 	 16GB 	 256GB 	 Win11 Pro
+N5800-GE70-OU04 	 Core 7 150U 	 16GB 	 512GB 	 Win11 Home
+N5800-GE70-PU04 	 Core 7 150U 	 16GB 	 512GB 	 Win11 Pro
+N5800-GE70-OU05 	 Core 7 150U 	 16GB 	 1TB 	 Win11 Home
+N5800-GE70-PU05 	 Core 7 150U 	 16GB 	 1TB 	 Win11 Pro
+N5800-GE70-OU06 	 Core 7 150U 	 32GB 	 1TB 	 Win11 Home
+N5800-GE70-PU06 	 Core 7 150U 	 32GB 	 1TB 	 Win11 Pro
+
+FP511-06-01
+
+13/13
+
+※ 위 마크는 추후 전자확인증 대조 프로그램에서 원본대조시 사용되는 2D코드입니다.

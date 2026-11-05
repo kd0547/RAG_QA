@@ -25,6 +25,24 @@ CLAUDE_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # Claude 모드 모델 (API 키는 langchain-anthropic이 ANTHROPIC_API_KEY로 읽는다)
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
 
+# ---------- OCR ----------
+# 환경변수/.env 변경 후 프로세스를 재시작한다. 기본값은 기존 LLM 방식.
+OCR_BACKEND = os.getenv("OCR_BACKEND", "llm")
+_PROJECT_ROOT = Path(__file__).resolve().parent
+PADDLEOCR_HOME = Path(os.getenv("PADDLEOCR_HOME", str(_PROJECT_ROOT.parent / "paddleocr_vl_test")))
+PADDLEOCR_PYTHON = os.getenv("PADDLEOCR_PYTHON", str(
+    PADDLEOCR_HOME / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+))
+PADDLEOCR_VL_MODEL_DIR = os.getenv("PADDLEOCR_VL_MODEL_DIR", str(
+    PADDLEOCR_HOME / "models/paddlex/official_models/PaddleOCR-VL-1.6"
+))
+PADDLEOCR_LAYOUT_MODEL_DIR = os.getenv("PADDLEOCR_LAYOUT_MODEL_DIR", str(
+    PADDLEOCR_HOME / "models/paddlex/official_models/PP-DocLayoutV3"
+))
+PADDLEOCR_DEVICE = os.getenv("PADDLEOCR_DEVICE", "gpu:0")
+PADDLEOCR_TIMEOUT = float(os.getenv("PADDLEOCR_TIMEOUT", "300"))
+PADDLEOCR_CACHE_DIR = _PROJECT_ROOT / os.getenv("PADDLEOCR_CACHE_DIR", "temp/paddleocr")
+
 
 
 # ---------- 메일 ----------

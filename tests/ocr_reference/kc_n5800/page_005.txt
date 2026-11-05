@@ -1,0 +1,39 @@
+ktl Korea Testing Laboratory
+
+신고번호: ZH10003-20001N
+Application No.
+
+부품명(회로기호) Component(Part no.) 	 제조자(상표명) Manufacturer(Brand) 	 모델명(형식) Model(Type) 	 정격 또는 특성 Rating or Characteristics 	 인증마크 Tested by
+
+(Alternate) 	 AUO 	 B156HAN02.1 	 344 ㎜(H) X 193 ㎜(V) (15.6 inch) LED Backlight 	 Tested with appliance
+(Alternate) 	 BOE 	 NV156FHM-N48 	 344 ㎜(H) X 193 ㎜(V) (15.6 inch) LED Backlight 	 Tested with appliance
+(Alternate) 	 Innolux 	 N156HCA-EAB 	 344 ㎜(H) X 193 ㎜(V) (15.6 inch) LED Backlight 	 Tested with appliance
+(Alternate) 	 BOE 	 NV156FHM-N23 	 344 ㎜(H) X 193 ㎜(V) (15.6 inch) LED Backlight 	 Tested with appliance
+(Alternate) 	 Shenzhen Goodstar Technology Co., Ltd 	 LCM156CS017D 	 344 ㎜(H) X 193 ㎜(V) (15.6 inch) LED Backlight 	 Tested with appliance
+DC FAN 	 WinMa Electronics Technology Co., Ltd. 	 EGC-60050V1-0AH 	 DC5 V, 0.5 A, 3.3 CFM min 	 Tested with appliance
+PCB 	 Interchangeable 	 Interchangeable 	 Min. V-0, Min. 130 ℃ 	 UL
+Metal Enclosure 	 Interchangeable 	 Interchangeable 	 Metal, Min. 0.8 ㎜ Thinkness 	 UL
+Plastic Enclosure 	 SABIC JAPAN L L C 	 C7230P (X) 	 V-0, Min 1.2 ㎜ Thinkness 	 UL
+(Alternate) 	 Covestro Deutschland AG 	 FR3002 + 	 V-0, Min 1.0 ㎜ Thinkness 	 UL
+(Alternate) 	 Covestro Deutschland AG 	 FR3021 + 	 V-0, Min 1.5 ㎜ Thinkness 	 UL
+(Alternate) 	 Covestro Deutschland AG 	 FR3008 + 	 V-0, Min 1.5 ㎜ Thinkness 	 UL
+
+☐ 유의사항 (Attention) :
+
+1. 안전관리부품은 전기적인 안전에 직접적인 영향을 주는 부품으로서 안전인증기관이 정기공장검사 시 확인
+관리 하는 사항입니다. 따라서 상기목록에 기재된 사항을 변경하거나 또는 복수등재를 원하시는 경우는
+안전인증기관에 인증변경신청을 하여야 합니다.
+
+As the "Critical components" are parts in directly related with safety, these components shall be checked during a factory inspection by the certification body. In case of applying multiple listing or changing the items above, the certification revision shall be applied.
+
+2. 인증변경신청 없이 임의로 변경하는 경우는, 전기용품 및 생활용품 안전관리법 시행규칙 제 21 조제 1 항
+또는 제 38 조제 1 항 규정에 의한 안전인증 취소 혹은 안전확인신고 효력상실 사유가 됨을 유의하시기
+바랍니다.
+
+The Safety Certification will be cancelled under the Article 21(1), 38(1) of the Enforcement Rule of the Electrical appliances and Consumer Products Safety Control Act if the contents of the Certification is altered without our authorization.
+
+FP511-04-02
+
+2/13
+
+※ 위 마크는 추후 전자확인증 대조 프로그램에서 원본대조시 사용되는 2D코드입니다.
