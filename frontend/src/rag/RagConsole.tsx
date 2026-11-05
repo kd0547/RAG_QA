@@ -10,7 +10,7 @@ import { GroupHome } from './GroupHome';
 import { GroupInfoSidebar } from './GroupInfoSidebar';
 import { ragApi } from './api';
 import type { AskMode, AskSource, FileDetail, FileGroup, FileSummary, UploadResult } from './types';
-import { AlertIcon, CloseIcon, DocumentIcon, UploadIcon } from '../components/icons';
+import { AlertIcon, CloseIcon, DocumentIcon, ImageIcon, PaperclipIcon, UploadIcon } from '../components/icons';
 
 /**
  * TG RAG 콘솔
@@ -37,6 +37,45 @@ const UPLOAD_EXTENSIONS = [
 function fileExt(name: string): string {
     const i = name.lastIndexOf('.');
     return i < 0 ? '' : name.slice(i).toLowerCase();
+}
+
+/** 질문에 붙일 수 있는 첨부 한도 (백엔드 app/routers/questions.py 의 MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES 와 맞춘다) */
+const ASK_ATTACHMENT_MAX = 5;
+const ASK_ATTACHMENT_MAX_BYTES = 20 * 1024 ** 2;
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']);
+let nextAttachmentId = 0;
+
+/** 질문에 붙인 파일 하나. 이미지는 보낸 뒤에도 말풍선에 보여주려고 object URL을 들고 있는다 */
+interface QaAttachment {
+    id: string;
+    file: File;
+    isImage: boolean;
+    previewUrl: string | null;
+}
+
+function toQaAttachment(file: File): QaAttachment {
+    const isImage = IMAGE_EXTENSIONS.has(fileExt(file.name)) || file.type.startsWith('image/');
+    return {
+        id: `att-${nextAttachmentId++}`,
+        file,
+        isImage,
+        previewUrl: isImage ? URL.createObjectURL(file) : null,
+    };
+}
+
+function releaseAttachments(attachments: QaAttachment[]) {
+    for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+}
+
+/** 클립보드로 붙여넣은 캡처는 이름이 image.png 로만 오므로 시각을 붙여 구분한다 */
+function namePastedFile(file: File): File {
+    if (file.name && file.name !== 'image.png' && file.name !== 'image.jpg') return file;
+    const ext = file.type === 'image/jpeg' ? '.jpg' : fileExt(file.name) || '.png';
+    const now = new Date();
+    const stamp = [now.getFullYear(), now.getMonth() + 1, now.getDate(), now.getHours(), now.getMinutes(), now.getSeconds()]
+        .map((n, i) => String(n).padStart(i === 0 ? 4 : 2, '0'))
+        .join('');
+    return new File([file], `캡처_${stamp}${ext}`, { type: file.type });
 }
 
 function formatBytes(bytes: number): string {
@@ -933,6 +972,7 @@ interface QaTurn {
     queryTopN: number;
     rerankTopN: number;
     askedAt: string;
+    attachments: QaAttachment[];
     status: 'pending' | 'done' | 'error';
     answer?: string;
     sources?: AskSource[];
@@ -963,9 +1003,14 @@ function Workspace({
     }, []);
     const [queryTopN, setQueryTopN] = useState(5);
     const [rerankTopN, setRerankTopN] = useState(3);
+    // 질문에 붙일 파일·이미지. 보내면 그 턴으로 옮겨가고 입력창에서는 비워진다
+    const [attachments, setAttachments] = useState<QaAttachment[]>([]);
+    const [attachError, setAttachError] = useState<string | null>(null);
+    const [dragging, setDragging] = useState(false);
 
     const logRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // 리랭킹은 검색 결과의 부분집합이므로 rerank_top_n <= query_top_n 이어야 한다
     const paramInvalid = rerankTopN > queryTopN;
@@ -985,10 +1030,54 @@ function Workspace({
         el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }, [question]);
 
+    /** 파일 선택·붙여넣기·드롭으로 들어온 파일을 첨부 목록에 더한다. 한도를 넘거나 형식이 안 맞으면 그 파일만 빼고 이유를 보여준다 */
+    const addAttachments = useCallback((incoming: Iterable<File>) => {
+        const files = Array.from(incoming);
+        if (files.length === 0) return;
+        const problems: string[] = [];
+        setAttachments((prev) => {
+            const next = [...prev];
+            for (const raw of files) {
+                const file = namePastedFile(raw);
+                if (!UPLOAD_EXTENSIONS.includes(fileExt(file.name))) {
+                    problems.push(`${file.name}: 지원하지 않는 형식`);
+                    continue;
+                }
+                if (file.size > ASK_ATTACHMENT_MAX_BYTES) {
+                    problems.push(`${file.name}: ${formatBytes(file.size)} (20MB 이하만 가능)`);
+                    continue;
+                }
+                if (next.some((a) => a.file.name === file.name && a.file.size === file.size)) continue;
+                if (next.length >= ASK_ATTACHMENT_MAX) {
+                    problems.push(`첨부는 ${ASK_ATTACHMENT_MAX}개까지 붙일 수 있습니다`);
+                    break;
+                }
+                next.push(toQaAttachment(file));
+            }
+            return next;
+        });
+        setAttachError(problems.length ? problems.join(' · ') : null);
+    }, []);
+
+    const removeAttachment = (id: string) => {
+        setAttachments((prev) => {
+            const target = prev.find((a) => a.id === id);
+            if (target) releaseAttachments([target]);
+            return prev.filter((a) => a.id !== id);
+        });
+        setAttachError(null);
+    };
+
+    const clearTurns = () => {
+        for (const t of turns) releaseAttachments(t.attachments);
+        setTurns([]);
+    };
+
     const ask = async () => {
         const q = question.trim();
         if (!q || paramInvalid || busy) return;
 
+        const sent = attachments;
         const turn: QaTurn = {
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             question: q,
@@ -996,21 +1085,22 @@ function Workspace({
             queryTopN,
             rerankTopN,
             askedAt: new Date().toISOString(),
+            attachments: sent,
             status: 'pending',
         };
         setTurns((prev) => [...prev, turn]);
         setQuestion('');
+        setAttachments([]);
+        setAttachError(null);
 
         const patch = (fields: Partial<QaTurn>) =>
             setTurns((prev) => prev.map((t) => (t.id === turn.id ? { ...t, ...fields } : t)));
 
         try {
-            const res = await ragApi.ask({
-                question: q,
-                mode,
-                query_top_n: queryTopN,
-                rerank_top_n: rerankTopN,
-            });
+            const payload = { question: q, mode, query_top_n: queryTopN, rerank_top_n: rerankTopN };
+            const res = sent.length
+                ? await ragApi.askWithAttachments(payload, sent.map((a) => a.file))
+                : await ragApi.ask(payload);
             patch({ status: 'done', answer: res.answer, sources: res.sources });
         } catch (e) {
             patch({ status: 'error', error: errMessage(e) });
@@ -1035,7 +1125,7 @@ function Workspace({
                             </span>
                             <button
                                 type="button"
-                                onClick={() => setTurns([])}
+                                onClick={clearTurns}
                                 disabled={busy}
                                 className="ml-auto h-7 px-2.5 rounded-lg font-semibold hover:text-ink hover:bg-chip disabled:opacity-40 transition-colors"
                             >
@@ -1051,14 +1141,52 @@ function Workspace({
                 )}
             </div>
 
-            {/* 떠 있는 입력창 */}
+            {/* 떠 있는 입력창 — 파일을 끌어다 놓거나 캡처를 붙여넣으면 첨부된다 */}
             <div className="shrink-0 px-4 pb-4 pt-1">
-                <div className="mx-auto w-full max-w-[760px] rounded-2xl bg-white border border-divide shadow-[0_8px_30px_rgba(20,28,43,0.10)] focus-within:border-brand/50 transition-colors">
+                <div
+                    onDragOver={(e) => {
+                        if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+                        e.preventDefault();
+                        setDragging(true);
+                    }}
+                    onDragLeave={(e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+                    }}
+                    onDrop={(e) => {
+                        e.preventDefault();
+                        setDragging(false);
+                        if (!busy) addAttachments(e.dataTransfer.files);
+                    }}
+                    className={`mx-auto w-full max-w-[760px] rounded-2xl bg-white border shadow-[0_8px_30px_rgba(20,28,43,0.10)] transition-colors ${
+                        dragging ? 'border-brand bg-brand-pale/40' : 'border-divide focus-within:border-brand/50'
+                    }`}
+                >
+                    {attachments.length > 0 && (
+                        <ul className="flex flex-wrap gap-2 px-3 pt-3">
+                            {attachments.map((a) => (
+                                <li key={a.id}>
+                                    <AttachmentChip attachment={a} onRemove={busy ? undefined : () => removeAttachment(a.id)} />
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                    {attachError && (
+                        <p role="alert" className="px-4 pt-2 text-[11.5px] text-danger break-words">
+                            {attachError}
+                        </p>
+                    )}
                     <textarea
                         ref={inputRef}
                         rows={1}
                         value={question}
                         onChange={(e) => setQuestion(e.target.value)}
+                        onPaste={(e) => {
+                            // 캡처 이미지를 Ctrl+V 로 바로 붙인다. 텍스트 붙여넣기는 그대로 둔다
+                            const files = Array.from(e.clipboardData.files);
+                            if (files.length === 0 || busy) return;
+                            e.preventDefault();
+                            addAttachments(files);
+                        }}
                         onKeyDown={(e) => {
                             // Enter 전송 · Shift+Enter 줄바꿈 (IME 조합 중에는 무시)
                             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -1066,10 +1194,39 @@ function Workspace({
                                 void ask();
                             }
                         }}
-                        placeholder={docCount > 0 ? '문서에 대해 질문하세요' : '문서를 올리거나, 서버에 있는 문서로 바로 질문하세요'}
+                        placeholder={
+                            attachments.length > 0
+                                ? '첨부한 파일에 대해 질문하세요'
+                                : docCount > 0
+                                  ? '문서에 대해 질문하세요. 사양서나 캡처를 붙여서 물어볼 수도 있습니다'
+                                  : '문서를 올리거나, 서버에 있는 문서로 바로 질문하세요'
+                        }
                         className="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14px] leading-[22px] placeholder:text-muted focus:outline-none"
                     />
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 pb-2.5 pt-1">
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            multiple
+                            accept={UPLOAD_EXTENSIONS.join(',')}
+                            className="hidden"
+                            onChange={(e) => {
+                                if (e.target.files) addAttachments(e.target.files);
+                                e.target.value = '';
+                            }}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={busy || attachments.length >= ASK_ATTACHMENT_MAX}
+                            title={`파일·사진 첨부 (${attachments.length}/${ASK_ATTACHMENT_MAX}) · 캡처는 Ctrl+V 로 붙여넣기`}
+                            aria-label="파일·사진 첨부"
+                            className={`h-7 w-7 rounded-lg inline-flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                                attachments.length > 0 ? 'text-brand bg-brand-pale' : 'text-muted enabled:hover:text-ink enabled:hover:bg-chip'
+                            }`}
+                        >
+                            <PaperclipIcon className="w-4 h-4" />
+                        </button>
                         <div className="flex p-0.5 rounded-lg bg-chip">
                             {(['claude', 'local'] as const).map((m) => (
                                 <button
@@ -1152,7 +1309,7 @@ function EmptyWorkspace({
             </p>
             <p className="mt-2 text-[13px] text-muted max-w-[360px] leading-relaxed">
                 {docCount > 0
-                    ? `업로드된 문서 ${docCount}건을 검색해 근거와 함께 답합니다.`
+                    ? `업로드된 문서 ${docCount}건을 검색해 근거와 함께 답합니다. 사양서나 캡처 이미지를 질문에 붙이면 그 내용과 대조해 답합니다.`
                     : '업로드한 문서를 근거로 답변합니다. 이미 서버에 문서가 있다면 바로 질문해도 됩니다.'}
             </p>
         </div>
@@ -1165,11 +1322,31 @@ function TurnView({ turn }: { turn: QaTurn }) {
         <article>
             {/* 질문 */}
             <div className="flex flex-col items-end">
+                {turn.attachments.length > 0 && (
+                    <ul className="max-w-[85%] mb-1.5 flex flex-wrap justify-end gap-2">
+                        {turn.attachments.map((a) => (
+                            <li key={a.id}>
+                                {a.previewUrl ? (
+                                    <a href={a.previewUrl} target="_blank" rel="noreferrer" title={`${a.file.name} · ${formatBytes(a.file.size)}`}>
+                                        <img
+                                            src={a.previewUrl}
+                                            alt={a.file.name}
+                                            className="max-h-40 max-w-[240px] rounded-xl border border-divide object-contain bg-white"
+                                        />
+                                    </a>
+                                ) : (
+                                    <AttachmentChip attachment={a} />
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                )}
                 <p className="max-w-[85%] rounded-2xl rounded-br-md bg-chip px-4 py-2.5 text-[14px] leading-[21px] whitespace-pre-wrap break-words">
                     {turn.question}
                 </p>
                 <span className="mt-1.5 text-[10.5px] text-muted tabular-nums">
-                    {MODE_LABEL[turn.mode]} · top {turn.queryTopN}/{turn.rerankTopN} · {fmtTime(turn.askedAt)}
+                    {MODE_LABEL[turn.mode]} · top {turn.queryTopN}/{turn.rerankTopN}
+                    {turn.attachments.length > 0 && ` · 첨부 ${turn.attachments.length}개`} · {fmtTime(turn.askedAt)}
                 </span>
             </div>
 
@@ -1182,7 +1359,7 @@ function TurnView({ turn }: { turn: QaTurn }) {
                     {turn.status === 'pending' && (
                         <div className="flex items-center gap-2.5 text-[13px] text-muted">
                             <span className="w-4 h-4 rounded-full border-2 border-brand-pale border-t-brand animate-spin" />
-                            문서를 찾아 답변을 만드는 중…
+                            {turn.attachments.length > 0 ? '첨부를 읽고 문서를 찾아 답변을 만드는 중…' : '문서를 찾아 답변을 만드는 중…'}
                         </div>
                     )}
 
@@ -1203,6 +1380,37 @@ function TurnView({ turn }: { turn: QaTurn }) {
                 </div>
             </div>
         </article>
+    );
+}
+
+/** 입력창과 질문 말풍선에 같이 쓰는 첨부 칩. onRemove 가 있으면 지우기 버튼이 붙는다 */
+function AttachmentChip({ attachment, onRemove }: { attachment: QaAttachment; onRemove?: () => void }) {
+    const { file, isImage, previewUrl } = attachment;
+    return (
+        <span
+            title={`${file.name} · ${formatBytes(file.size)}`}
+            className="inline-flex items-center gap-1.5 h-8 pl-1.5 pr-2 rounded-lg bg-chip text-[12px] max-w-[260px]"
+        >
+            {isImage && previewUrl ? (
+                <img src={previewUrl} alt="" className="w-5 h-5 rounded object-cover bg-white" />
+            ) : isImage ? (
+                <ImageIcon className="w-4 h-4 shrink-0 text-muted" />
+            ) : (
+                <DocumentIcon className="w-4 h-4 shrink-0 text-muted" />
+            )}
+            <span className="truncate font-medium">{file.name}</span>
+            <span className="shrink-0 text-[10.5px] text-muted tabular-nums">{formatBytes(file.size)}</span>
+            {onRemove && (
+                <button
+                    type="button"
+                    onClick={onRemove}
+                    aria-label={`${file.name} 첨부 제거`}
+                    className="ml-0.5 w-5 h-5 shrink-0 rounded-md inline-flex items-center justify-center text-muted hover:text-ink hover:bg-white transition-colors"
+                >
+                    <CloseIcon />
+                </button>
+            )}
+        </span>
     );
 }
 

@@ -130,3 +130,21 @@ export function AlertIcon({ className = 'w-6 h-6' }: IconProps) {
         </svg>
     );
 }
+
+export function PaperclipIcon({ className = 'w-4 h-4' }: IconProps) {
+    return (
+        <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.2 7.6l-5.1 5.1a3.1 3.1 0 01-4.4-4.4l5.6-5.6a2 2 0 012.9 2.9L6.6 11.2a.95.95 0 01-1.35-1.35l4.9-4.9" />
+        </svg>
+    );
+}
+
+export function ImageIcon({ className = 'w-4 h-4' }: IconProps) {
+    return (
+        <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+            <rect x="2" y="3" width="12" height="10" rx="1.6" />
+            <circle cx="5.8" cy="6.5" r="1.1" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.6 10.6L10.4 7.4 5.2 12.6" />
+        </svg>
+    );
+}

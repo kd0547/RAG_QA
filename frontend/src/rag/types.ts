@@ -1,6 +1,6 @@
 /**
  * RAG 업로드/질의 API 타입.
- * 계약: app/routers/files.py (POST /upload, GET /files), app/routers/questions.py (POST /ask)
+ * 계약: app/routers/files.py (POST /upload, GET /files), app/routers/questions.py (POST /ask, POST /ask/attachments)
  */
 
 /** GET /files 의 항목. repository/file_repository.py file_list() */
@@ -77,8 +77,16 @@ export interface AskSource {
     text: string;
 }
 
+/** 질문에 붙여 보낸 첨부 (POST /ask/attachments 응답에만 있다) */
+export interface AskAttachmentInfo {
+    filename: string;
+    /** image | pdf | docx | pptx | xlsx | hwp | hwpx */
+    type: string;
+}
+
 export interface AskResponse {
     question: string;
     answer: string;
     sources: AskSource[];
+    attachments?: AskAttachmentInfo[];
 }

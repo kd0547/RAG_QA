@@ -104,4 +104,18 @@ export const ragApi = {
             body: JSON.stringify(payload),
         });
     },
+
+    /**
+     * 파일·이미지를 붙여서 질문 (POST /ask/attachments, multipart).
+     * 첨부는 이 질문에만 쓰이고 문서 저장소에는 올라가지 않는다. 이미지는 모델이 직접 보고, 문서는 서버가 텍스트로 읽는다.
+     */
+    askWithAttachments(payload: AskRequest, files: File[]): Promise<AskResponse> {
+        const form = new FormData();
+        form.append('question', payload.question);
+        form.append('mode', payload.mode);
+        form.append('query_top_n', String(payload.query_top_n));
+        form.append('rerank_top_n', String(payload.rerank_top_n));
+        for (const f of files) form.append('files', f);
+        return request<AskResponse>('/ask/attachments', { method: 'POST', body: form });
+    },
 };

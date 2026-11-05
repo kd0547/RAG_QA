@@ -4,13 +4,19 @@ import { LogoMark } from './icons';
 
 type AppKey = 'rag' | 'mail' | 'spec' | 'prompt';
 
-/** 공통 메뉴. OCR 도구는 /ocr 경로로만 제공한다. */
-const APPS: { key: AppKey; label: string; path: string }[] = [
+/**
+ * 공통 메뉴. OCR 도구는 /ocr 경로로만 제공한다.
+ * 제품 사양(/spec)은 그룹 문서 RAG 성능을 먼저 확인하는 동안 메뉴와 경로에서 숨긴다 (Root.tsx도 같이).
+ * 다시 열려면 HIDDEN_APPS에서 'spec'을 빼고 Root.tsx의 spec 경로 주석을 풀면 된다.
+ */
+const HIDDEN_APPS: ReadonlySet<AppKey> = new Set<AppKey>(['spec']);
+const ALL_APPS: { key: AppKey; label: string; path: string }[] = [
     { key: 'rag', label: 'TG RAG', path: '/' },
     { key: 'mail', label: '메일', path: '/mail' },
     { key: 'spec', label: '제품 사양', path: '/spec' },
     { key: 'prompt', label: '프롬프트', path: '/prompt' },
 ];
+const APPS = ALL_APPS.filter((a) => !HIDDEN_APPS.has(a.key));
 
 /**
  * 모든 화면 공통 상단 바.
