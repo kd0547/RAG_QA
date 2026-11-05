@@ -34,7 +34,14 @@ def save_embeddings(chunks: list[EmbeddedChunk]) -> Path:
             embeddings=[c.embedding for c in chunks],
             documents=[c.text for c in chunks],
             metadatas=[
-                {"file_id": c.file_id, "source": c.source, "page": c.page, "chunk_index": c.chunk_index}
+                {
+                    "file_id": c.file_id,
+                    "source": c.source,
+                    "page": c.page,
+                    "chunk_index": c.chunk_index,
+                    # Chroma는 메타데이터 값으로 None을 받지 않는다. 미분류는 빈 문자열이다.
+                    "group_id": c.group_id or "",
+                }
                 for c in chunks
             ],
         )
@@ -43,6 +50,19 @@ def save_embeddings(chunks: list[EmbeddedChunk]) -> Path:
 def delete_embeddings(file_id: str) -> None:
     """파일 하나의 임베딩 청크를 모두 삭제한다. 없으면 아무것도 하지 않는다."""
     _collection.delete(where={"file_id": file_id})
+
+
+def update_group_metadata(file_id: str, group_id: str | None) -> int:
+    """파일의 모든 청크에 group_id 메타데이터를 다시 쓴다. 바꾼 청크 수를 돌려준다.
+
+    Chroma update는 넘긴 키만 덮어쓰고 나머지 메타데이터는 유지한다.
+    그룹 변경은 SQLite(file.group_id)와 여기 둘 다 바꿔야 검색 필터가 맞는다.
+    """
+    ids = _collection.get(where={"file_id": file_id}, include=[])["ids"]
+    if not ids:
+        return 0
+    _collection.update(ids=ids, metadatas=[{"group_id": group_id or ""}] * len(ids))
+    return len(ids)
 
 
 def load_embeddings(doc_id: str) -> list[dict]:
@@ -79,14 +99,22 @@ def search(
         page = -1,
         file_id: str | None = None,
         candidate_k: int = 10,
+        group_id: str | None = None,
 ) -> list[dict]:
-    """쿼리 임베딩과 가장 유사한 청크를 top_k개 반환한다 (거리 오름차순)."""
+    """쿼리 임베딩과 가장 유사한 청크를 top_k개 반환한다 (거리 오름차순).
+
+    group_id를 주면 그 문서 그룹(entity/group.py)의 청크만 본다. 그룹 지정 전에 올린 청크는
+    메타데이터에 group_id가 없어서 필터에 걸리지 않는다. 그룹을 바꾸면 update_group_metadata()가 채운다.
+    """
 
     # metadata 검색 조건
     conditions = []
 
     if file_id:
         conditions.append({"file_id": file_id})
+
+    if group_id:
+        conditions.append({"group_id": group_id})
 
     if page >= 0:
         conditions.append({"page": page})
@@ -137,6 +165,7 @@ def search(
         docs.append({
             "id": chunk_id,
             "file_id": metadata.get("file_id"),
+            "group_id": metadata.get("group_id") or None,
             "source": metadata.get("source"),
             "page": metadata.get("page"),
             "chunk_index": metadata.get("chunk_index"),

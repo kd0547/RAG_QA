@@ -23,6 +23,7 @@ class Database:
         schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
         with self._lock, self.get_conn() as conn:
             conn.executescript(schema_sql)
+            _migrate(conn)
 
     def transaction(self):
         """with db.transaction() as conn: 형태로 사용. 블록 정상 종료 시 커밋, 예외 시 롤백."""
@@ -31,6 +32,18 @@ class Database:
     @property
     def lock(self) -> threading.Lock:
         return self._lock
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """schema.sql은 CREATE IF NOT EXISTS라 이미 있는 테이블에 새 컬럼을 넣지 못한다. 그 차이를 여기서 채운다."""
+    file_columns = {row["name"] for row in conn.execute("PRAGMA table_info(file)")}
+    if "group_id" not in file_columns:
+        conn.execute("ALTER TABLE file ADD COLUMN group_id TEXT REFERENCES file_group(id) ON DELETE SET NULL")
+    if "description" not in file_columns:
+        conn.execute("ALTER TABLE file ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+    # 컬럼이 생긴 뒤에 만들어야 하므로 schema.sql이 아니라 여기서 만든다
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_file_group_id ON file(group_id)")
+    conn.commit()
+
 
 class _Transaction:
 

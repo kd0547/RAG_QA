@@ -7,6 +7,28 @@
 export interface FileSummary {
     file_id: string;
     original_name: string;
+    /** 문서 그룹(GET /groups 의 id). null 이면 아직 분류하지 않은 파일 */
+    group_id: string | null;
+    description: string;
+}
+
+/** GET/POST /groups 및 PATCH /groups/{id} 의 항목. 파일을 모으는 사용자 생성 그룹 */
+export interface FileGroup {
+    id: string;
+    name: string;
+    description: string;
+    file_count: number;
+    created_at?: string;
+    updated_at?: string;
+}
+
+/** GET /file/{file_id} — 파일 상세의 기본 정보 */
+export interface FileDetail extends FileSummary {
+    mime_type: string | null;
+    size_bytes: number | null;
+    chunk_count: number | null;
+    created_at: string | null;
+    updated_at: string | null;
 }
 
 /** retrieval/type.py 의 Chunk — 응답에서는 embedding 벡터가 빠진 미리보기용으로 온다 */
@@ -23,6 +45,8 @@ export interface ChunkPreview {
 export interface UploadResult {
     filename: string;
     error?: string;
+    /** 동일한 내용이 이미 등록된 파일은 다시 인덱싱하지 않는다. */
+    skipped?: 'duplicate';
     num_chunks?: number;
     chunks_saved_to?: string;
     chunks?: ChunkPreview[];

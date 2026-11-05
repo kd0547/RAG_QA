@@ -6,7 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_ollama import OllamaEmbeddings, ChatOllama
@@ -16,16 +16,19 @@ import config
 from agent.reranker import load_rerank
 from app.routers.app_config import router as config_router
 from app.routers.files import router as file_router
+from app.routers.group import router as group_router
 from app.routers.mail_links import router as mail_link_router
 from app.routers.mails import router as mail_router
 from app.routers.prompt import router as prompt_router
 from app.routers.questions import router as question_router
 from app.routers.search import router as search_router
+from app.routers.spec_import import router as spec_import_router
+from app.routers.specs import router as spec_router
 from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
 from agent.agent import get_agent
-from repository import db, email_repo, prompt_repo, task_repo
+from repository import db, email_repo, group_repo, prompt_repo, task_repo
 from logging_config import setup_logging
 
 # uvicorn이 앱을 import할 때 한 번 실행된다. 이후 메일 스레드·라우터 로그가 logs/에 남는다.
@@ -56,6 +59,14 @@ async def lifespan(app: FastAPI):
         prompt_repo.ensure_default()
     except Exception:
         logger.exception("기본 프롬프트 등록 실패")
+
+    # 과거 자동 생성된 빈 그룹만 정리한다. 사용자가 이름·설명을 바꿨거나 파일을 넣은 그룹은 보존한다.
+    try:
+        removed = group_repo.prune_unused_defaults()
+        if removed:
+            logger.info("사용하지 않는 기본 문서 그룹 %d개 정리", removed)
+    except Exception:
+        logger.exception("기본 문서 그룹 정리 실패")
 
     embedding_model = OllamaEmbeddings(
         model=config.EMBEDDING_MODEL)
@@ -100,11 +111,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="RAG PDF Uploader", lifespan=lifespan)
 app.include_router(config_router)
 app.include_router(file_router)
+app.include_router(group_router)
 app.include_router(search_router)
 app.include_router(question_router)
 app.include_router(mail_router)
 app.include_router(mail_link_router)
 app.include_router(prompt_router)
+app.include_router(spec_router)
+app.include_router(spec_import_router)
 
 if FRONTEND_DIST.is_dir():
     # 라우터보다 뒤에 등록해야 /upload, /ask 등 API 경로가 가려지지 않는다.
@@ -112,6 +126,9 @@ if FRONTEND_DIST.is_dir():
     # /mail, /ocr 은 서버에 없는 경로이므로 여기서 index.html을 받아 클라이언트 라우터가 처리한다.
     @app.get("/{spa_path:path}", include_in_schema=False)
     def frontend(spa_path: str) -> FileResponse:
+        # 존재하지 않는 API 요청에 HTML을 반환하면 프론트엔드에서 JSON 파싱 오류가 난다.
+        if spa_path.split("/", 1)[0] in {"file", "files", "groups", "config", "upload", "ask", "search", "mails", "prompts", "specs"}:
+            raise HTTPException(status_code=404, detail="요청한 API를 찾을 수 없습니다.")
         target = (FRONTEND_DIST / spa_path).resolve()
         # resolve() 후 dist 하위인지 확인해 경로 탈출(../)을 막는다
         if spa_path and target.is_file() and target.is_relative_to(FRONTEND_DIST.resolve()):

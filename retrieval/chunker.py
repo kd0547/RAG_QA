@@ -75,8 +75,9 @@ def chunk_pages(
     file_id: str | None = None,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
+    group_id: str | None = None,
 ) -> list[Chunk]:
-    """파서가 만든 페이지별 텍스트를 청킹해 Chunk 리스트로 변환한다."""
+    """파서가 만든 페이지별 텍스트를 청킹해 Chunk 리스트로 변환한다. group_id는 모든 청크에 같이 붙는다."""
     file_path = Path(file_path)
 
     chunks: list[Chunk] = []
@@ -95,6 +96,7 @@ def chunk_pages(
                     chunk_index=i,
                     text=chunk,
                     file_id=file_id,
+                    group_id=group_id,
                 )
             )
     return chunks

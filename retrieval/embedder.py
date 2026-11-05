@@ -55,6 +55,7 @@ def embed_chunks(chunks: list[Chunk]) -> list[EmbeddedChunk]:
             chunk_type=c.chunk_type,
             embedding=vector,
             file_id=c.file_id,
+            group_id=c.group_id,
         )
         for c, vector in zip(chunks, vectors)
     ]

@@ -73,6 +73,14 @@ export function DocumentIcon({ className = 'w-7 h-7' }: IconProps) {
     );
 }
 
+export function FolderIcon({ className = 'w-5 h-5' }: IconProps) {
+    return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7A2 2 0 0 1 20.5 9.5v9A2 2 0 0 1 18.5 20h-13a2 2 0 0 1-2-2V7.5Z" />
+        </svg>
+    );
+}
+
 export function PageIcon({ className = 'w-[7px] h-[9px]' }: IconProps) {
     return (
         <svg className={className} viewBox="0 0 14 18" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">

@@ -25,6 +25,9 @@ class FileEntity:
     error_message: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+    group_id: str | None = None   # file_group.id, 아직 분류 전이면 None
+    description: str = ""         # 파일 내용 짧은 설명
+    # 연관 파일은 file_relation 테이블에 있다. FileRepository.get_related_files()로 조회한다.
 
 
 def create_file(
@@ -34,6 +37,8 @@ def create_file(
         sha256: str | None = None,
         size_bytes: int | None = None,
         chunk_count: int = 0,
+        group_id: str | None = None,
+        description: str = "",
 ) -> FileEntity:
     """새 업로드 파일의 FileEntity를 만든다. sha256은 documents 문자열을 이어 붙여 계산한다."""
     # 구분자 없이 join하면 ["ab", "c"]와 ["a", "bc"]의 해시가 같아진다
@@ -46,4 +51,6 @@ def create_file(
         size_bytes=size_bytes,
         sha256=sha256,
         chunk_count=chunk_count,
+        group_id=group_id,
+        description=description,
     )

@@ -10,6 +10,7 @@ class Chunk:
     text: str
     chunk_type: str = "text"
     file_id: str | None
+    group_id: str | None = None   # 문서 그룹(entity/group.py). 검색 범위 필터용으로 Chroma 메타데이터에 들어간다
 
 
 

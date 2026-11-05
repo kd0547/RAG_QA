@@ -23,11 +23,14 @@ export default defineConfig({
       '/upload': API_TARGET,
       '/files': API_TARGET,
       '/file/': API_TARGET,
+      '/groups': API_TARGET,
       '/ask': API_TARGET,
       '/search': API_TARGET,
       '/mails': API_TARGET,
       // '/prompt'(화면 경로)와 겹치지 않도록 복수형만 프록시한다
       '/prompts': API_TARGET,
+      // '/spec'(화면 경로)와 겹치지 않도록 복수형만 프록시한다
+      '/specs': API_TARGET,
     },
   },
 })

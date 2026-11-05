@@ -21,6 +21,7 @@ def search_documents(
     page: int = -1,
     file_id: str | None = None,
     score_threshold: float = 0.2,
+    group_id: str | None = None,
 ) -> list[dict]:
     """
 문서 근거가 필요한 질문에 대해 벡터DB에서 관련 청크를 찾습니다.
@@ -28,6 +29,11 @@ def search_documents(
 Args:
     query:
         검색할 질문이나 핵심 키워드.
+
+    group_id:
+        문서 그룹으로 검색 범위를 제한할 때 사용하는 그룹 ID입니다. None이면 모든 그룹을 검색합니다.
+        현재 사용 가능한 ID와 각 그룹의 설명은 시스템 프롬프트의 문서 그룹 검색 힌트를 참고하세요.
+        질문이 특정 그룹을 명확히 가리킬 때만 지정하고, 결과가 0건이면 group_id=None으로 다시 검색합니다.
 
     top_k:
         가져올 청크의 최대 개수.
@@ -108,17 +114,19 @@ Returns:
         score_threshold=score_threshold,
         page=page,
         file_id=file_id,
+        group_id=group_id,
     )
 
     logger.info(
-        "[search_documents] query=%r file_id=%r page=%d top_k=%d score_threshold=%s -> %d건",
-        query, file_id, page, top_k, score_threshold, len(docs),
+        "[search_documents] query=%r group_id=%r file_id=%r page=%d top_k=%d score_threshold=%s -> %d건",
+        query, group_id, file_id, page, top_k, score_threshold, len(docs),
     )
 
     return [
         {
             "id": doc["id"],
             "file_id": doc["file_id"],
+            "group_id": doc["group_id"],
             "source": doc["source"],
             "page": doc["page"],
             "chunk_index": doc["chunk_index"],

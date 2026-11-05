@@ -1,11 +1,12 @@
 /**
  * 라이브러리 없는 경로 기반 라우팅 (History API).
- *  - `/`      RAG 콘솔 (업로드 + 질의) — 기본 화면
+ *  - `/`            문서 그룹 목록 (`?group=…` 파일 관리, `?qa=1` 질의응답)
  *  - `/mail`         메일 대시보드 (현황 요약)
  *  - `/mail/inbox`   메일 (전체 메일 조회)
  *  - `/mail/review`  메일 검토 (검토 대기열 + 승인/반려)
  *  - `/ocr`   OCR 도구
  *  - `/prompt` 프롬프트 설정
+ *  - `/spec`   제품·부품 사양 관리
  *
  * 서버에 없는 경로이므로 index.html로 fallback 해줘야 한다.
  * (개발: vite SPA fallback 기본 동작 · 배포: main.py 의 catch-all)

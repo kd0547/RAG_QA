@@ -7,7 +7,9 @@ Database/EmailRepository/TaskRepository는 SQLite 커넥션과 스레드 락을 
 from pathlib import Path
 
 from repository.file_repository import FileRepository
+from repository.group_repository import GroupRepository
 from repository.repo_connect import Database
+from repository.spec_repository import SpecRepository
 from repository.email_repository import EmailRepository
 from repository.prompt_repository import PromptRepository
 from repository.task_repository import TaskRepository
@@ -16,4 +18,6 @@ db = Database(str(Path(__file__).resolve().parent.parent / "storage" / "mail.db"
 email_repo = EmailRepository(db)
 task_repo = TaskRepository(db)
 file_repo = FileRepository(db)
+group_repo = GroupRepository(db)
 prompt_repo = PromptRepository(db)
+spec_repo = SpecRepository(db)

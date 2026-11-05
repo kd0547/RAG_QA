@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS task_reviews (
 CREATE INDEX IF NOT EXISTS idx_task_reviews_task_id ON task_reviews(task_id);
 
 
+-- file_group: 사용자가 만드는 문서 묶음. 소속 파일과 검색 청크에 같은 group_id를 저장한다.
+-- 기존 버전의 고정 그룹은 데이터가 있거나 사용자가 수정했다면 유지한다.
+create table if not exists file_group (
+    id          text primary key,              -- 신규 그룹은 UUID, 기존 그룹은 과거 키를 유지
+    name        text not null,
+    description text not null default '',      -- 그룹의 역할 (어떤 문서들이 모였는지)
+    created_at  text not null default current_timestamp,
+    updated_at  text not null default current_timestamp
+);
+
+
 create table if not exists file (
     file_id       text primary key,              -- uuid, Chroma 메타데이터의 file_id와 같은 값
     original_name text not null,                 -- 사용자가 올린 파일명 (화면 표시, 검색 결과 출처용)
@@ -84,9 +95,27 @@ create table if not exists file (
     chunk_count   integer,                       -- 인덱싱이 끝나면 채움
     error_message text,                          -- 실패 원인
     created_at    text not null default current_timestamp,
-    updated_at    text not null default current_timestamp
+    updated_at    text not null default current_timestamp,
+    -- 소속 그룹. 아직 분류 전이면 NULL, 그룹이 지워지면 NULL로 돌아간다.
+    -- 기존 DB에는 repo_connect.py의 마이그레이션이 이 컬럼과 idx_file_group_id 인덱스를 추가한다.
+    group_id      text references file_group(id) on delete set null,
+    description   text not null default ''       -- 파일 내용을 짧게 설명 (기존 DB는 마이그레이션이 추가)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_file_sha256 ON file(sha256);
+
+
+-- file_relation: 서로 연관된 파일 쌍 (파일 N : 파일 N). 방향이 없는 관계다.
+-- 같은 쌍이 (A,B)와 (B,A)로 두 번 들어가지 않도록 file_id < related_file_id 순서로만 저장한다.
+-- 둘 중 한 파일이 지워지면 관계도 같이 지워진다.
+create table if not exists file_relation (
+    file_id         text not null references file(file_id) on delete cascade,
+    related_file_id text not null references file(file_id) on delete cascade,
+    created_at      text not null default current_timestamp,
+    primary key (file_id, related_file_id),
+    check (file_id < related_file_id)
+);
+-- primary key가 file_id 쪽 조회를 맡고, 반대쪽 조회는 이 인덱스가 맡는다
+CREATE INDEX IF NOT EXISTS idx_file_relation_related ON file_relation(related_file_id);
 
 
 -- prompt: 답변 지침(시스템 프롬프트). 여러 개 저장하고 그중 하나만 선택해 쓴다.
@@ -108,3 +137,76 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_selected ON prompt(is_selected) WHE
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_mail_uid ON tasks(mail_uid);
+
+
+-- ===== 제품·부품 사양 (입찰 조건 판정용 구조화 데이터) =====
+-- 문서(세일즈 가이드 등)는 근거로만 쓰고, 판정에 쓰는 값은 여기에 사람이 검증해 넣는다.
+
+-- spec_attribute: 속성 사전. 사양 값은 반드시 이 키로 저장한다. 비교 코드는 data_type과 unit을 본다.
+-- 기본 속성(entity/spec.py DEFAULT_ATTRIBUTES)은 자동으로 넣지 않고 화면의 "기본 속성 추가"로 넣는다.
+CREATE TABLE IF NOT EXISTS spec_attribute (
+    key         TEXT PRIMARY KEY,                -- 예: cpu_cores, ram_max_gb (영문 소문자·숫자·_)
+    name        TEXT NOT NULL,                   -- 화면 이름 (예: CPU 코어 수)
+    category    TEXT NOT NULL DEFAULT 'other',   -- entity/spec.py ATTRIBUTE_CATEGORIES
+    data_type   TEXT NOT NULL DEFAULT 'text' CHECK (data_type IN ('number', 'text', 'bool')),
+    unit        TEXT NOT NULL DEFAULT '',        -- number일 때 단위 (GB, GHz, kg ...)
+    description TEXT NOT NULL DEFAULT '',
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT current_timestamp,
+    updated_at  TEXT NOT NULL DEFAULT current_timestamp
+);
+
+-- product: 우리 제품 (모델 단위. N5800, A650 ...)
+CREATE TABLE IF NOT EXISTS product (
+    id          TEXT PRIMARY KEY,                -- uuid
+    model       TEXT NOT NULL UNIQUE,            -- 모델명
+    name        TEXT NOT NULL DEFAULT '',        -- 표시 이름 (예: N5800 14세대)
+    category    TEXT NOT NULL DEFAULT 'notebook', -- entity/spec.py PRODUCT_CATEGORIES
+    status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'planned', 'eol')),
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT current_timestamp,
+    updated_at  TEXT NOT NULL DEFAULT current_timestamp
+);
+
+-- component: 부품 (CPU, GPU, SSD ...). 코어 수·클럭처럼 사내 문서에 없는 값은 부품 사양으로 넣는다.
+CREATE TABLE IF NOT EXISTS component (
+    id          TEXT PRIMARY KEY,                -- uuid
+    kind        TEXT NOT NULL DEFAULT 'other',   -- entity/spec.py COMPONENT_KINDS
+    model       TEXT NOT NULL,                   -- 예: AMD Ryzen AI 7 350
+    vendor      TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT current_timestamp,
+    updated_at  TEXT NOT NULL DEFAULT current_timestamp,
+    UNIQUE (kind, model)
+);
+
+-- spec_value: 제품 또는 부품(owner_type)의 사양 값 한 건. 같은 속성에 값이 여러 개(옵션)면 행이 여러 개다.
+-- owner_id는 product.id 또는 component.id. 두 테이블을 가리켜서 FK 대신 저장소가 삭제 시 함께 지운다.
+CREATE TABLE IF NOT EXISTS spec_value (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_type     TEXT NOT NULL CHECK (owner_type IN ('product', 'component')),
+    owner_id       TEXT NOT NULL,
+    attribute_key  TEXT NOT NULL REFERENCES spec_attribute(key),
+    value_text     TEXT NOT NULL,                -- 입력한 값 그대로
+    value_num      REAL,                         -- number면 파싱한 숫자, bool이면 1/0, text면 NULL
+    is_option      INTEGER NOT NULL DEFAULT 0 CHECK (is_option IN (0, 1)),  -- 선택 구성 여부
+    note           TEXT NOT NULL DEFAULT '',
+    source_file_id TEXT,                         -- 근거 문서 file.file_id (문서가 지워져도 남긴다)
+    source_page    INTEGER,
+    source_note    TEXT NOT NULL DEFAULT '',     -- 예: "R&D 홍길동 2026-11-05"
+    created_at     TEXT NOT NULL DEFAULT current_timestamp,
+    updated_at     TEXT NOT NULL DEFAULT current_timestamp,
+    UNIQUE (owner_type, owner_id, attribute_key, value_text)
+);
+CREATE INDEX IF NOT EXISTS idx_spec_value_owner ON spec_value(owner_type, owner_id);
+
+-- product_component: 제품에 들어가는 부품. is_option = 1 이면 선택 구성.
+CREATE TABLE IF NOT EXISTS product_component (
+    product_id   TEXT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
+    component_id TEXT NOT NULL REFERENCES component(id) ON DELETE CASCADE,
+    is_option    INTEGER NOT NULL DEFAULT 0 CHECK (is_option IN (0, 1)),
+    note         TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL DEFAULT current_timestamp,
+    PRIMARY KEY (product_id, component_id)
+);
+CREATE INDEX IF NOT EXISTS idx_product_component_component ON product_component(component_id);
