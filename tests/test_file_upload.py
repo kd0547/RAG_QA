@@ -53,6 +53,7 @@ def upload_router(tmp_path, monkeypatch):
     repository = ModuleType("repository")
     repository.file_repo = file_repo
     repository.group_repo = SimpleNamespace(exists=lambda group_id: True)
+    repository.page_repo = SimpleNamespace(save_pages=lambda file_id, pages: len(pages))
     embeddings = ModuleType("repository.embedding_repository")
     def save_embeddings(chunks):
         saved_chunks.append(chunks)
@@ -60,6 +61,7 @@ def upload_router(tmp_path, monkeypatch):
 
     embeddings.save_embeddings = save_embeddings
     embeddings.delete_embeddings = lambda file_id: None
+    embeddings.replace_page_embeddings = lambda file_id, page, chunks: 0
     embeddings.update_group_metadata = lambda file_id, group_id: 0
     monkeypatch.setitem(sys.modules, "repository", repository)
     monkeypatch.setitem(sys.modules, "repository.embedding_repository", embeddings)

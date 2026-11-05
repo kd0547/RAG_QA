@@ -2,7 +2,8 @@ import { useState } from 'react';
 
 import { AlertIcon, DocumentIcon, TrashIcon } from '../components/icons';
 import { ApiError } from '../lib/http';
-import { ragApi } from './api';
+import { linkProps } from '../lib/router';
+import { ragApi, reviewPath } from './api';
 import type { FileGroup, FileSummary } from './types';
 
 const UNGROUPED_TARGET = '__ungrouped__';
@@ -251,6 +252,13 @@ function FileListContent({
                                         {doc.description && <span className="mt-0.5 block break-words text-[11.5px] leading-relaxed text-ink/70">{doc.description}</span>}
                                     </span>
                                 </button>
+                                <a
+                                    {...linkProps(reviewPath(doc.file_id))}
+                                    title="저장된 내용을 원본과 비교하며 검수합니다"
+                                    className="shrink-0 h-8 inline-flex items-center rounded-lg border border-line bg-white px-2.5 text-[11.5px] font-semibold text-ink/70 hover:border-brand hover:text-brand-hover focus-visible:outline-2 focus-visible:outline-brand"
+                                >
+                                    파일 검수
+                                </a>
                                 <button
                                     type="button"
                                     onClick={() => void deleteFile(doc)}

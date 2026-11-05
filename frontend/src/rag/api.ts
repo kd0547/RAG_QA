@@ -1,6 +1,25 @@
 /** RAG 업로드/질의 API 클라이언트. 베이스 URL 규칙은 lib/http.ts 참고. */
 import { API_BASE, ApiError, request } from '../lib/http';
-import type { AppConfig, AskRequest, AskResponse, FileDetail, FileGroup, FileSummary, UploadResponse } from './types';
+import type {
+    AppConfig,
+    AskRequest,
+    AskResponse,
+    FileDetail,
+    FileGroup,
+    FilePagesResponse,
+    FileSummary,
+    PageUpdateResponse,
+    UploadResponse,
+} from './types';
+
+/**
+ * 파일 검수 화면 주소. 검수가 끝나면 지금 보던 화면(return)으로 돌아간다.
+ * 내용은 RAG 서버에 저장된 페이지별 텍스트를 쓰고, 원본 미리보기는 PDF만 된다.
+ */
+export function reviewPath(fileId: string): string {
+    const back = window.location.pathname + window.location.search;
+    return `/review?file_id=${encodeURIComponent(fileId)}&return=${encodeURIComponent(back)}`;
+}
 
 export const ragApi = {
     /** 서버 설정 (Claude 모드 사용 가능 여부) */
@@ -49,6 +68,24 @@ export const ragApi = {
             method: 'PUT',
             body: JSON.stringify({ group_id: groupId }),
         });
+    },
+
+    /** 파일 검수: 업로드 때 저장한 페이지별 텍스트 */
+    listFilePages(fileId: string): Promise<FilePagesResponse> {
+        return request<FilePagesResponse>(`/file/${encodeURIComponent(fileId)}/pages`);
+    },
+
+    /** 파일 검수: 페이지 텍스트가 없는 예전 파일은 보관된 원본을 다시 파싱해 만든다 (검색 청크는 그대로) */
+    importFilePages(fileId: string): Promise<FilePagesResponse> {
+        return request<FilePagesResponse>(`/file/${encodeURIComponent(fileId)}/pages/import`, { method: 'POST' });
+    },
+
+    /** 파일 검수: 페이지 텍스트 수정. 서버가 그 페이지만 다시 청킹·임베딩한다 */
+    updatePageText(fileId: string, pageId: number, text: string): Promise<PageUpdateResponse> {
+        return request<PageUpdateResponse>(
+            `/file/${encodeURIComponent(fileId)}/pages/${pageId}`,
+            { method: 'PUT', body: JSON.stringify({ text }) },
+        );
     },
 
     filePreviewUrl(fileId: string): string {

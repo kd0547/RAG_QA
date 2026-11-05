@@ -4,11 +4,11 @@ import remarkGfm from 'remark-gfm';
 
 import { AppHeader } from '../components/AppHeader';
 import { ApiError } from '../lib/http';
-import { navigate, subscribeRoute } from '../lib/router';
+import { linkProps, navigate, subscribeRoute } from '../lib/router';
 import { FileList as RegisteredFileList } from './FileList';
 import { GroupHome } from './GroupHome';
 import { GroupInfoSidebar } from './GroupInfoSidebar';
-import { ragApi } from './api';
+import { ragApi, reviewPath } from './api';
 import type { AskMode, AskSource, FileDetail, FileGroup, FileSummary, UploadResult } from './types';
 import { AlertIcon, CloseIcon, DocumentIcon, ImageIcon, PaperclipIcon, UploadIcon } from '../components/icons';
 
@@ -885,11 +885,16 @@ function FileDetailPanel({
                         ))}
                     </dl>
                 )}
-                {fileExt(doc.original_name) === '.pdf' && (
-                    <button type="button" onClick={() => setPreviewOpen(true)} className="mt-6 h-9 w-full rounded-lg border border-line bg-white text-[12px] font-semibold hover:border-brand hover:text-brand">
-                        PDF 미리보기
-                    </button>
-                )}
+                <div className="mt-6 grid grid-cols-2 gap-2">
+                    {fileExt(doc.original_name) === '.pdf' && (
+                        <button type="button" onClick={() => setPreviewOpen(true)} className="h-9 rounded-lg border border-line bg-white text-[12px] font-semibold hover:border-brand hover:text-brand">
+                            PDF 미리보기
+                        </button>
+                    )}
+                    <a {...linkProps(reviewPath(doc.file_id))} className={`h-9 inline-flex items-center justify-center rounded-lg bg-brand text-[12px] font-bold text-white hover:bg-brand-hover ${fileExt(doc.original_name) === '.pdf' ? '' : 'col-span-2'}`}>
+                        파일 검수
+                    </a>
+                </div>
             </div>
         </section>
     );

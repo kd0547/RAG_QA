@@ -99,6 +99,15 @@ class FileRepository:
             rows = conn.execute(select_sql, (file_id, file_id, file_id)).fetchall()
             return [dict(row) for row in rows]
 
+    def update_chunk_count(self, file_id: str, chunk_count: int) -> None:
+        """검수로 페이지를 다시 청킹한 뒤 파일의 청크 수와 수정 시각을 맞춘다."""
+        with self.db.get_conn() as conn:
+            conn.execute(
+                "UPDATE file SET chunk_count = ?, updated_at = current_timestamp WHERE file_id = ?",
+                (chunk_count, file_id),
+            )
+            conn.commit()
+
     def delete_file(self,file_id:str):
         with self.db.get_conn() as conn:
             delete_sql = "DELETE FROM file WHERE file_id = ?"

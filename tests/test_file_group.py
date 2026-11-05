@@ -15,6 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from entity.file import create_file  # noqa: E402
 from entity.group import DEFAULT_GROUPS, GROUP_IDS  # noqa: E402
 from parser.pdf.type import PageText  # noqa: E402
+from repository.file_page_repository import FilePageRepository  # noqa: E402
 from repository.file_repository import FileRepository  # noqa: E402
 from repository.group_repository import GroupRepository  # noqa: E402
 from repository.repo_connect import Database  # noqa: E402
@@ -114,9 +115,11 @@ def api_client(tmp_path, monkeypatch):
     repository = ModuleType("repository")
     repository.file_repo = file_repo
     repository.group_repo = group_repo
+    repository.page_repo = FilePageRepository(db)
     embeddings = ModuleType("repository.embedding_repository")
     embeddings.save_embeddings = lambda chunks: None
     embeddings.delete_embeddings = lambda file_id: None
+    embeddings.replace_page_embeddings = lambda file_id, page, chunks: 0
     embeddings.update_group_metadata = lambda file_id, group_id: metadata_calls.append((file_id, group_id)) or 3
     monkeypatch.setitem(sys.modules, "repository", repository)
     monkeypatch.setitem(sys.modules, "repository.embedding_repository", embeddings)

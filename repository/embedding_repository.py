@@ -65,6 +65,20 @@ def update_group_metadata(file_id: str, group_id: str | None) -> int:
     return len(ids)
 
 
+def replace_page_embeddings(file_id: str, page: int, chunks: list[EmbeddedChunk]) -> int:
+    """파일의 한 페이지 청크를 새 청크로 갈아끼운다. 지운 옛 청크 수를 돌려준다.
+
+    파일 검수에서 페이지 텍스트를 고친 뒤 부른다. 임베딩은 호출 전에 다 만들어 두어야
+    임베딩 실패로 페이지 청크만 사라지는 일이 없다.
+    """
+    where = {"$and": [{"file_id": file_id}, {"page": page}]}
+    old_ids = _collection.get(where=where, include=[])["ids"]
+    if old_ids:
+        _collection.delete(ids=old_ids)
+    save_embeddings(chunks)
+    return len(old_ids)
+
+
 def load_embeddings(doc_id: str) -> list[dict]:
     """문서 하나의 임베딩 청크를 불러온다. 없으면 빈 리스트."""
     result = _collection.get(

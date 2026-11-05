@@ -327,10 +327,16 @@ export default function App() {
             const formData = new FormData();
             formData.append('files', item.file);
 
-            const response = await fetch(`${OCR_API_BASE}/ocr/run_ocr`, {
-                method: 'POST',
-                body: formData,
-            });
+            let response: Response;
+            try {
+                response = await fetch(`${OCR_API_BASE}/ocr/run_ocr`, {
+                    method: 'POST',
+                    body: formData,
+                });
+            } catch {
+                // 브라우저의 "Failed to fetch"는 서버가 꺼져 있거나 주소가 틀렸을 때 난다
+                throw new Error(`OCR 서버(${OCR_API_BASE})에 연결할 수 없습니다. OCR 서버가 켜져 있는지 확인해 주세요.`);
+            }
             if (!response.ok) {
                 throw new Error(`Server responded with ${response.status}`);
             }

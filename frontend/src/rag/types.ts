@@ -31,6 +31,35 @@ export interface FileDetail extends FileSummary {
     updated_at: string | null;
 }
 
+/**
+ * GET /file/{id}/pages 의 항목 (파일 검수). repository/file_page_repository.py
+ * 업로드 때 파서가 뽑은 페이지별 텍스트다. xlsx는 같은 page에 블록이 여럿일 수 있다.
+ */
+export interface FilePage {
+    page_id: number;
+    seq: number;
+    /** 1부터 시작하는 페이지(시트) 번호 */
+    page: number;
+    /** 검색에 쓰는 현재 텍스트 (검수로 수정) */
+    text: string;
+    /** 업로드 때 파싱 결과. 서버가 바꾸지 않는다 */
+    original_text: string;
+    edited: boolean;
+    updated_at: string;
+}
+
+export interface FilePagesResponse {
+    file_id: string;
+    original_name: string;
+    pages: FilePage[];
+}
+
+/** PUT /file/{id}/pages/{page_id} — chunk_count는 다시 만든 청크 수 (내용이 같으면 null) */
+export interface PageUpdateResponse {
+    page: FilePage;
+    chunk_count: number | null;
+}
+
 /** retrieval/type.py 의 Chunk — 응답에서는 embedding 벡터가 빠진 미리보기용으로 온다 */
 export interface ChunkPreview {
     id: string;

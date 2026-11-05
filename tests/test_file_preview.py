@@ -19,9 +19,11 @@ def preview_client(tmp_path, monkeypatch):
     repository = ModuleType("repository")
     repository.file_repo = SimpleNamespace(get_file_by_id=files.get)
     repository.group_repo = SimpleNamespace(exists=lambda group_id: False)
+    repository.page_repo = SimpleNamespace(save_pages=lambda file_id, pages: len(pages))
     embeddings = ModuleType("repository.embedding_repository")
     embeddings.save_embeddings = lambda chunks: None
     embeddings.delete_embeddings = lambda file_id: None
+    embeddings.replace_page_embeddings = lambda file_id, page, chunks: 0
     embeddings.update_group_metadata = lambda file_id, group_id: 0
     monkeypatch.setitem(sys.modules, "repository", repository)
     monkeypatch.setitem(sys.modules, "repository.embedding_repository", embeddings)

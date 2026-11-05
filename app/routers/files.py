@@ -15,11 +15,17 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from entity.file import create_file
-from repository import file_repo, group_repo
+from repository import file_repo, group_repo, page_repo
 from retrieval.embedder import embed_chunks
 from parser.file_parser import SUPPORTED_EXTENSIONS, parse_file
 from retrieval.chunker import chunk_pages, dump_chunks_markdown
-from repository.embedding_repository import save_embeddings, delete_embeddings, update_group_metadata
+from repository.embedding_repository import (
+    delete_embeddings,
+    replace_page_embeddings,
+    save_embeddings,
+    update_group_metadata,
+)
+from parser.pdf.type import PageText
 from retrieval.type import Chunk
 
 logger = logging.getLogger(__name__)
@@ -139,6 +145,92 @@ def get_file_detail(file_id: str) -> dict:
         "group_id": file.group_id,
         "description": file.description,
     }
+
+
+MAX_PAGE_TEXT = 200_000
+
+
+def _chunk_ids(file_id: str, chunks: list[Chunk]) -> list[Chunk]:
+    # chunk_pages의 기본 ID는 파일명 기반이라 동명 문서끼리 충돌한다. 업로드와 같은 규칙으로 바꾼다.
+    for chunk in chunks:
+        chunk.id = f"{file_id}-p{chunk.page}-c{chunk.chunk_index}"
+    return chunks
+
+
+@router.get("/file/{file_id}/pages")
+def get_file_pages(file_id: str) -> dict:
+    """파일 검수용: 업로드 때 저장한 페이지별 텍스트를 파서 순서대로 돌려준다."""
+    file = file_repo.get_file_by_id(file_id)
+    if file is None:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+    return {"file_id": file_id, "original_name": file.original_name, "pages": page_repo.list_pages(file_id)}
+
+
+@router.post("/file/{file_id}/pages/import")
+def import_file_pages(file_id: str) -> dict:
+    """페이지 텍스트가 없는 예전 업로드 파일용: 보관된 원본을 다시 파싱해 페이지 텍스트만 저장한다.
+
+    검색용 청크는 바꾸지 않는다. 페이지를 고쳐 저장할 때 그 페이지만 새 텍스트로 다시 청킹된다.
+    """
+    file = file_repo.get_file_by_id(file_id)
+    if file is None:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+    if page_repo.has_pages(file_id):
+        raise HTTPException(status_code=409, detail="이미 페이지 텍스트가 저장된 파일입니다.")
+    path = _uploaded_original_path(file.stored_path)
+    if path is None:
+        raise HTTPException(status_code=404, detail="원본 파일을 찾을 수 없습니다.")
+    started = time.perf_counter()
+    try:
+        pages = parse_file(path)
+    except Exception as exc:
+        logger.exception("페이지 텍스트 가져오기 실패: file_id=%s", file_id)
+        raise HTTPException(status_code=500, detail=f"원본 파싱 실패: {exc}") from exc
+    page_repo.save_pages(file_id, pages)
+    logger.info("페이지 텍스트 가져오기: file_id=%s, pages=%d, %.1f초", file_id, len(pages), time.perf_counter() - started)
+    return {"file_id": file_id, "original_name": file.original_name, "pages": page_repo.list_pages(file_id)}
+
+
+class PageTextBody(BaseModel):
+    text: str
+
+
+@router.put("/file/{file_id}/pages/{page_id}")
+def set_page_text(file_id: str, page_id: int, body: PageTextBody) -> dict:
+    """파일 검수에서 고친 페이지 텍스트를 저장하고, 그 페이지만 다시 청킹·임베딩한다.
+
+    업로드 원본 파일과 original_text(처음 파싱 결과)는 바꾸지 않는다.
+    """
+    file = file_repo.get_file_by_id(file_id)
+    if file is None:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+    row = page_repo.get_page(file_id, page_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="페이지를 찾을 수 없습니다.")
+    text = body.text
+    if len(text) > MAX_PAGE_TEXT:
+        raise HTTPException(status_code=400, detail=f"페이지 텍스트는 {MAX_PAGE_TEXT:,}자 이하여야 합니다.")
+    if text == row["text"]:
+        return {"page": row, "chunk_count": None}
+
+    # 같은 페이지 번호의 블록을 모두 모아 다시 청킹해야 청크 번호가 업로드 때와 같은 규칙으로 이어진다
+    siblings = page_repo.pages_with_number(file_id, row["page"])
+    pages = [PageText(page=p["page"], text=text if p["page_id"] == page_id else p["text"]) for p in siblings]
+    chunks = _chunk_ids(file_id, chunk_pages(Path(file.stored_path), pages, file_id=file_id, group_id=file.group_id))
+    try:
+        embedded = embed_chunks(chunks)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    removed = replace_page_embeddings(file_id, row["page"], embedded)
+    page_repo.update_text(page_id, text)
+    if file.chunk_count is not None:
+        file_repo.update_chunk_count(file_id, max(file.chunk_count - removed + len(embedded), 0))
+    logger.info(
+        "페이지 검수 저장: file_id=%s, page=%s, %d자 -> %d자, chunks %d -> %d",
+        file_id, row["page"], len(row["text"]), len(text), removed, len(embedded),
+    )
+    return {"page": page_repo.get_page(file_id, page_id), "chunk_count": len(embedded)}
 
 
 class FileGroupBody(BaseModel):
@@ -261,9 +353,7 @@ async def upload_files(
             #파싱 후 청킹을 진행
             pages = parse_file(dest_path)
             chunks: list[Chunk] = chunk_pages(dest_path, pages, file_id=db_file.file_id, group_id=group_id)
-            # chunk_pages의 기본 ID는 파일명 기반이라 동명 문서끼리 충돌한다.
-            for chunk in chunks:
-                chunk.id = f"{db_file.file_id}-p{chunk.page}-c{chunk.chunk_index}"
+            _chunk_ids(db_file.file_id, chunks)
             #dump_chunks_markdown(dest_path, chunks)
 
             db_file.chunk_count = len(chunks)
@@ -281,6 +371,8 @@ async def upload_files(
 
         saved_path = save_embeddings(embedded_chunks)
         file_repo.file_save(db_file)
+        # 검수용 페이지 텍스트. 파일 행이 먼저 있어야 외래키가 맞는다
+        page_repo.save_pages(db_file.file_id, pages)
         logger.info(
             "문서 업로드 완료: %s, file_id=%s, group=%s, pages=%d, chunks=%d, size=%d, %.1f초",
             file.filename, db_file.file_id, group_id, len(pages), len(embedded_chunks), len(content),

@@ -210,3 +210,20 @@ CREATE TABLE IF NOT EXISTS product_component (
     PRIMARY KEY (product_id, component_id)
 );
 CREATE INDEX IF NOT EXISTS idx_product_component_component ON product_component(component_id);
+
+
+-- file_page: 업로드 때 파서가 뽑은 페이지별 텍스트 (파일 1 : 페이지 N).
+-- 파일 검수는 text만 고치고, 그 페이지를 다시 청킹·임베딩한다. original_text(파싱 원문)와 업로드 원본 파일은 건드리지 않는다.
+-- xlsx는 한 시트(page)가 여러 블록으로 나뉘어 오므로 page가 같은 행이 여럿일 수 있다. 순서는 seq로 지킨다.
+create table if not exists file_page (
+    page_id       integer primary key autoincrement,
+    file_id       text not null references file(file_id) on delete cascade,
+    seq           integer not null,               -- 파서가 돌려준 순서 (0부터)
+    page          integer not null,               -- 1부터 시작하는 페이지(시트) 번호. 청크 메타데이터의 page와 같다
+    text          text not null,                  -- 검색에 쓰는 현재 텍스트 (검수로 수정)
+    original_text text not null,                  -- 업로드 때 파싱 결과. 수정하지 않는다
+    created_at    text not null default current_timestamp,
+    updated_at    text not null default current_timestamp,
+    unique (file_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_file_page_file_page ON file_page(file_id, page);
