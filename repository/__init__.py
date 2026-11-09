@@ -8,6 +8,7 @@ from pathlib import Path
 
 from repository.file_page_repository import FilePageRepository
 from repository.file_repository import FileRepository
+from repository.graph_repository import GraphRepository
 from repository.group_repository import GroupRepository
 from repository.repo_connect import Database
 from repository.spec_repository import SpecRepository
@@ -23,3 +24,4 @@ page_repo = FilePageRepository(db)
 group_repo = GroupRepository(db)
 prompt_repo = PromptRepository(db)
 spec_repo = SpecRepository(db)
+graph_repo = GraphRepository(db)

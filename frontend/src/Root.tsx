@@ -3,6 +3,7 @@ import { MailSection } from './mail/MailSection.tsx'
 import { RagConsole } from './rag/RagConsole.tsx'
 import { PromptSection } from './prompt/PromptSection.tsx'
 import { FileReview } from './rag/FileReview.tsx'
+import { KnowledgeSection } from './knowledge/KnowledgeSection.tsx'
 // 제품 사양 화면은 그룹 문서 RAG 성능을 먼저 확인하는 동안 숨긴다 (AppHeader.tsx HIDDEN_APPS와 같이 되돌린다)
 // import { SpecSection } from './spec/SpecSection.tsx'
 import { getRoute, normalizeLegacyHash, normalizeLegacyMailLink, subscribeRoute } from './lib/router'
@@ -36,6 +37,7 @@ export function Root() {
   const route = useSyncExternalStore(subscribeRoute, getRoute)
   if (route === 'prompt') return <PromptSection />
   if (route === 'review') return <FileReview />
+  if (route === 'knowledge') return <KnowledgeSection />
   // if (route === 'spec') return <SpecSection />
   if (route === 'mail' || route.startsWith('mail/')) return <MailSection route={route} />
   if (route === 'ocr') {

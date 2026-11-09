@@ -24,6 +24,7 @@ export default defineConfig({
       '/files': API_TARGET,
       '/file/': API_TARGET,
       '/groups': API_TARGET,
+      '/graph': API_TARGET,
       '/ask': API_TARGET,
       '/search': API_TARGET,
       '/mails': API_TARGET,

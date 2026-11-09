@@ -10,10 +10,11 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+import config
 from entity.file import create_file
 from repository import file_repo, group_repo, page_repo
 from retrieval.embedder import embed_chunks
@@ -76,6 +77,33 @@ def _remove_uploaded_original(stored_path: str) -> None:
             pass
 
 
+# ---------- 문서 그래프 동기화 ----------
+# 그래프 추출은 페이지마다 LLM을 부르므로 응답을 보낸 뒤 백그라운드로 돈다. 실패해도 업로드·검수는 성공으로 둔다.
+
+def _graph_index(file_id: str, page: int | None = None) -> None:
+    try:
+        from graph_rag.service import index_file, index_page
+        if page is None:
+            index_file(file_id)
+        else:
+            index_page(file_id, page)
+    except Exception:
+        logger.warning("문서 그래프 추출 실패: file_id=%s, page=%s", file_id, page, exc_info=True)
+
+
+def _schedule_graph_index(background: BackgroundTasks | None, file_id: str, page: int | None = None) -> None:
+    if config.GRAPH_EXTRACT_ENABLED and background is not None:
+        background.add_task(_graph_index, file_id, page)
+
+
+def _graph_prune() -> None:
+    try:
+        from repository import graph_repo
+        graph_repo.prune_orphans()
+    except Exception:
+        logger.warning("문서 그래프 정리 실패", exc_info=True)
+
+
 @router.delete("/file/{file_id}")
 def delete_file(file_id:str):
     """
@@ -91,6 +119,7 @@ def delete_file(file_id:str):
     shared_original = file_repo.has_other_stored_path(file.stored_path, file_id)
     file_repo.delete_file(file_id)
     delete_embeddings(file_id)
+    _graph_prune()  # 파일의 개체 등장·관계는 외래키로 지워졌고, 남은 빈 개체를 치운다
     if not shared_original:
         _remove_uploaded_original(file.stored_path)
     logger.info("문서 삭제: file_id=%s, name=%s", file_id, file.original_name)
@@ -167,7 +196,7 @@ def get_file_pages(file_id: str) -> dict:
 
 
 @router.post("/file/{file_id}/pages/import")
-def import_file_pages(file_id: str) -> dict:
+def import_file_pages(file_id: str, background: BackgroundTasks) -> dict:
     """페이지 텍스트가 없는 예전 업로드 파일용: 보관된 원본을 다시 파싱해 페이지 텍스트만 저장한다.
 
     검색용 청크는 바꾸지 않는다. 페이지를 고쳐 저장할 때 그 페이지만 새 텍스트로 다시 청킹된다.
@@ -187,6 +216,7 @@ def import_file_pages(file_id: str) -> dict:
         logger.exception("페이지 텍스트 가져오기 실패: file_id=%s", file_id)
         raise HTTPException(status_code=500, detail=f"원본 파싱 실패: {exc}") from exc
     page_repo.save_pages(file_id, pages)
+    _schedule_graph_index(background, file_id)
     logger.info("페이지 텍스트 가져오기: file_id=%s, pages=%d, %.1f초", file_id, len(pages), time.perf_counter() - started)
     return {"file_id": file_id, "original_name": file.original_name, "pages": page_repo.list_pages(file_id)}
 
@@ -196,7 +226,7 @@ class PageTextBody(BaseModel):
 
 
 @router.put("/file/{file_id}/pages/{page_id}")
-def set_page_text(file_id: str, page_id: int, body: PageTextBody) -> dict:
+def set_page_text(file_id: str, page_id: int, body: PageTextBody, background: BackgroundTasks) -> dict:
     """파일 검수에서 고친 페이지 텍스트를 저장하고, 그 페이지만 다시 청킹·임베딩한다.
 
     업로드 원본 파일과 original_text(처음 파싱 결과)는 바꾸지 않는다.
@@ -224,6 +254,7 @@ def set_page_text(file_id: str, page_id: int, body: PageTextBody) -> dict:
 
     removed = replace_page_embeddings(file_id, row["page"], embedded)
     page_repo.update_text(page_id, text)
+    _schedule_graph_index(background, file_id, row["page"])
     if file.chunk_count is not None:
         file_repo.update_chunk_count(file_id, max(file.chunk_count - removed + len(embedded), 0))
     logger.info(
@@ -298,6 +329,8 @@ async def upload_files(
     files: list[UploadFile],
     group_id: Annotated[str | None, Form()] = None,
     descriptions: Annotated[list[str] | None, Form()] = None,
+    # FastAPI는 타입으로 주입한다. 기본값 None은 라우터 함수를 직접 부르는 테스트용이다.
+    background: BackgroundTasks = None,  # type: ignore[assignment]
 ) -> dict:
     """여러 파일을 올린다. group_id는 소속 그룹, descriptions는 파일 순서에 맞춘 간단한 설명이다."""
     if not files:
@@ -373,6 +406,7 @@ async def upload_files(
         file_repo.file_save(db_file)
         # 검수용 페이지 텍스트. 파일 행이 먼저 있어야 외래키가 맞는다
         page_repo.save_pages(db_file.file_id, pages)
+        _schedule_graph_index(background, db_file.file_id)
         logger.info(
             "문서 업로드 완료: %s, file_id=%s, group=%s, pages=%d, chunks=%d, size=%d, %.1f초",
             file.filename, db_file.file_id, group_id, len(pages), len(embedded_chunks), len(content),

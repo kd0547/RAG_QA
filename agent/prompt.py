@@ -42,13 +42,32 @@ def render_aliases(aliases: dict[str, list[str]]) -> str:
     return "\n".join(f"- {name} = {', '.join(alts)}" for name, alts in aliases.items())
 
 
+GRAPH_GUIDE = """**문서 그래프 검색 (graph_search)**
+- 질문에 제품 모델명, 부품, 인증 이름·번호, 규격, 상위 개념이 나오면 search_documents보다 먼저 graph_search를 호출한다.
+- graph_search 결과 documents의 source를 read_source_document로 읽어 근거를 확인한다. pages는 개체가 나온 페이지다.
+- expanded에 상위 개념이 펼쳐져 있으면, 속한 인증 종류마다 해당 문서를 찾아 답변에 모두 포함한다. 찾지 못한 종류는 "문서 없음"으로 밝힌다.
+- graph_search 결과가 비었거나 질문과 맞지 않으면 search_documents로 검색한다."""
+
+
+def render_concepts(concepts: list[dict]) -> str:
+    return "\n".join(f"- {c['name']} = {', '.join(c['members'])}" for c in concepts)
+
+
 def render_prompt(
     content: str,
     aliases: dict[str, list[str]],
     groups: list[dict] | None = None,
+    concepts: list[dict] | None = None,
 ) -> str:
-    """선택된 프롬프트에 별칭과 현재 문서 그룹의 검색용 메타데이터를 더한다."""
+    """선택된 프롬프트에 별칭, 문서 그래프 사용법, 현재 문서 그룹의 검색용 메타데이터를 더한다.
+
+    concepts가 None이면 그래프를 쓸 수 없는 것으로 보고 그래프 안내를 넣지 않는다.
+    """
     rendered = Template(content).safe_substitute(aliases=render_aliases(aliases))
+    if concepts is not None:
+        rendered = f"{rendered}\n\n{GRAPH_GUIDE}"
+        if concepts:
+            rendered += f"\n- 상위 개념 (개념 = 속한 인증 종류):\n{render_concepts(concepts)}"
     if not groups:
         return rendered
 

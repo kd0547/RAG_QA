@@ -157,3 +157,20 @@ def test_deleting_file_removes_pages(env):
 
     assert client.delete(f"/file/{file.file_id}").status_code == 200
     assert page_repo.list_pages(file.file_id) == []
+
+
+def test_edit_and_import_schedule_graph_extraction(env, monkeypatch):
+    client, file, _, page_repo, _, module, _ = env
+    calls = []
+    monkeypatch.setattr(module, "_graph_index", lambda file_id, page=None: calls.append((file_id, page)))
+    page_repo.save_pages(file.file_id, [PageText(page=1, text="첫 쪽"), PageText(page=2, text="둘째 쪽")])
+    page2 = page_repo.list_pages(file.file_id)[1]
+
+    assert client.put(f"/file/{file.file_id}/pages/{page2['page_id']}", json={"text": "고친 둘째 쪽"}).status_code == 200
+    # 바뀌지 않은 저장은 다시 뽑지 않는다
+    assert client.put(f"/file/{file.file_id}/pages/{page2['page_id']}", json={"text": "고친 둘째 쪽"}).status_code == 200
+    assert calls == [(file.file_id, 2)]
+
+    monkeypatch.setattr(module.config, "GRAPH_EXTRACT_ENABLED", False)
+    assert client.put(f"/file/{file.file_id}/pages/{page2['page_id']}", json={"text": "또 고침"}).status_code == 200
+    assert calls == [(file.file_id, 2)]

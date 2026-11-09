@@ -55,6 +55,12 @@ REVIEWER_EMAIL = os.getenv("REVIEWER_EMAIL", "dongwook.kim@trigem.co.kr")
 DEFAULT_CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "2000"))
 DEFAULT_CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 
+# ---------- 문서 그래프 (Graph RAG) ----------
+# 업로드·페이지 검수 저장 뒤 백그라운드로 개체·관계를 뽑을지 (0이면 끈다. /graph/rebuild로 따로 뽑을 수 있다)
+GRAPH_EXTRACT_ENABLED = os.getenv("GRAPH_EXTRACT_ENABLED", "1") not in ("0", "false", "False", "")
+# LLM에 넘기는 페이지 텍스트 최대 길이
+GRAPH_EXTRACT_MAX_CHARS = int(os.getenv("GRAPH_EXTRACT_MAX_CHARS", "12000"))
+
 # ---------- 로그 ----------
 # 로그 파일 폴더 (기본: 프로젝트 루트의 logs/). 상대 경로면 프로젝트 루트 기준.
 LOG_DIR = Path(__file__).resolve().parent / os.getenv("LOG_DIR", "logs")

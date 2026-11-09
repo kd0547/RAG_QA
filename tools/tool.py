@@ -213,6 +213,39 @@ def check_answerability(question: str, documents: list[dict]) -> dict:
         "reason": result.reason
     }
 
+@tool
+def graph_search(query: str, group_id: str | None = None) -> dict:
+    """문서 그래프에서 질문에 나온 제품·부품·인증·규격·기관을 찾고, 연결된 개체와 그 개체가 나온 문서를 돌려줍니다.
+
+    다음 질문에 먼저 사용합니다.
+    - 제품 모델명(예: N5800), 부품, 인증번호, 규격이 나오는 질문
+    - "KC인증 자료"처럼 여러 인증 종류를 묶는 상위 개념을 묻는 질문 (속한 인증 종류로 펼쳐서 찾습니다)
+    - 한 제품의 인증·부품·시험 문서를 모아야 하는 질문
+
+    결과 documents의 source를 read_source_document에 그대로 넘겨 원본을 읽은 뒤 답합니다.
+    documents가 비었거나 질문과 맞지 않으면 search_documents로 검색합니다.
+
+    Args:
+        query: 사용자 질문 또는 핵심 키워드. 모델명·인증 이름을 빼지 말고 넣습니다.
+        group_id: 문서 그룹으로 범위를 좁힐 때만 지정합니다. None이면 전체 문서를 봅니다.
+
+    Returns:
+        - matched: 질문에서 찾은 개체
+        - expanded: 펼친 상위 개념과 그에 속한 인증 종류. 답변에는 각 인증 종류의 문서를 모두 포함합니다.
+        - relations: "출발 -[관계]-> 도착 (파일 p페이지)" 형식의 관계
+        - documents: 관련 문서. matched_terms가 클수록 질문의 대상을 더 많이 담은 문서입니다.
+          각 항목의 source, original_name, pages(개체가 나온 페이지), entities
+    """
+    from graph_rag.service import search_graph  # DB 저장소는 사용 시점에 연다
+
+    result = search_graph(query, group_id=group_id)
+    logger.info(
+        "[graph_search] query=%r group_id=%r -> matched=%d, documents=%d",
+        query, group_id, len(result["matched"]), len(result["documents"]),
+    )
+    return result
+
+
 # 업로드된 원본 문서 폴더 (app/routers/files.py의 UPLOAD_DIR과 같은 위치)
 DOCS_ROOT = (Path(__file__).resolve().parent.parent / "data" / "uploads").resolve()
 MAX_READ_CHARS = 20000

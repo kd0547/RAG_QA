@@ -16,6 +16,7 @@ import config
 from agent.reranker import load_rerank
 from app.routers.app_config import router as config_router
 from app.routers.files import router as file_router
+from app.routers.graph import router as graph_router
 from app.routers.group import router as group_router
 from app.routers.mail_links import router as mail_link_router
 from app.routers.mails import router as mail_router
@@ -27,8 +28,8 @@ from app.routers.specs import router as spec_router
 from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
-from agent.agent import get_agent
-from repository import db, email_repo, group_repo, prompt_repo, task_repo
+from agent.agent import ALIASES, get_agent
+from repository import db, email_repo, graph_repo, group_repo, prompt_repo, task_repo
 from logging_config import setup_logging
 
 # uvicorn이 앱을 import할 때 한 번 실행된다. 이후 메일 스레드·라우터 로그가 logs/에 남는다.
@@ -67,6 +68,13 @@ async def lifespan(app: FastAPI):
             logger.info("사용하지 않는 기본 문서 그룹 %d개 정리", removed)
     except Exception:
         logger.exception("기본 문서 그룹 정리 실패")
+
+    # aliases.yaml의 상위 개념(KC 인증 등)을 문서 그래프에 넣는다. 실패해도 그래프 검색만 덜 펼쳐질 뿐이다.
+    try:
+        linked = graph_repo.seed_concepts(ALIASES)
+        logger.info("문서 그래프 상위 개념 등록: 연결 %d개, %s", linked, graph_repo.stats())
+    except Exception:
+        logger.exception("문서 그래프 상위 개념 등록 실패")
 
     embedding_model = OllamaEmbeddings(
         model=config.EMBEDDING_MODEL)
@@ -112,6 +120,7 @@ app = FastAPI(title="RAG PDF Uploader", lifespan=lifespan)
 app.include_router(config_router)
 app.include_router(file_router)
 app.include_router(group_router)
+app.include_router(graph_router)
 app.include_router(search_router)
 app.include_router(question_router)
 app.include_router(mail_router)
@@ -127,7 +136,7 @@ if FRONTEND_DIST.is_dir():
     @app.get("/{spa_path:path}", include_in_schema=False)
     def frontend(spa_path: str) -> FileResponse:
         # 존재하지 않는 API 요청에 HTML을 반환하면 프론트엔드에서 JSON 파싱 오류가 난다.
-        if spa_path.split("/", 1)[0] in {"file", "files", "groups", "config", "upload", "ask", "search", "mails", "prompts", "specs"}:
+        if spa_path.split("/", 1)[0] in {"file", "files", "groups", "config", "upload", "ask", "search", "mails", "prompts", "specs", "graph"}:
             raise HTTPException(status_code=404, detail="요청한 API를 찾을 수 없습니다.")
         target = (FRONTEND_DIST / spa_path).resolve()
         # resolve() 후 dist 하위인지 확인해 경로 탈출(../)을 막는다

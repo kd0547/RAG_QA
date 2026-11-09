@@ -227,3 +227,69 @@ create table if not exists file_page (
     unique (file_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_file_page_file_page ON file_page(file_id, page);
+
+
+-- ===== 문서 그래프 (Graph RAG) =====
+-- 업로드 문서의 페이지 텍스트(file_page.text)에서 LLM으로 뽑은 개체와 관계. 사양 DB와는 별개다.
+-- 문서에서 뽑은 행은 file_id에 걸려 있어 파일이 지워지면 같이 지워진다. 남는 개체는 graph_repository.prune_orphans()가 치운다.
+-- aliases.yaml에서 넣은 상위 개념(concept)과 그 연결은 file_id가 NULL이다.
+
+-- graph_entity: 개체. 같은 type 안에서 norm(소문자, 공백·기호 제거)이 같으면 같은 개체로 본다.
+create table if not exists graph_entity (
+    id         integer primary key autoincrement,
+    type       text not null,                  -- graph_rag/types.py ENTITY_TYPES
+    name       text not null,                  -- 처음 뽑힌 표기 (화면 표시용)
+    norm       text not null,                  -- 비교용 정규화 키
+    created_at text not null default current_timestamp,
+    unique (type, norm)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_entity_norm ON graph_entity(norm);
+
+-- graph_alias: 개체의 다른 표기. 검색어를 개체로 바꿀 때 쓴다.
+create table if not exists graph_alias (
+    entity_id  integer not null references graph_entity(id) on delete cascade,
+    alias      text not null,
+    alias_norm text not null,
+    primary key (entity_id, alias_norm)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_alias_norm ON graph_alias(alias_norm);
+
+-- graph_mention: 개체가 나온 문서 페이지. 그래프 검색 결과를 원본 문서로 잇는다.
+create table if not exists graph_mention (
+    entity_id integer not null references graph_entity(id) on delete cascade,
+    file_id   text not null references file(file_id) on delete cascade,
+    page      integer not null,
+    primary key (entity_id, file_id, page)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_mention_file ON graph_mention(file_id, page);
+
+-- graph_relation: 개체 사이의 방향 있는 관계. file_id/page는 그 관계를 뽑은 근거 페이지다.
+create table if not exists graph_relation (
+    id         integer primary key autoincrement,
+    src_id     integer not null references graph_entity(id) on delete cascade,
+    dst_id     integer not null references graph_entity(id) on delete cascade,
+    type       text not null,                  -- graph_rag/types.py RELATION_TYPES
+    file_id    text references file(file_id) on delete cascade,  -- 근거 문서. seed와 근거 없이 넣은 manual은 NULL
+    page       integer,
+    -- extract: 문서에서 뽑음 (페이지를 다시 뽑으면 갈아끼운다) / seed: aliases.yaml / manual: 화면에서 사람이 넣음 (다시 뽑아도 유지)
+    -- 기존 DB에는 repo_connect.py의 마이그레이션이 이 컬럼을 추가한다
+    origin     text not null default 'extract' check (origin in ('extract', 'seed', 'manual')),
+    created_at text not null default current_timestamp
+);
+-- file_id가 NULL인 행도 중복을 막도록 빈 문자열/-1로 바꿔 유일성을 건다
+CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_relation_unique
+    ON graph_relation(src_id, dst_id, type, ifnull(file_id, ''), ifnull(page, -1));
+CREATE INDEX IF NOT EXISTS idx_graph_relation_dst ON graph_relation(dst_id);
+CREATE INDEX IF NOT EXISTS idx_graph_relation_file ON graph_relation(file_id, page);
+
+-- graph_relation_block: 사람이 화면에서 지운 관계. 문서를 다시 뽑거나 서버가 aliases.yaml을 다시 넣어도 되살리지 않는다.
+-- 개체 id는 다시 뽑으면 바뀔 수 있으므로 (종류, 정규화 이름)으로 기억한다. 같은 관계를 화면에서 다시 넣으면 지운다.
+create table if not exists graph_relation_block (
+    src_type   text not null,
+    src_norm   text not null,
+    type       text not null,
+    dst_type   text not null,
+    dst_norm   text not null,
+    created_at text not null default current_timestamp,
+    primary key (src_type, src_norm, type, dst_type, dst_norm)
+);

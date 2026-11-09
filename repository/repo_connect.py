@@ -42,6 +42,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE file ADD COLUMN description TEXT NOT NULL DEFAULT ''")
     # 컬럼이 생긴 뒤에 만들어야 하므로 schema.sql이 아니라 여기서 만든다
     conn.execute("CREATE INDEX IF NOT EXISTS idx_file_group_id ON file(group_id)")
+    # 문서 그래프 초기 버전에는 관계 출처(origin) 컬럼이 없었다. 근거 파일이 없는 관계는 aliases.yaml에서 넣은 것이다
+    relation_columns = {row["name"] for row in conn.execute("PRAGMA table_info(graph_relation)")}
+    if relation_columns and "origin" not in relation_columns:
+        conn.execute("ALTER TABLE graph_relation ADD COLUMN origin TEXT NOT NULL DEFAULT 'extract'")
+        conn.execute("UPDATE graph_relation SET origin = 'seed' WHERE file_id IS NULL")
     conn.commit()
 
 
