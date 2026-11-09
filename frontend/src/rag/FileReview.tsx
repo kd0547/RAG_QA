@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
 import { AlertIcon, DocumentIcon } from '../components/icons';
 import { ApiError } from '../lib/http';
 import { navigate } from '../lib/router';
 import { ragApi } from './api';
+import { PageMarkdown, PageTextEditor } from './PageTextEditor';
+import { PAGE_PROSE_CLASS } from './pageProse';
 import type { FilePage, FilePagesResponse } from './types';
 
 /**
@@ -259,6 +259,7 @@ function PageCard({
     const [error, setError] = useState('');
     const [status, setStatus] = useState('');
     const [showOriginal, setShowOriginal] = useState(false);
+    const [tableOpen, setTableOpen] = useState(false);
 
     const save = async () => {
         if (draft === row.text) {
@@ -313,14 +314,12 @@ function PageCard({
             </div>
             {editing ? (
                 <div className="p-4">
-                    <textarea
+                    <PageTextEditor
                         value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
+                        onChange={setDraft}
                         disabled={saving}
-                        autoFocus
-                        rows={Math.min(30, Math.max(8, draft.split('\n').length + 1))}
-                        aria-label={`${label} 텍스트`}
-                        className="w-full resize-y rounded-lg border border-line px-3 py-2 font-mono text-[12px] leading-relaxed focus:outline-none focus:border-brand disabled:opacity-50"
+                        label={label}
+                        onTableEditingChange={setTableOpen}
                     />
                     {error && <p role="alert" className="mt-2 break-words text-[12px] text-danger">{error}</p>}
                     <div className="mt-2 flex items-center justify-end gap-2">
@@ -328,17 +327,18 @@ function PageCard({
                             <button
                                 type="button"
                                 onClick={() => setDraft(row.original_text)}
-                                disabled={saving}
+                                disabled={saving || tableOpen}
                                 className="mr-auto h-8 rounded-lg px-2 text-[12px] font-semibold text-muted hover:bg-surface hover:text-ink disabled:opacity-50"
                                 title="편집 칸을 처음 파싱 결과로 바꿉니다. 저장해야 반영됩니다"
                             >
                                 처음 파싱 결과로 되돌리기
                             </button>
                         )}
-                        <button type="button" onClick={() => setEditing(false)} disabled={saving} className="h-8 rounded-lg px-3 text-[12px] font-semibold text-ink/70 hover:bg-surface disabled:opacity-50">
+                        {tableOpen && <span className="text-[11.5px] text-muted">표 편집을 적용하거나 취소한 뒤 저장할 수 있습니다</span>}
+                        <button type="button" onClick={() => setEditing(false)} disabled={saving || tableOpen} className="h-8 rounded-lg px-3 text-[12px] font-semibold text-ink/70 hover:bg-surface disabled:opacity-50">
                             취소
                         </button>
-                        <button type="button" onClick={() => void save()} disabled={saving} className="h-8 rounded-lg bg-brand px-3 text-[12px] font-bold text-white hover:bg-brand-hover disabled:opacity-50">
+                        <button type="button" onClick={() => void save()} disabled={saving || tableOpen} className="h-8 rounded-lg bg-brand px-3 text-[12px] font-bold text-white hover:bg-brand-hover disabled:opacity-50">
                             {saving ? '저장 중…' : '저장'}
                         </button>
                     </div>
@@ -348,9 +348,9 @@ function PageCard({
                     {showOriginal && (
                         <p className="px-4 pt-3 text-[11.5px] font-semibold text-warn">처음 파싱 결과 (읽기 전용)</p>
                     )}
-                    <article className="prose prose-slate prose-sm max-w-none px-4 py-3 break-words prose-table:text-[12px] prose-th:border prose-th:border-line prose-th:px-2 prose-td:border prose-td:border-line prose-td:px-2">
+                    <article className={`${PAGE_PROSE_CLASS} px-4 py-3`}>
                         {(showOriginal ? row.original_text : row.text).trim()
-                            ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{showOriginal ? row.original_text : row.text}</ReactMarkdown>
+                            ? <PageMarkdown text={showOriginal ? row.original_text : row.text} />
                             : <p className="text-muted">(빈 페이지)</p>}
                     </article>
                     {status && <p role="status" className="px-4 pb-3 text-[12px] text-brand-hover">{status}</p>}
