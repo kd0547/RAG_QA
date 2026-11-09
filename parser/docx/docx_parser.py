@@ -1,3 +1,4 @@
+import logging
 import re
 from pathlib import Path
 
@@ -7,32 +8,93 @@ from docx.text.paragraph import Paragraph
 
 from parser.pdf.type import PageText
 
+logger = logging.getLogger(__name__)
+
 _INDENT = "  "
+
+_NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_NS_V = "urn:schemas-microsoft-com:vml"
+# OCR 모델에 보낼 수 있는 형식. EMF/WMF 같은 벡터 그림은 건너뛴다.
+_OCR_CONTENT_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp"})
 
 
 def parser_docx_md(
-        docx_path: Path) -> str:
-    """docx를 마크다운 텍스트로 변환한다. 본문 순서(문단/표)를 유지한다."""
+        docx_path: Path, ocr_images: bool = True) -> str:
+    """docx를 마크다운 텍스트로 변환한다. 본문 순서(문단/표/이미지)를 유지한다.
+
+    ocr_images가 True면 본문 문단에 들어 있는 이미지를 OCR해 그 위치에 넣는다.
+    """
     docx = Document(docx_path)
 
     blocks: list[str] = []
     # 레벨별 번호 카운터. 리스트가 아닌 블록을 만나면 초기화한다.
     counters: dict[int, int] = {}
+    # 같은 이미지가 여러 번 쓰여도 OCR은 한 번만 한다. (part 이름 -> OCR 결과)
+    ocr_cache: dict[str, str | None] = {}
 
     for child in docx.element.body.iterchildren():
         if child.tag.endswith("}p"):
             para = Paragraph(child, docx)
             text = _paragraph_to_text(para, counters)
-            if text is None:  # 빈 문단
+            images = _paragraph_images(para, ocr_cache) if ocr_images else []
+            if text is None and not images:  # 빈 문단
                 continue
-            if not _is_list(para.style.name):
+            if not _is_list(para.style.name) or images:
                 counters.clear()
-            blocks.append(text)
+            if text is not None:
+                blocks.append(text)
+            blocks.extend(images)
         elif child.tag.endswith("}tbl"):
             counters.clear()
             blocks.append(_table_to_text(Table(child, docx)))
 
     return _join_blocks(blocks)
+
+
+# -------------------------------------------------------------------- image
+
+def _paragraph_images(para: Paragraph, cache: dict[str, str | None]) -> list[str]:
+    """문단 안의 이미지를 순서대로 OCR한 결과 목록. 실패하거나 결과가 비면 뺀다."""
+    results: list[str] = []
+    for rid in _image_rids(para):
+        part = para.part.related_parts.get(rid)
+        if part is None:
+            continue
+        key = str(part.partname)
+        if key not in cache:
+            cache[key] = _ocr_part(part)
+        if cache[key]:
+            results.append(cache[key])
+    return results
+
+
+def _image_rids(para: Paragraph) -> list[str]:
+    """문단에 들어 있는 이미지의 관계 ID. 새 형식(a:blip)과 옛 VML 형식(v:imagedata)을 모두 찾는다."""
+    rids: list[str] = []
+    for el in para._p.iter(f"{{{_NS_A}}}blip", f"{{{_NS_V}}}imagedata"):
+        rid = el.get(f"{{{_NS_R}}}embed") or el.get(f"{{{_NS_R}}}id")
+        # mc:AlternateContent는 같은 그림을 두 번 담기도 하므로 중복을 뺀다.
+        if rid and rid not in rids:
+            rids.append(rid)
+    return rids
+
+
+def _ocr_part(part) -> str | None:
+    content_type = getattr(part, "content_type", "")
+    if content_type not in _OCR_CONTENT_TYPES:
+        logger.info("OCR할 수 없는 이미지 형식이라 건너뜀: %s (%s)", part.partname, content_type)
+        return None
+
+    from ocr.provider import ocr_image  # OCR 의존성은 이미지가 있을 때만 불러온다
+
+    try:
+        text = ocr_image(part.blob).strip()
+    except Exception:
+        # OCR이 안 돼도 문서 본문 변환은 계속한다.
+        logger.warning("docx 이미지 OCR 실패, 건너뜀: %s", part.partname, exc_info=True)
+        return None
+    return text or None
 
 
 
