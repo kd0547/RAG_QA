@@ -68,3 +68,5 @@ LOG_DIR = Path(__file__).resolve().parent / os.getenv("LOG_DIR", "logs")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 # 날짜별로 교체된 로그 파일을 며칠치 남길지
 LOG_BACKUP_DAYS = int(os.getenv("LOG_BACKUP_DAYS", "30"))
+# DB(access_log)에 남긴 HTTP 접속 기록을 며칠치 보관할지
+ACCESS_LOG_RETENTION_DAYS = int(os.getenv("ACCESS_LOG_RETENTION_DAYS", "90"))

@@ -32,6 +32,8 @@ export default defineConfig({
       '/prompts': API_TARGET,
       // '/spec'(화면 경로)와 겹치지 않도록 복수형만 프록시한다
       '/specs': API_TARGET,
+      // 서버 상태 API. 화면 경로는 '/status'라 겹치지 않는다
+      '/monitor': API_TARGET,
     },
   },
 })

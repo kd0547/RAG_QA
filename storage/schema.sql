@@ -296,3 +296,20 @@ create table if not exists graph_relation_block (
     created_at text not null default current_timestamp,
     primary key (src_type, src_norm, type, dst_type, dst_norm)
 );
+
+-- access_log: HTTP 접속 기록. app/access_log.py 미들웨어가 모아서 넣고, ACCESS_LOG_RETENTION_DAYS가 지나면 지운다.
+-- 정적 파일(/assets/)과 상태 대시보드 폴링(/monitor/)은 남기지 않는다.
+create table if not exists access_log (
+    id          integer primary key autoincrement,
+    ts          text not null,                  -- UTC '2026-11-10T03:15:42Z'
+    client_ip   text not null default '',
+    method      text not null,
+    path        text not null,                  -- 실제 요청 경로
+    route       text not null,                  -- 묶음 기준: API는 경로 템플릿(/file/{file_id}), 화면은 실제 경로
+    query       text not null default '',
+    status      integer not null,
+    duration_ms real not null,
+    user_agent  text not null default ''
+);
+CREATE INDEX IF NOT EXISTS idx_access_log_ts ON access_log(ts);
+CREATE INDEX IF NOT EXISTS idx_access_log_ip ON access_log(client_ip);

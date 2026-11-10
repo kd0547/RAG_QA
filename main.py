@@ -14,7 +14,10 @@ from langchain_openai import ChatOpenAI
 
 import config
 from agent.reranker import load_rerank
+from app import access_log, system_monitor
+from app.access_log import AccessLogMiddleware
 from app.routers.app_config import router as config_router
+from app.routers.monitor import router as monitor_router
 from app.routers.files import router as file_router
 from app.routers.graph import router as graph_router
 from app.routers.group import router as group_router
@@ -53,6 +56,10 @@ async def lifespan(app: FastAPI):
         config.PUBLIC_BASE_URL, config.REVIEWER_EMAIL,
         config.DEFAULT_CHUNK_SIZE, config.DEFAULT_CHUNK_OVERLAP,
     )
+
+    # 접속 기록 저장(access_log 테이블)과 CPU·메모리·GPU 측정 스레드. 서버 상태 화면(/status)이 읽는다.
+    access_log.start()
+    system_monitor.start()
 
     # 기본 프롬프트가 DB에 없으면 agent/prompt.py 내용으로 넣는다.
     # 실패해도 에이전트는 agent/prompt.py 원문으로 동작하므로 서버 시작은 막지 않는다.
@@ -113,11 +120,15 @@ async def lifespan(app: FastAPI):
     still_running = [t.name for t in (producer, consumer) if t.is_alive()]
     if still_running:
         logger.warning("종료 대기 시간 안에 끝나지 않은 스레드: %s", still_running)
+    system_monitor.stop()
+    access_log.stop()  # 큐에 남은 접속 기록을 저장한다
     logger.info("서버 종료")
 
 
 app = FastAPI(title="RAG PDF Uploader", lifespan=lifespan)
+app.add_middleware(AccessLogMiddleware)
 app.include_router(config_router)
+app.include_router(monitor_router)
 app.include_router(file_router)
 app.include_router(group_router)
 app.include_router(graph_router)
@@ -136,7 +147,7 @@ if FRONTEND_DIST.is_dir():
     @app.get("/{spa_path:path}", include_in_schema=False)
     def frontend(spa_path: str) -> FileResponse:
         # 존재하지 않는 API 요청에 HTML을 반환하면 프론트엔드에서 JSON 파싱 오류가 난다.
-        if spa_path.split("/", 1)[0] in {"file", "files", "groups", "config", "upload", "ask", "search", "mails", "prompts", "specs", "graph"}:
+        if spa_path.split("/", 1)[0] in {"file", "files", "groups", "config", "upload", "ask", "search", "mails", "prompts", "specs", "graph", "monitor"}:
             raise HTTPException(status_code=404, detail="요청한 API를 찾을 수 없습니다.")
         target = (FRONTEND_DIST / spa_path).resolve()
         # resolve() 후 dist 하위인지 확인해 경로 탈출(../)을 막는다

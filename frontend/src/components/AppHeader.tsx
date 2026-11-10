@@ -1,8 +1,8 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { linkProps } from '../lib/router';
 import { LogoMark } from './icons';
 
-type AppKey = 'rag' | 'mail' | 'spec' | 'knowledge' | 'prompt';
+type AppKey = 'rag' | 'mail' | 'spec' | 'knowledge' | 'prompt' | 'status';
 
 /** 공통 메뉴. OCR 도구는 /ocr 경로로만 제공한다. */
 const APPS: { key: AppKey; label: string; path: string }[] = [
@@ -11,6 +11,7 @@ const APPS: { key: AppKey; label: string; path: string }[] = [
     { key: 'spec', label: '제품 사양', path: '/spec' },
     { key: 'knowledge', label: '지식 그래프', path: '/knowledge' },
     { key: 'prompt', label: '프롬프트', path: '/prompt' },
+    { key: 'status', label: '서버 상태', path: '/status' },
 ];
 
 /**
@@ -26,10 +27,26 @@ export function AppHeader({
     children?: ReactNode;
     aside?: ReactNode;
 }) {
+    // 메뉴가 넘칠 때(휴대폰) 지금 화면의 메뉴가 보이도록 그 위치로 넘겨 둔다
+    const menuRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const menu = menuRef.current;
+        const active = menu?.querySelector<HTMLElement>('[aria-current="page"]');
+        if (menu && active && menu.scrollWidth > menu.clientWidth) {
+            menu.scrollLeft = active.offsetLeft - (menu.clientWidth - active.offsetWidth) / 2;
+        }
+    }, [current]);
+
     return (
         <header className="h-14 shrink-0 border-b border-divide px-3 sm:px-5 flex items-center gap-3 sm:gap-4">
             <LogoMark className="hidden sm:block w-5 h-5 shrink-0" />
-            <div role="group" aria-label="앱 전환" className="shrink-0 flex p-0.5 rounded-full bg-chip">
+            {/* 휴대폰 폭에서는 메뉴가 다 안 들어가므로 가로로 넘겨 본다 */}
+            <div
+                ref={menuRef}
+                role="group"
+                aria-label="앱 전환"
+                className="shrink-0 max-sm:shrink max-sm:min-w-0 overflow-x-auto [scrollbar-width:none] flex p-0.5 rounded-full bg-chip"
+            >
                 {APPS.map((a) => {
                     const active = a.key === current;
                     return (

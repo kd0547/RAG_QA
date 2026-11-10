@@ -5,6 +5,7 @@ import { PromptSection } from './prompt/PromptSection.tsx'
 import { FileReview } from './rag/FileReview.tsx'
 import { KnowledgeSection } from './knowledge/KnowledgeSection.tsx'
 import { SpecSection } from './spec/SpecSection.tsx'
+import { StatusSection } from './status/StatusSection.tsx'
 import { getRoute, normalizeLegacyHash, normalizeLegacyMailLink, subscribeRoute } from './lib/router'
 
 /**
@@ -38,6 +39,7 @@ export function Root() {
   if (route === 'review') return <FileReview />
   if (route === 'knowledge') return <KnowledgeSection />
   if (route === 'spec') return <SpecSection />
+  if (route === 'status') return <StatusSection />
   if (route === 'mail' || route.startsWith('mail/')) return <MailSection route={route} />
   if (route === 'ocr') {
     return (

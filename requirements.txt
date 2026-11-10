@@ -36,3 +36,6 @@ pillow
 # 검토 메일 본문(마크다운 -> HTML). 루트의 markdown/ 폴더와 이름이 같아,
 # 설치되지 않으면 import가 그 폴더로 잡혀 AttributeError가 난다.
 Markdown
+
+# 서버 상태 화면(/status)의 CPU·메모리 측정 (GPU는 nvidia-smi)
+psutil

@@ -19,12 +19,23 @@ services:
     environment:
       # 임베딩(bge-m3)은 아래 ollama 컨테이너가 맡는다. langchain-ollama는 OLLAMA_HOST를 읽는다.
       - OLLAMA_HOST=http://ollama:11434
+      # 아래 deploy의 GPU는 nvidia-smi용이다. 연산(compute)은 빼서 리랭커가 GPU로 옮겨가지 않게 한다.
+      - NVIDIA_DRIVER_CAPABILITIES=utility
     extra_hosts:
       # 같은 서버의 vLLM 등 호스트 서비스를 host.docker.internal로 부를 수 있게 한다 (리눅스용)
       - "host.docker.internal:host-gateway"
     depends_on:
       - ollama
     restart: unless-stopped
+    # 서버 상태 화면(/status)의 GPU 사용량을 읽으려고 nvidia-smi만 붙인다 (utility = nvidia-smi·NVML).
+    # compute를 주지 않으므로 이 컨테이너의 연산(리랭커 등)은 지금처럼 CPU에서 돈다.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility]
 
   # 임베딩 전용 Ollama. 모델은 처음 한 번 받아야 한다:
   #   docker compose exec ollama ollama pull bge-m3

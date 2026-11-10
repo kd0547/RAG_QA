@@ -9,6 +9,7 @@
  *  - `/prompt` 프롬프트 설정
  *  - `/spec`   제품·부품 사양 관리
  *  - `/knowledge?entity=…`  지식 그래프 (문서에서 뽑은 개체·관계 보기와 편집)
+ *  - `/status` 서버 상태 (CPU·메모리·GPU, 접속 기록)
  *
  * 서버에 없는 경로이므로 index.html로 fallback 해줘야 한다.
  * (개발: vite SPA fallback 기본 동작 · 배포: main.py 의 catch-all)
