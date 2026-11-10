@@ -91,6 +91,7 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     SpecAttribute("cpu_cache_mb", "CPU 캐시", "cpu", "number", "MB", aliases=("캐시", "캐쉬", "캐시메모리", "l3 캐시")),
     SpecAttribute("npu_tops", "NPU 성능", "cpu", "number", "TOPS"),
     SpecAttribute("chipset", "칩셋", "cpu", "text", "", "예: AMD Kraken Mobile Platform", aliases=("chipset", "칩셋")),
+    SpecAttribute("cpu_socket", "CPU 소켓", "cpu", "text", "", "데스크톱. 예: LGA1700", aliases=("cpu socket", "socket", "소켓")),
     # 메모리
     SpecAttribute("ram_type", "메모리 종류", "memory", "text", "", "예: DDR5 SO-DIMM, LPDDR5x", aliases=("메모리종류", "메모리 타입", "ram type")),
     SpecAttribute("ram_gb", "메모리 용량", "memory", "number", "GB", "기본·옵션 구성을 각각 한 행으로", aliases=("메모리", "memory", "ram", "주기억장치", "주기억장치(ram)", "메모리용량", "기본메모리")),
@@ -101,6 +102,8 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     SpecAttribute("ssd_interface", "SSD 인터페이스", "storage", "text", "", "예: M.2 2280 PCIe Gen4 x4 NVMe", aliases=("ssd 인터페이스", "ssd 규격", "저장장치 인터페이스", "interface", "인터페이스")),
     SpecAttribute("ssd_slots", "SSD 슬롯 수", "storage", "number", "개"),
     SpecAttribute("hdd_supported", "HDD 장착 가능", "storage", "bool"),
+    SpecAttribute("hdd_gb", "HDD 용량", "storage", "number", "GB", "옵션이 여러 개면 슬래시로. 예: 2048 / 4096(옵션)",
+                  aliases=("hdd 용량", "하드디스크 용량")),
     # 사내 SSD 비교표 항목 (부품 사양으로 주로 쓴다)
     SpecAttribute("ssd_form_factor", "SSD 폼팩터", "storage", "text", "", "예: M.2, 2.5인치", aliases=("form factor", "form factors", "폼팩터", "폼 팩터")),
     SpecAttribute("ssd_nvme_version", "NVMe 버전", "storage", "text", "", "예: 1.4, 2.0c", aliases=("nvme ver.", "nvme ver", "nvme version", "nvme 버전", "nvme")),
@@ -129,12 +132,16 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     SpecAttribute("usb_a_ports", "USB-A 단자 수", "io", "number", "개", aliases=("usb-a", "usb a", "usb type-a")),
     SpecAttribute("usb_c_ports", "USB-C 단자 수", "io", "number", "개", aliases=("usb-c", "usb c", "usb type-c")),
     SpecAttribute("usb_total_ports", "USB 단자 합계", "io", "number", "개", aliases=("usb", "usb port", "usb단자")),
+    SpecAttribute("lan_controller", "LAN 컨트롤러", "network", "text", "", "예: Intel i219LM x 1ea", aliases=("lan 컨트롤러", "lan chip", "lan 칩")),
     SpecAttribute("lan_port", "유선 LAN 단자", "io", "bool", aliases=("유선lan", "유선 lan", "lan", "rj-45", "rj45")),
     SpecAttribute("card_reader", "카드리더", "io", "bool", aliases=("카드리더", "카드리더기", "card reader")),
     SpecAttribute("audio_jack", "오디오 잭", "io", "bool"),
-    SpecAttribute("audio", "오디오", "io", "text", "", "예: HD Audio, 스피커 2개, 마이크 내장", aliases=("audio", "사운드", "스피커")),
+    SpecAttribute("audio", "오디오", "io", "text", "", "예: HD Audio, 스피커 2개, 마이크 내장", aliases=("audio", "sound", "사운드", "스피커")),
+    SpecAttribute("pci_slots", "PCI 확장 슬롯", "io", "text", "", "데스크톱. 예: PCIe 4.0 x16 * 1ea, PCIe 3.0 x1 * 2ea, PCI * 1ea",
+                  aliases=("pci 확장", "pci slot", "pci slots", "확장 슬롯")),
+    SpecAttribute("front_ports", "전면 포트", "io", "text", "", "데스크톱 앞면 단자. 뒷면은 단자 구성에", aliases=("front port", "front ports")),
     SpecAttribute("io_ports", "단자 구성", "io", "text", "", "제안서의 I/O Port 칸을 그대로. 단자 수는 위 숫자 속성에 따로",
-                  aliases=("i/o port", "i/o ports", "io port", "io ports", "입출력 단자", "포트 구성", "단자")),
+                  aliases=("i/o port", "i/o ports", "io port", "io ports", "입출력 단자", "포트 구성", "단자", "후면 포트", "rear port", "rear ports")),
     # 네트워크
     SpecAttribute("wifi", "무선 LAN", "network", "text", "", "예: Wi-Fi 6E AX210", aliases=("무선", "무선lan", "무선 lan", "wi-fi", "wireless", "wireless lan", "wlan")),
     SpecAttribute("bluetooth", "블루투스", "network", "text", "", "예: 5.2", aliases=("블루투스", "bt")),
@@ -142,6 +149,9 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     # 전원
     SpecAttribute("battery_wh", "배터리 용량", "power", "number", "Wh", aliases=("배터리", "battery")),
     SpecAttribute("adapter_w", "어댑터 출력", "power", "number", "W", aliases=("어댑터", "adapter", "전원어댑터")),
+    SpecAttribute("psu_w", "파워 출력", "power", "number", "W", "데스크톱. 설명을 같이 적어도 첫 숫자를 읽는다. 예: 500W 80+ (700W 개별 상품화 가능)",
+                  aliases=("파워", "power", "psu", "파워서플라이")),
+    SpecAttribute("energy_kwh_year", "소비 전력량", "power", "number", "kWh/년", "예: 161.13 kWh/년 이하", aliases=("소비전력량", "연간 소비 전력량")),
     SpecAttribute("usb_c_charging", "USB-C 충전", "power", "bool"),
     # 크기·무게
     SpecAttribute("weight_kg", "무게", "body", "number", "kg", aliases=("무게", "중량", "weight")),
@@ -150,6 +160,7 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     SpecAttribute("housing", "베어본(하우징)", "body", "text", "", "예: Clevo V561KNP Bare-bone (with CPU)",
                   aliases=("housing", "베어본", "barebone", "bare-bone", "하우징")),
     SpecAttribute("keyboard", "키보드", "body", "text", "", "예: 102키, 백라이트, Copilot 키", aliases=("keyboard", "자판")),
+    SpecAttribute("case_type", "케이스", "body", "text", "", "데스크톱. 예: Mini Tower형, LP Slim형 (Genesis-5)", aliases=("case", "케이스 형태")),
     # 운영체제
     SpecAttribute("os", "운영체제", "os", "text", "", "예: Windows 11 Pro", aliases=("운영체제", "운영체제(os)", "operating system", "윈도우")),
     SpecAttribute("software", "기본 소프트웨어", "os", "text", "", "예: 복원 솔루션, 전자매뉴얼",
