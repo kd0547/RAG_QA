@@ -72,8 +72,11 @@ export interface Product {
     category: string;
     status: string;
     note: string;
+    /** 상위 모델 id. null이면 최상위 모델 */
+    parent_id: string | null;
     spec_count: number;
     component_count: number;
+    child_count: number;
     created_at: string;
     updated_at: string;
 }
@@ -84,6 +87,12 @@ export interface ProductInput {
     category: string;
     status: string;
     note: string;
+    parent_id: string | null;
+}
+
+export interface ProductRef {
+    id: string;
+    model: string;
 }
 
 export interface LinkedComponent {
@@ -99,6 +108,10 @@ export interface LinkedComponent {
 export interface ProductDetail extends Product {
     specs: SpecValue[];
     components: LinkedComponent[];
+    /** 최상위 모델부터 바로 위 모델까지 */
+    ancestors: ProductRef[];
+    /** 바로 아래 하위(파생) 모델 */
+    children: (ProductRef & { name: string; status: string })[];
 }
 
 export interface Component {
@@ -144,6 +157,8 @@ export interface ImportPreviewRow {
     label: string;
     attribute_key: string | null;
     match: 'key' | 'name' | 'alias' | null;
+    /** 사전에 아직 없는 기본 속성에 맞은 행. 적용할 때 이 속성을 새로 만든다 */
+    new_attribute: ImportNewAttribute | null;
     cells: ImportPreviewCell[];
 }
 
@@ -152,6 +167,10 @@ export interface ImportPreviewColumn {
     header: string;
     owner_id: string | null;
     owner_label: string | null;
+    /** 제품 표의 '상위 모델' 행 값. 있으면 그 모델의 하위(파생) 모델로 등록한다 */
+    parent_model: string | null;
+    /** 제품 표의 '제품 이름' 행 값 */
+    name: string | null;
 }
 
 export interface ImportPreview {
@@ -181,12 +200,14 @@ export interface ImportBody {
     replace: boolean;
     source_note: string;
     source_page: number | null;
-    columns: { header: string; owner_id: string | null; create: boolean; skip: boolean }[];
+    columns: { header: string; owner_id: string | null; create: boolean; skip: boolean; parent_model?: string | null; name?: string | null }[];
     rows: { attribute_key: string | null; new_attribute: ImportNewAttribute | null; cells: string[] }[];
 }
 
 export interface ImportSummary {
     owners_created: number;
+    /** 상위 모델을 맞춘 제품 수 */
+    parents_set?: number;
     attributes_created: number;
     values_added: number;
     values_replaced: number;

@@ -2,7 +2,7 @@
 
 - /specs/meta                 분류·종류·상태 코드와 표시 이름
 - /specs/attributes           속성 사전 CRUD, /defaults 로 기본 속성 추가
-- /specs/products             제품 CRUD, /{id}/components 로 부품 연결
+- /specs/products             제품 CRUD (parent_id로 하위 모델), /{id}/components 로 부품 연결
 - /specs/components           부품 CRUD
 - /specs/values               사양 값 추가·수정·삭제 (제품·부품 공통)
 """
@@ -105,6 +105,7 @@ class ProductCreate(BaseModel):
     category: str = "notebook"
     status: str = "active"
     note: str = ""
+    parent_id: str | None = None  # 상위 모델 id. 있으면 하위(파생) 모델로 등록한다
 
 
 class ProductUpdate(BaseModel):
@@ -113,6 +114,7 @@ class ProductUpdate(BaseModel):
     category: str | None = None
     status: str | None = None
     note: str | None = None
+    parent_id: str | None = None  # 넘기면 반영한다. null이면 최상위 모델로 올린다
 
 
 class ComponentLink(BaseModel):

@@ -31,6 +31,8 @@ interface EditColumn {
     owner_label: string | null;
     create: boolean;
     skip: boolean;
+    parent_model?: string | null;
+    name?: string | null;
 }
 
 const OPTION_MARK = /\(?\s*(옵션|option|opt|선택)\s*\)?/i;
@@ -63,9 +65,9 @@ function hint(dataType: DataType | undefined, text: string): string | null {
 function toRows(preview: ImportPreview): EditRow[] {
     return preview.rows.map((r) => ({
         label: r.label,
-        mode: r.attribute_key ? 'attribute' : 'skip',
+        mode: r.attribute_key ? 'attribute' : r.new_attribute ? 'new' : 'skip',
         attribute_key: r.attribute_key ?? '',
-        newAttribute: { key: '', name: r.label, category: 'other', data_type: 'text', unit: '', description: '' },
+        newAttribute: r.new_attribute ?? { key: '', name: r.label, category: 'other', data_type: 'text', unit: '', description: '' },
         cells: r.cells.map((c) => c.raw),
         match: r.match,
     }));
@@ -225,7 +227,10 @@ export function ImportTab({
             // 이미지 > 엑셀 > 붙여넣기 순으로 하나만 읽는다
             const upload = image?.file ?? file;
             const preview = await specApi.parseImport({ owner_type: ownerType, kind: effectiveKind, text: upload ? undefined : text.trim() || undefined, file: upload });
-            setColumns(preview.columns.map((c) => ({ header: c.header, owner_id: c.owner_id, owner_label: c.owner_label, create: true, skip: false })));
+            setColumns(preview.columns.map((c) => ({
+                header: c.header, owner_id: c.owner_id, owner_label: c.owner_label, create: true, skip: false,
+                parent_model: c.parent_model, name: c.name,
+            })));
             setRows(toRows(preview));
             setSource(preview.source);
             setSkippedColumns(preview.skipped_columns);
@@ -255,7 +260,7 @@ export function ImportTab({
             replace,
             source_note: sourceNote.trim(),
             source_page: null,
-            columns: columns.map((c) => ({ header: c.header, owner_id: c.owner_id, create: c.create, skip: c.skip })),
+            columns: columns.map((c) => ({ header: c.header, owner_id: c.owner_id, create: c.create, skip: c.skip, parent_model: c.parent_model ?? null, name: c.name ?? null })),
             rows: rows.map((r) => ({
                 attribute_key: r.mode === 'attribute' ? r.attribute_key || null : null,
                 new_attribute: r.mode === 'new' ? { ...r.newAttribute, key: r.newAttribute.key.trim().toLowerCase() } : null,
@@ -336,7 +341,11 @@ export function ImportTab({
                         </Field>
                     )}
                     <a href={specApi.templateUrl(ownerType, effectiveKind)} download className={btnGhost}>엑셀 양식 내려받기</a>
-                    <span className="text-[11.5px] text-muted">양식에는 현재 속성과 등록된 {ownerType === 'product' ? '제품' : '부품'}의 값이 채워져 있습니다. 고쳐서 다시 올리면 됩니다.</span>
+                    <span className="text-[11.5px] leading-5 text-muted max-w-[560px]">
+                        {ownerType === 'product'
+                            ? '열 하나가 모델 하나입니다. 위쪽 상위 모델·제품 이름 행을 채우면 시리즈와 파생 모델이 함께 등록되고, 여러 모델에 같은 값은 제안서처럼 셀을 병합하면 됩니다. 등록된 제품과 값이 채워져 있어 고쳐서 다시 올려도 됩니다.'
+                            : '이 부품 종류에 쓰는 속성만 분류별로 들어 있습니다. 등록된 부품과 값이 채워져 있어 고쳐서 다시 올리면 됩니다.'}
+                    </span>
                 </div>
             </section>
 
@@ -493,7 +502,7 @@ export function ImportTab({
                     {error && <Notice kind="error">{error}</Notice>}
                     {result && (
                         <Notice kind="ok">
-                            적용했습니다. {ownerType === 'product' ? '제품' : '부품'} {result.owners_created}개 새로 등록, 속성 {result.attributes_created}개 추가,
+                            적용했습니다. {ownerType === 'product' ? '제품' : '부품'} {result.owners_created}개 새로 등록,{result.parents_set ? ` 하위 모델 ${result.parents_set}개 연결,` : ''} 속성 {result.attributes_created}개 추가,
                             값 {result.values_added}건 저장(기존 값 {result.values_replaced}건 교체), 건너뛴 행 {result.rows_skipped}개.
                             <button type="button" onClick={() => onOpenTab(ownerType === 'product' ? 'products' : 'components')} className={`${btnTiny} ml-2 text-brand`}>
                                 {ownerType === 'product' ? '제품 탭에서 확인' : '부품 탭에서 확인'}
@@ -518,6 +527,13 @@ export function ImportTab({
                                         {c.owner_id ? <Pill tone="brand">기존</Pill> : c.create ? <Pill tone="warn">새로 등록</Pill> : <Pill>미등록</Pill>}
                                     </div>
                                     {c.owner_label && c.owner_label !== c.header && <div className="mt-0.5 text-[11px] font-normal text-muted truncate">{c.owner_label}</div>}
+                                    {(c.parent_model || c.name) && (
+                                        <div className="mt-0.5 text-[11px] font-normal text-muted truncate" title={[c.parent_model && `상위 모델 ${c.parent_model}`, c.name && `이름 ${c.name}`].filter(Boolean).join(' · ')}>
+                                            {c.parent_model && <>상위 <span className="font-semibold text-ink">{c.parent_model}</span></>}
+                                            {c.parent_model && c.name && ' · '}
+                                            {c.name}
+                                        </div>
+                                    )}
                                     <div className="mt-1 flex items-center gap-2 text-[11px] font-normal text-muted">
                                         {!c.owner_id && (
                                             <label className="inline-flex items-center gap-1">

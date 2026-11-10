@@ -4,8 +4,11 @@
     | 속성      | 단위 | N5800 | A650        |
     | 메모리 용량 | GB  | 16    | 16 / 32(옵션) |
 
-- 첫 열은 속성(키 또는 이름). "단위", "설명" 같은 보조 열은 건너뛴다.
+- 속성은 "속성키"·"속성명" 머리글이 있으면 그 열에서 읽고(키가 비면 이름), 없으면 첫 열에서 읽는다.
+  "분류", "단위", "설명" 같은 보조 열은 값 열로 보지 않는다.
 - 나머지 열 머리글은 제품 모델명(부품이면 부품 모델명)이다.
+- 제품 표에서 "상위 모델"·"제품 이름" 행은 사양 값이 아니라 그 열 제품의 정보다 (엑셀 양식 위쪽의 모델 정보 행).
+  상위 모델 칸에 모델명을 적으면 그 모델의 하위(파생) 모델로 등록한다.
 - 셀 하나에 값이 여러 개면 줄바꿈, 세미콜론, 공백이 붙은 슬래시(" / ")로 나눈다. "MB/s", "N/A",
   "w/Hsink"처럼 붙어 있는 슬래시는 나누지 않는다. "(옵션)" 표시가 있거나 두 번째 값부터는 옵션 구성으로 본다.
 - TBD, N/A, ?, 미정 같은 표기는 값이 아니라서 건너뛴다 (그 칸은 저장하지 않는다).
@@ -19,7 +22,7 @@ import io
 import re
 from pathlib import Path
 
-from entity.spec import DEFAULT_ATTRIBUTES
+from entity.spec import DEFAULT_ATTRIBUTES, SpecAttribute
 from repository.spec_repository import parse_value
 
 # 첫 열 다음에 올 수 있는 보조 열. 머리글이 이 중 하나면 값 열로 보지 않는다.
@@ -29,6 +32,14 @@ _META_HEADERS = frozenset(
         "단위", "unit", "설명", "description", "분류", "category", "비고", "note", "자료형", "type",
     )
 )
+# 속성 키·이름을 읽는 열의 머리글
+_KEY_HEADERS = ("속성키", "속성 키", "키", "key")
+_NAME_HEADERS = ("속성명", "속성 이름", "속성이름", "이름", "name")
+# 제품 표의 모델 정보 행: 정규화한 표기 → 미리보기 열에 넣을 필드
+PRODUCT_INFO_ROWS: dict[str, str] = {
+    "parentmodel": "parent_model", "상위모델": "parent_model", "시리즈": "parent_model",
+    "productname": "name", "제품이름": "name", "제품명": "name",
+}
 _OPTION_MARK = re.compile(r"\(?\s*(옵션|option|opt|선택)\s*\)?", re.IGNORECASE)
 # 값 구분자: 줄바꿈, 세미콜론, 양쪽(또는 한쪽)에 공백이 있는 슬래시. "MB/s", "N/A"는 붙어 있어 나뉘지 않는다
 _VALUE_SPLIT = re.compile(r"[\n;]|\s+/\s*|\s*/\s+")
@@ -117,16 +128,22 @@ def split_cell(raw: str) -> list[dict]:
 
 # ---------- 속성 맞추기 ----------
 
-def build_attribute_index(attributes: list[dict]) -> dict[str, tuple[str, str]]:
-    """정규화한 표기 -> (속성 키, 맞춘 방법). 키·이름·기본 별칭을 모두 등록한다."""
+def build_attribute_index(attributes: list[dict], *, include_defaults: bool = False) -> dict[str, tuple[str, str]]:
+    """정규화한 표기 -> (속성 키, 맞춘 방법). 키·이름·기본 별칭을 모두 등록한다.
+
+    include_defaults면 아직 사전에 없는 기본 속성(entity/spec.py)도 뒤에 등록한다. 사전에 있는 속성이 먼저 맞는다.
+    """
     index: dict[str, tuple[str, str]] = {}
     defaults = {a.key: a for a in DEFAULT_ATTRIBUTES}
-    for attribute in attributes:
-        key = attribute["key"]
+    entries = [(a["key"], a["name"], a.get("unit") or "") for a in attributes]
+    if include_defaults:
+        known = {a["key"] for a in attributes}
+        entries += [(a.key, a.name, a.unit) for a in DEFAULT_ATTRIBUTES if a.key not in known]
+    for key, name, unit in entries:
         index.setdefault(normalize_label(key), (key, "key"))
-        index.setdefault(normalize_label(attribute["name"]), (key, "name"))
-        if attribute.get("unit"):
-            index.setdefault(normalize_label(f"{attribute['name']}({attribute['unit']})"), (key, "name"))
+        index.setdefault(normalize_label(name), (key, "name"))
+        if unit:
+            index.setdefault(normalize_label(f"{name}({unit})"), (key, "name"))
         default = defaults.get(key)
         if default:
             for alias in default.aliases:
@@ -134,8 +151,24 @@ def build_attribute_index(attributes: list[dict]) -> dict[str, tuple[str, str]]:
     return index
 
 
-def analyze_grid(grid: list[list[str]], attributes: list[dict]) -> dict:
-    """격자를 미리보기 구조로 바꾼다. 속성 맞추기와 값 검증까지 한다. 저장은 하지 않는다."""
+def missing_default(key: str, attributes: list[dict]) -> SpecAttribute | None:
+    """key가 사전에는 없고 기본 속성에만 있으면 그 기본 속성을 돌려준다."""
+    if any(a["key"] == key for a in attributes):
+        return None
+    return next((a for a in DEFAULT_ATTRIBUTES if a.key == key), None)
+
+
+def _find_column(header: list[str], names: tuple[str, ...]) -> int | None:
+    wanted = {normalize_label(n) for n in names}
+    return next((i for i, h in enumerate(header) if normalize_label(h) in wanted), None)
+
+
+def analyze_grid(grid: list[list[str]], attributes: list[dict], owner_type: str = "product") -> dict:
+    """격자를 미리보기 구조로 바꾼다. 속성 맞추기와 값 검증까지 한다. 저장은 하지 않는다.
+
+    사전에 없는 기본 속성에 맞은 행은 attribute_key 없이 new_attribute(기본 속성 정의)를 붙여 돌려준다.
+    적용할 때 그 속성을 사전에 만들고 값을 넣는다.
+    """
     if len(grid) < 2 or len(grid[0]) < 2:
         raise ValueError("표에 머리글 행과 값 열이 최소 하나씩 있어야 합니다. 첫 열은 속성, 나머지 열은 모델명입니다.")
 
@@ -148,15 +181,31 @@ def analyze_grid(grid: list[list[str]], attributes: list[dict]) -> dict:
     if not value_columns:
         raise ValueError("모델명 열을 찾지 못했습니다. 머리글에 제품(부품) 모델명이 있어야 합니다.")
 
-    index = build_attribute_index(attributes)
+    index = build_attribute_index(attributes, include_defaults=True)
     data_types = {a["key"]: a["data_type"] for a in attributes}
+    data_types.update({a.key: a.data_type for a in DEFAULT_ATTRIBUTES if a.key not in data_types})
+    key_col, name_col = _find_column(header, _KEY_HEADERS), _find_column(header, _NAME_HEADERS)
+    label_cols = [c for c in (key_col, name_col) if c is not None] or [0]
+    info: dict[int, dict[str, str]] = {c: {} for c in value_columns}
     rows = []
     for r, row in enumerate(grid[1:], start=1):
-        label = row[0].strip()
-        if not label:
+        labels = [row[c].strip() for c in label_cols if c < len(row) and row[c].strip()]
+        if not labels:
             continue
-        matched = index.get(normalize_label(label))
+        # 화면에 보일 행 이름은 사람이 읽는 이름(속성명)을 먼저 쓴다
+        label = row[name_col].strip() if name_col is not None and name_col < len(row) and row[name_col].strip() else labels[0]
+
+        info_field = next((PRODUCT_INFO_ROWS[n] for n in map(normalize_label, labels) if n in PRODUCT_INFO_ROWS), None)
+        if owner_type == "product" and info_field:
+            for c in value_columns:
+                value = " ".join((row[c] if c < len(row) else "").split())
+                if value and value.lower() not in UNKNOWN_TOKENS:
+                    info[c][info_field] = value
+            continue
+
+        matched = next((index[n] for n in map(normalize_label, labels) if n in index), None)
         attribute_key, match = matched if matched else (None, None)
+        default = missing_default(attribute_key, attributes) if attribute_key else None
         cells = []
         for c in value_columns:
             raw = row[c] if c < len(row) else ""
@@ -166,13 +215,26 @@ def analyze_grid(grid: list[list[str]], attributes: list[dict]) -> dict:
             cells.append({"column": c, "raw": raw, "values": values})
         if not any(cell["values"] for cell in cells):
             continue  # 값이 하나도 없는 행은 미리보기에서 뺀다
-        rows.append({"index": r, "label": label, "attribute_key": attribute_key, "match": match, "cells": cells})
+        new_attribute = None
+        if default is not None:
+            new_attribute = {
+                "key": default.key, "name": default.name, "category": default.category,
+                "data_type": default.data_type, "unit": default.unit, "description": default.description,
+            }
+            attribute_key = None
+        rows.append({
+            "index": r, "label": label, "attribute_key": attribute_key, "match": match,
+            "new_attribute": new_attribute, "cells": cells,
+        })
 
     return {
-        "columns": [{"index": c, "header": header[c].strip()} for c in value_columns],
+        "columns": [
+            {"index": c, "header": header[c].strip(), "parent_model": info[c].get("parent_model"), "name": info[c].get("name")}
+            for c in value_columns
+        ],
         "rows": rows,
         "skipped_columns": skipped,
-        "unmatched_rows": sum(1 for row in rows if row["attribute_key"] is None),
+        "unmatched_rows": sum(1 for row in rows if row["attribute_key"] is None and row["new_attribute"] is None),
     }
 
 
@@ -198,3 +260,4 @@ def extract_table_text(text: str) -> str:
     if len(table_lines) >= 2:
         return "\n".join(table_lines)
     return text or ""
+

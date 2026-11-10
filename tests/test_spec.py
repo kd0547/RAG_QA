@@ -94,6 +94,50 @@ def test_attribute_in_use_cannot_be_deleted_and_type_change_reparses(repo):
 
 # ---------- 제품 / 부품 / 사양 값 ----------
 
+def test_sub_models_form_a_tree(repo):
+    base = repo.create_product("N5800")
+    series = repo.create_product("N5800-GB70", parent_id=base["id"])
+    sku = repo.create_product("N5800-GB70-PU02", parent_id=series["id"])
+
+    assert [c["model"] for c in repo.get_product(base["id"])["children"]] == ["N5800-GB70"]
+    detail = repo.get_product(sku["id"])
+    assert detail["parent_id"] == series["id"]
+    assert [a["model"] for a in detail["ancestors"]] == ["N5800", "N5800-GB70"]
+    assert {p["model"]: p["child_count"] for p in repo.list_products()} == {"N5800": 1, "N5800-GB70": 1, "N5800-GB70-PU02": 0}
+
+    with pytest.raises(SpecNotFoundError):
+        repo.create_product("X1", parent_id="missing")
+    with pytest.raises(ValueError):
+        repo.update_product(base["id"], parent_id=base["id"])  # 자기 자신
+    with pytest.raises(ValueError):
+        repo.update_product(base["id"], parent_id=sku["id"])  # 자기 하위 모델
+    with pytest.raises(SpecConflictError):
+        repo.delete_product(series["id"])  # 하위 모델이 남아 있다
+
+    # 다른 값만 고치면 상위 모델은 그대로, parent_id=None을 넘기면 최상위로 올라간다
+    assert repo.update_product(sku["id"], name="PU02")["parent_id"] == series["id"]
+    moved = repo.update_product(sku["id"], parent_id=None)
+    assert moved["parent_id"] is None and moved["ancestors"] == []
+    repo.delete_product(series["id"])
+    assert repo.get_product(base["id"])["children"] == []
+
+
+def test_old_product_table_gets_parent_column(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE product (id TEXT PRIMARY KEY, model TEXT NOT NULL UNIQUE, name TEXT NOT NULL DEFAULT '',"
+                 " category TEXT NOT NULL DEFAULT 'notebook', status TEXT NOT NULL DEFAULT 'active', note TEXT NOT NULL DEFAULT '',"
+                 " created_at TEXT NOT NULL DEFAULT current_timestamp, updated_at TEXT NOT NULL DEFAULT current_timestamp)")
+    conn.execute("INSERT INTO product (id, model) VALUES ('p1', 'N5800')")
+    conn.commit()
+    conn.close()
+
+    repo = SpecRepository(Database(str(path)))
+    child = repo.create_product("N5800-GB70-PU02", parent_id="p1")
+    assert repo.get_product("p1")["children"][0]["id"] == child["id"]
+
+
 def test_product_specs_with_options_and_sources(repo):
     repo.add_default_attributes()
     product = repo.create_product(" N5800 ", "N5800 14세대", "notebook", "active")
@@ -177,6 +221,12 @@ def test_api_flow(client):
     pid = product.json()["id"]
     assert client.post("/specs/products", json={"model": "N5800"}).status_code == 409
     assert client.post("/specs/products", json={"model": "X", "status": "nope"}).status_code == 400
+    sub = client.post("/specs/products", json={"model": "N5800-GB70-PU02", "parent_id": pid})
+    assert sub.status_code == 201 and sub.json()["ancestors"][0]["model"] == "N5800"
+    assert client.post("/specs/products", json={"model": "N5800-Z", "parent_id": "missing"}).status_code == 404
+    assert client.delete(f"/specs/products/{pid}").status_code == 409  # 하위 모델이 있다
+    assert client.put(f"/specs/products/{pid}", json={"parent_id": sub.json()["id"]}).status_code == 400
+    assert client.delete(f"/specs/products/{sub.json()['id']}").status_code == 204
 
     value = client.post("/specs/values", json={"owner_type": "product", "owner_id": pid, "attribute_key": "ram_gb", "value_text": "16GB"})
     assert value.status_code == 201 and value.json()["value_num"] == 16.0

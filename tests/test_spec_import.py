@@ -315,6 +315,119 @@ def test_parse_apply_and_template_endpoints(client, tmp_path):
     wb = openpyxl.load_workbook(filename=__import__("io").BytesIO(template.content))
     ws = wb.worksheets[0]
     header = [cell.value for cell in ws[1]]
-    assert header[:3] == ["속성키", "속성명", "단위"] and "A650" in header and "N5800" in header
-    row = next(r for r in ws.iter_rows(min_row=2, values_only=True) if r[0] == "ram_gb")
+    assert header[:4] == ["분류", "속성키", "속성명", "단위"] and "A650" in header and "N5800" in header
+    row = next(r for r in ws.iter_rows(min_row=2, values_only=True) if r[1] == "ram_gb")
     assert row[header.index("A650")] == "16 / 32(옵션)"  # 기존 값이 채워져 내려온다
+
+
+# ---------- 엑셀 양식 (상위 모델·제품 이름 행, 병합 셀) ----------
+
+def test_row_matching_missing_default_attribute_suggests_new_attribute():
+    grid = [["항목", "A650"], ["인증명", "A600"], ["Housing", "Clevo V561KNP"]]
+    preview = analyze_grid(grid, [])  # 속성 사전이 비어 있다
+    rows = {r["label"]: r for r in preview["rows"]}
+    assert rows["인증명"]["attribute_key"] is None and rows["인증명"]["new_attribute"]["key"] == "cert_model"
+    assert rows["Housing"]["new_attribute"]["name"] == "베어본(하우징)"
+    assert preview["unmatched_rows"] == 0
+
+
+def _upload(c, wb, tmp_path, name="filled.xlsx"):
+    path = tmp_path / name
+    wb.save(path)
+    with path.open("rb") as f:
+        return c.post("/specs/import/parse", data={"owner_type": "product"}, files={"file": (name, f, "application/octet-stream")})
+
+
+def _apply_preview(c, preview):
+    return c.post("/specs/import/apply", json={
+        "owner_type": "product",
+        "columns": [{"header": col["header"], "owner_id": col["owner_id"], "create": True,
+                     "parent_model": col["parent_model"], "name": col["name"]} for col in preview["columns"]],
+        "rows": [{"attribute_key": r["attribute_key"], "new_attribute": r["new_attribute"],
+                  "cells": [cell["raw"] for cell in r["cells"]]} for r in preview["rows"]],
+    })
+
+
+def test_filled_template_creates_series_tree_and_shares_merged_values(client, tmp_path):
+    c, repo = client
+    template = c.get("/specs/import/template", params={"owner_type": "product"})
+    wb = openpyxl.load_workbook(filename=__import__("io").BytesIO(template.content))
+    assert wb.sheetnames == ["제품 사양", "작성 안내", "작성 예시"]
+    ws = wb.worksheets[0]
+    labels = [ws.cell(r, 3).value for r in range(1, 4)]
+    assert labels == ["속성명", "상위 모델", "제품 이름"]
+    keys = [ws.cell(r, 2).value for r in range(2, ws.max_row + 1)]
+    assert {"cert_model", "housing", "chipset", "io_ports"} <= set(keys)  # 제안서 항목 기본 속성
+
+    # 시리즈 A650과 파생 모델 둘을 채운다. CPU·인증 모델명은 세 열 병합(공통), 메모리는 칸마다
+    assert ws.cell(1, 5).value == "N5800"  # 등록된 제품은 열로 내려온다. 새 모델은 그 뒤(F열~)에 적는다
+    ws.cell(1, 6, "A650"), ws.cell(1, 7, "A650-GA70-OU01")
+    ws.cell(1, 8, "A650-GA70-PU02")
+    ws.cell(2, 7, "A650"), ws.cell(2, 8, "a650")  # 대소문자 무시
+    ws.cell(3, 6, "A650 Series"), ws.cell(3, 7, "Home"), ws.cell(3, 8, "Pro")
+    row_of = {ws.cell(r, 2).value: r for r in range(2, ws.max_row + 1)}
+    ws.cell(row_of["cpu_model"], 6, "AMD Ryzen AI 7 350")
+    ws.merge_cells(start_row=row_of["cpu_model"], start_column=6, end_row=row_of["cpu_model"], end_column=8)
+    ws.cell(row_of["cert_model"], 6, "A600")
+    ws.merge_cells(start_row=row_of["cert_model"], start_column=6, end_row=row_of["cert_model"], end_column=8)
+    ws.cell(row_of["ram_gb"], 7, "16"), ws.cell(row_of["ram_gb"], 8, "64")
+
+    preview = _upload(c, wb, tmp_path)
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    columns = {col["header"]: col for col in body["columns"]}
+    assert set(columns) == {"N5800", "A650", "A650-GA70-OU01", "A650-GA70-PU02"}  # 기존 N5800 열도 내려왔다
+    assert columns["A650-GA70-OU01"]["parent_model"] == "A650" and columns["A650-GA70-PU02"]["name"] == "Pro"
+    assert all(r["label"] not in ("상위 모델", "제품 이름") for r in body["rows"])
+    cert = next(r for r in body["rows"] if r["label"] == "인증 모델명")
+    assert cert["attribute_key"] == "cert_model"  # 기본 속성을 넣어 둔 사전이라 바로 맞는다
+
+    applied = _apply_preview(c, body)
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["parents_set"] == 2
+
+    by_model = {p["model"]: p for p in repo.list_products()}
+    series = repo.get_product(by_model["A650"]["id"])
+    assert series["name"] == "A650 Series"
+    assert [child["model"] for child in series["children"]] == ["A650-GA70-OU01", "A650-GA70-PU02"]
+    pro = repo.get_product(by_model["A650-GA70-PU02"]["id"])
+    assert pro["name"] == "Pro"
+    specs = {s["attribute_key"]: s["value_text"] for s in pro["specs"]}
+    assert specs == {"cpu_model": "AMD Ryzen AI 7 350", "cert_model": "A600", "ram_gb": "64"}
+
+    # 다시 내려받으면 상위 모델 바로 뒤에 파생 모델이 오고, 모델 정보 행이 채워져 있다
+    again = openpyxl.load_workbook(filename=__import__("io").BytesIO(c.get("/specs/import/template").content)).worksheets[0]
+    header = [cell.value for cell in again[1]][4:]
+    assert header == ["A650", "A650-GA70-OU01", "A650-GA70-PU02", "N5800"]
+    assert [again.cell(2, col).value for col in range(5, 9)] == [None, "A650", "A650", None]
+
+
+def test_template_parent_errors_and_self_reference(client):
+    c, repo = client
+    base = {"owner_type": "product", "rows": [{"attribute_key": "os", "cells": ["Windows 11"]}]}
+    missing = c.post("/specs/import/apply", json={**base, "columns": [{"header": "X1-AA", "parent_model": "X1"}]})
+    assert missing.status_code == 400 and "X1" in missing.json()["detail"]["errors"][0]["message"]
+    assert all(p["model"] != "X1-AA" for p in repo.list_products())  # 아무것도 저장하지 않는다
+
+    # 병합 셀이 시리즈 열까지 덮어 자기 이름이 들어간 칸은 무시한다
+    ok = c.post("/specs/import/apply", json={**base, "columns": [{"header": "N5800", "parent_model": "N5800"}]})
+    assert ok.status_code == 200 and ok.json()["parents_set"] == 0
+
+
+def test_label_falls_back_to_name_when_key_is_blank():
+    grid = [["분류", "속성키", "속성명", "단위", "A650"], ["CPU", "", "CPU 모델", "", "Ryzen"], ["기타", "", "모르는 항목", "", "x"]]
+    preview = analyze_grid(grid, [{"key": "cpu_model", "name": "CPU 모델", "data_type": "text", "unit": ""}])
+    assert [c["header"] for c in preview["columns"]] == ["A650"]
+    assert [(r["label"], r["attribute_key"]) for r in preview["rows"]] == [("CPU 모델", "cpu_model"), ("모르는 항목", None)]
+    assert preview["unmatched_rows"] == 1
+
+
+def test_component_template_keeps_only_that_kind(client):
+    c, _ = client
+    wb = openpyxl.load_workbook(filename=__import__("io").BytesIO(
+        c.get("/specs/import/template", params={"owner_type": "component", "kind": "ssd"}).content))
+    ws = wb.worksheets[0]
+    categories = {ws.cell(r, 1).value for r in range(2, ws.max_row + 1)} - {None}
+    assert categories <= {"저장장치", "기타"}
+    assert ws.cell(2, 3).value != "상위 모델"
+

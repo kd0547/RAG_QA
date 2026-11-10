@@ -47,6 +47,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if relation_columns and "origin" not in relation_columns:
         conn.execute("ALTER TABLE graph_relation ADD COLUMN origin TEXT NOT NULL DEFAULT 'extract'")
         conn.execute("UPDATE graph_relation SET origin = 'seed' WHERE file_id IS NULL")
+    # 제품 초기 버전에는 상위 모델(parent_id)이 없었다
+    product_columns = {row["name"] for row in conn.execute("PRAGMA table_info(product)")}
+    if product_columns and "parent_id" not in product_columns:
+        conn.execute("ALTER TABLE product ADD COLUMN parent_id TEXT REFERENCES product(id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_product_parent ON product(parent_id)")
     conn.commit()
 
 

@@ -157,9 +157,12 @@ CREATE TABLE IF NOT EXISTS spec_attribute (
 );
 
 -- product: 우리 제품 (모델 단위. N5800, A650 ...)
+-- parent_id가 있으면 그 제품의 하위 모델(파생 모델, 예: N5800 → N5800-GB70-PU02)이다. 단계는 여러 개 둘 수 있다.
+-- 하위 모델이 있는 제품은 저장소가 지우지 못하게 막는다.
 CREATE TABLE IF NOT EXISTS product (
     id          TEXT PRIMARY KEY,                -- uuid
     model       TEXT NOT NULL UNIQUE,            -- 모델명
+    parent_id   TEXT REFERENCES product(id),     -- 상위 모델. NULL이면 최상위 모델
     name        TEXT NOT NULL DEFAULT '',        -- 표시 이름 (예: N5800 14세대)
     category    TEXT NOT NULL DEFAULT 'notebook', -- entity/spec.py PRODUCT_CATEGORIES
     status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'planned', 'eol')),

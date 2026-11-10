@@ -57,6 +57,19 @@ COMPONENT_KINDS: dict[str, str] = {
     "other": "기타",
 }
 
+# 부품 종류 → 그 부품에 쓰는 속성 분류. 여기 없는 종류는 모든 분류를 쓴다. 기타(other) 분류는 늘 같이 쓴다.
+# 화면(frontend/src/spec/styles.ts KIND_CATEGORIES)과 엑셀 양식이 같은 기준으로 속성을 거른다.
+KIND_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "cpu": ("cpu",),
+    "gpu": ("graphics",),
+    "memory": ("memory",),
+    "ssd": ("storage",),
+    "wifi": ("network",),
+    "display": ("display",),
+    "battery": ("power",),
+    "adapter": ("power",),
+}
+
 
 @dataclass(frozen=True)
 class SpecAttribute:
@@ -77,9 +90,10 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     SpecAttribute("cpu_max_ghz", "CPU 최대 클럭", "cpu", "number", "GHz", aliases=("최대클럭", "클럭", "부스트클럭", "max clock")),
     SpecAttribute("cpu_cache_mb", "CPU 캐시", "cpu", "number", "MB", aliases=("캐시", "캐쉬", "캐시메모리", "l3 캐시")),
     SpecAttribute("npu_tops", "NPU 성능", "cpu", "number", "TOPS"),
+    SpecAttribute("chipset", "칩셋", "cpu", "text", "", "예: AMD Kraken Mobile Platform", aliases=("chipset", "칩셋")),
     # 메모리
     SpecAttribute("ram_type", "메모리 종류", "memory", "text", "", "예: DDR5 SO-DIMM, LPDDR5x", aliases=("메모리종류", "메모리 타입", "ram type")),
-    SpecAttribute("ram_gb", "메모리 용량", "memory", "number", "GB", "기본·옵션 구성을 각각 한 행으로", aliases=("메모리", "ram", "주기억장치", "주기억장치(ram)", "메모리용량", "기본메모리")),
+    SpecAttribute("ram_gb", "메모리 용량", "memory", "number", "GB", "기본·옵션 구성을 각각 한 행으로", aliases=("메모리", "memory", "ram", "주기억장치", "주기억장치(ram)", "메모리용량", "기본메모리")),
     SpecAttribute("ram_max_gb", "메모리 최대 용량", "memory", "number", "GB", aliases=("최대메모리", "메모리최대", "메모리 최대", "max memory")),
     SpecAttribute("ram_slots", "메모리 슬롯 수", "memory", "number", "개"),
     # 저장장치
@@ -97,8 +111,12 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     SpecAttribute("ssd_random_read_kiops", "랜덤 읽기 IOPS", "storage", "number", "K IOPS", "예: 1,000K", aliases=("random read", "랜덤읽기", "랜덤 읽기", "4k random read", "random read iops")),
     SpecAttribute("ssd_random_write_kiops", "랜덤 쓰기 IOPS", "storage", "number", "K IOPS", "예: 1,000K", aliases=("random write", "랜덤쓰기", "랜덤 쓰기", "4k random write", "random write iops")),
     SpecAttribute("ssd_tbw", "총 쓰기 용량(TBW)", "storage", "number", "TB", "", aliases=("tbw", "내구성", "endurance", "total bytes written")),
+    SpecAttribute("m2_slots", "M.2 슬롯 구성", "storage", "text", "", "슬롯마다 한 줄. 예: 2번: M.2 2280 SSD PCIe Gen4x4",
+                  aliases=("m.2 slot", "m.2 slots", "m2 slot", "m.2 슬롯", "m.2 슬롯 구성")),
+    SpecAttribute("odd", "광학 드라이브(ODD)", "storage", "text", "", "예: 외장형 Super Multi, 미포함",
+                  aliases=("odd", "광학드라이브", "광학 드라이브", "dvd", "cd-rom")),
     # 그래픽
-    SpecAttribute("gpu_model", "GPU 모델", "graphics", "text", "", "내장·외장을 각각 한 행으로", aliases=("gpu", "vga", "그래픽", "그래픽카드", "비디오", "graphics")),
+    SpecAttribute("gpu_model", "GPU 모델", "graphics", "text", "", "내장·외장을 각각 한 행으로", aliases=("gpu", "vga", "그래픽", "그래픽카드", "비디오", "graphics", "display&video", "display & video", "display/video")),
     SpecAttribute("vram_gb", "비디오 메모리", "graphics", "number", "GB", "공유 메모리면 비고에 적는다", aliases=("비디오메모리", "vram", "그래픽메모리")),
     # 디스플레이
     SpecAttribute("display_inch", "화면 크기", "display", "number", "인치", aliases=("lcd", "화면", "디스플레이", "화면크기", "display", "패널")),
@@ -114,8 +132,11 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     SpecAttribute("lan_port", "유선 LAN 단자", "io", "bool", aliases=("유선lan", "유선 lan", "lan", "rj-45", "rj45")),
     SpecAttribute("card_reader", "카드리더", "io", "bool", aliases=("카드리더", "카드리더기", "card reader")),
     SpecAttribute("audio_jack", "오디오 잭", "io", "bool"),
+    SpecAttribute("audio", "오디오", "io", "text", "", "예: HD Audio, 스피커 2개, 마이크 내장", aliases=("audio", "사운드", "스피커")),
+    SpecAttribute("io_ports", "단자 구성", "io", "text", "", "제안서의 I/O Port 칸을 그대로. 단자 수는 위 숫자 속성에 따로",
+                  aliases=("i/o port", "i/o ports", "io port", "io ports", "입출력 단자", "포트 구성", "단자")),
     # 네트워크
-    SpecAttribute("wifi", "무선 LAN", "network", "text", "", "예: Wi-Fi 6E AX210", aliases=("무선", "무선lan", "무선 lan", "wi-fi", "wireless")),
+    SpecAttribute("wifi", "무선 LAN", "network", "text", "", "예: Wi-Fi 6E AX210", aliases=("무선", "무선lan", "무선 lan", "wi-fi", "wireless", "wireless lan", "wlan")),
     SpecAttribute("bluetooth", "블루투스", "network", "text", "", "예: 5.2", aliases=("블루투스", "bt")),
     SpecAttribute("wwan", "무선 데이터 통신(LTE/5G)", "network", "bool"),
     # 전원
@@ -126,8 +147,13 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     SpecAttribute("weight_kg", "무게", "body", "number", "kg", aliases=("무게", "중량", "weight")),
     SpecAttribute("dimensions_mm", "크기(W x D x H)", "body", "text", "mm", aliases=("크기", "치수", "사이즈", "size", "dimensions")),
     SpecAttribute("chassis_material", "외장 재질", "body", "text", aliases=("재질", "a/d", "외장")),
+    SpecAttribute("housing", "베어본(하우징)", "body", "text", "", "예: Clevo V561KNP Bare-bone (with CPU)",
+                  aliases=("housing", "베어본", "barebone", "bare-bone", "하우징")),
+    SpecAttribute("keyboard", "키보드", "body", "text", "", "예: 102키, 백라이트, Copilot 키", aliases=("keyboard", "자판")),
     # 운영체제
     SpecAttribute("os", "운영체제", "os", "text", "", "예: Windows 11 Pro", aliases=("운영체제", "운영체제(os)", "operating system", "윈도우")),
+    SpecAttribute("software", "기본 소프트웨어", "os", "text", "", "예: 복원 솔루션, 전자매뉴얼",
+                  aliases=("s/w", "sw", "software", "소프트웨어", "번들 소프트웨어")),
     # 보안·관리
     SpecAttribute("webcam", "웹캠", "security", "text", "", "예: 5M IR, 없음", aliases=("웹캠", "웹카메라", "카메라", "camera")),
     SpecAttribute("camera_removable", "카메라 기능 제거 가능", "security", "bool", "", "BIOS 비활성화 또는 물리 제거"),
@@ -140,5 +166,10 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     SpecAttribute("kc_safety", "KC 안전확인", "cert", "text", "", "인증번호"),
     SpecAttribute("kc_emc", "KC 전자파 적합등록", "cert", "text", "", "인증번호"),
     SpecAttribute("energy_efficiency", "에너지 효율", "cert", "text", "", "예: 에너지소비효율 1등급, Energy Star"),
+    SpecAttribute("cert_model", "인증 모델명", "cert", "text", "", "KC 등 인증 문서에 적힌 모델명. 제품 모델명과 다를 때. 예: A600",
+                  aliases=("인증명", "인증모델", "인증 모델", "certification model")),
+    SpecAttribute("accessory", "구성품", "other", "text", "", "예: 어댑터, 전원 코드, 가방",
+                  aliases=("accessory", "accessories", "부속품", "액세서리")),
+    SpecAttribute("royalty", "로열티", "other", "text", "", "예: Windows 11, NEC", aliases=("royalty", "royalties")),
     SpecAttribute("warranty_years", "보증 기간", "other", "number", "년", aliases=("보증", "보증기간", "보증기한", "보증 기한", "warranty", "warranty period", "a/s")),
 )

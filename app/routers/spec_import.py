@@ -1,11 +1,10 @@
 """사양 표 가져오기 API (/specs/import).
 
-- GET  /specs/import/template  현재 속성과 제품(부품)을 담은 엑셀 양식. 값이 있으면 같이 넣어 내려준다 (내려받아 고쳐서 올리면 된다).
+- GET  /specs/import/template  엑셀 양식. 제품은 상위 모델·제품 이름 행과 분류별 속성, 등록된 값을 채워 내려준다 (채워서 그대로 올리면 된다).
 - POST /specs/import/parse     붙여넣은 표(text) 또는 엑셀(file)을 읽어 미리보기를 만든다. 저장하지 않는다.
 - POST /specs/import/apply     미리보기에서 고친 표를 저장한다. 한 곳이라도 못 읽으면 400과 함께 위치를 돌려주고 아무것도 저장하지 않는다.
 """
 
-import io
 import logging
 import tempfile
 from pathlib import Path
@@ -17,6 +16,7 @@ from pydantic import BaseModel
 
 from entity.spec import COMPONENT_KINDS
 from parser.spec_table import analyze_grid, extract_table_text, grid_from_text, grid_from_xlsx
+from parser.spec_template import build_template
 from repository import spec_repo
 from repository.spec_repository import OWNER_TYPES, SpecImportError
 
@@ -48,63 +48,15 @@ def _check_owner(owner_type: str, kind: str | None) -> str | None:
 
 @router.get("/template")
 def download_template(owner_type: str = "product", kind: str | None = None) -> Response:
-    """엑셀 양식. 1행 머리글, A열 속성 키, B열 속성 이름, C열 단위, D열부터 모델명. 기존 값이 있으면 채워서 준다."""
+    """엑셀 양식 (parser/spec_template.py). 제품은 모델 정보 행(상위 모델·제품 이름)과 트리 순서 열, 부품은 그 종류의 속성만.
+    등록된 값이 있으면 채워서 준다."""
     kind = _check_owner(owner_type, kind)
-    try:
-        import openpyxl
-        from openpyxl.styles import Alignment, Font, PatternFill
-        from openpyxl.utils import get_column_letter
-    except ImportError as exc:  # pragma: no cover
-        raise HTTPException(status_code=500, detail="openpyxl이 설치되어 있지 않습니다.") from exc
-
-    attributes = spec_repo.list_attributes()
     owners = spec_repo.list_products() if owner_type == "product" else spec_repo.list_components(kind)
     details = [spec_repo.get_product(o["id"]) if owner_type == "product" else spec_repo.get_component(o["id"]) for o in owners]
-    values: dict[tuple[str, str], list[str]] = {}
-    for detail in details:
-        for spec in detail["specs"]:
-            text = f"{spec['value_text']}(옵션)" if spec["is_option"] else spec["value_text"]
-            values.setdefault((detail["id"], spec["attribute_key"]), []).append(text)
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "제품 사양" if owner_type == "product" else f"부품 사양 ({COMPONENT_KINDS[kind]})"
-    header = ["속성키", "속성명", "단위"] + ([o["model"] for o in owners] or ["모델명1", "모델명2"])
-    ws.append(header)
-    for attribute in attributes:
-        row = [attribute["key"], attribute["name"], attribute["unit"]]
-        for detail in details:
-            row.append(" / ".join(values.get((detail["id"], attribute["key"]), [])))
-        if not details:
-            row += ["", ""]
-        ws.append(row)
-
-    bold = Font(bold=True)
-    fill = PatternFill("solid", fgColor="EBF8FC")
-    for cell in ws[1]:
-        cell.font = bold
-        cell.fill = fill
-        cell.alignment = Alignment(horizontal="center")
-    for column in range(1, len(header) + 1):
-        ws.column_dimensions[get_column_letter(column)].width = 18 if column != 2 else 26
-    ws.freeze_panes = "D2"
-
-    guide = wb.create_sheet("작성 안내")
-    for line in (
-        "A열 속성키는 바꾸지 마세요. 화면의 속성 탭과 같은 키입니다. 새 속성이 필요하면 행을 추가하고 속성키 대신 속성명만 적어도 됩니다 (가져오기 화면에서 속성을 고르게 됩니다).",
-        "D열부터 한 열이 제품(부품) 하나입니다. 머리글에 모델명을 적으세요. 없는 모델은 가져올 때 새로 등록됩니다.",
-        "값이 여러 개면 슬래시(/)나 줄바꿈으로 나누세요. 두 번째 값부터는 옵션 구성으로 봅니다. '(옵션)'을 붙여 직접 표시해도 됩니다. 예: 16GB / 32GB(옵션)",
-        "숫자 속성은 단위를 같이 적어도 됩니다 (2.16kg → 2.16). 예/아니오 속성은 예, 아니오, 있음, 없음, O, X 로 적습니다.",
-        "빈 칸은 건너뜁니다. 값이 있는 칸은 가져올 때 그 제품·속성의 기존 값을 표의 값으로 바꿉니다.",
-    ):
-        guide.append([line])
-    guide.column_dimensions["A"].width = 120
-
-    buffer = io.BytesIO()
-    wb.save(buffer)
+    content = build_template(owner_type, kind, spec_repo.list_attributes(), [d for d in details if d])
     filename = f"spec_template_{owner_type}{'_' + kind if kind else ''}.xlsx"
     return Response(
-        content=buffer.getvalue(),
+        content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
@@ -168,7 +120,7 @@ async def parse_table(
         raise HTTPException(status_code=400, detail="엑셀 파일을 올리거나 표를 붙여넣으세요.")
 
     try:
-        preview = analyze_grid(grid, spec_repo.list_attributes())
+        preview = analyze_grid(grid, spec_repo.list_attributes(), owner_type)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -190,6 +142,8 @@ class ImportColumn(BaseModel):
     owner_id: str | None = None
     create: bool = True
     skip: bool = False
+    parent_model: str | None = None  # 제품만: 상위 모델명. 있으면 그 모델의 하위 모델로 옮긴다
+    name: str | None = None  # 제품만: 제품 이름
 
 
 class NewAttribute(BaseModel):

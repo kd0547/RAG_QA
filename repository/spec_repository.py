@@ -2,6 +2,7 @@
 
 - spec_attribute: 속성 사전. 사양 값은 반드시 이 키로 저장한다.
 - product / component: 제품과 부품. 제품은 product_component로 부품과 이어진다.
+  제품은 parent_id로 상위 모델에 매달린 하위 모델(파생 모델)을 가질 수 있다.
 - spec_value: 제품 또는 부품(owner_type)의 사양 값 한 건. 같은 속성에 값이 여러 개(옵션)면 행이 여러 개다.
   number 속성은 value_text에서 숫자를 뽑아 value_num에 같이 둔다. 비교 코드는 value_num을 본다.
 """
@@ -230,7 +231,8 @@ class SpecRepository:
                 """
                 SELECT p.*,
                        (SELECT COUNT(*) FROM spec_value v WHERE v.owner_type = 'product' AND v.owner_id = p.id) AS spec_count,
-                       (SELECT COUNT(*) FROM product_component pc WHERE pc.product_id = p.id) AS component_count
+                       (SELECT COUNT(*) FROM product_component pc WHERE pc.product_id = p.id) AS component_count,
+                       (SELECT COUNT(*) FROM product c WHERE c.parent_id = p.id) AS child_count
                 FROM product p
                 ORDER BY p.model
                 """
@@ -258,9 +260,26 @@ class SpecRepository:
             ]
             product["spec_count"] = len(product["specs"])
             product["component_count"] = len(product["components"])
+            # 상위 모델 경로 (최상위 → 바로 위). 화면의 위치 표시에 쓴다
+            ancestors, parent_id = [], product["parent_id"]
+            while parent_id and len(ancestors) < 20:  # 순환이 생겨도 멈춘다
+                row = conn.execute("SELECT id, model, parent_id FROM product WHERE id = ?", (parent_id,)).fetchone()
+                if row is None:
+                    break
+                ancestors.insert(0, {"id": row["id"], "model": row["model"]})
+                parent_id = row["parent_id"]
+            product["ancestors"] = ancestors
+            product["children"] = [
+                dict(r) for r in conn.execute(
+                    "SELECT id, model, name, status FROM product WHERE parent_id = ? ORDER BY model", (product_id,),
+                ).fetchall()
+            ]
         return product
 
-    def create_product(self, model: str, name: str = "", category: str = "notebook", status: str = "active", note: str = "") -> dict:
+    def create_product(
+        self, model: str, name: str = "", category: str = "notebook", status: str = "active", note: str = "",
+        parent_id: str | None = None,
+    ) -> dict:
         values = (
             str(uuid.uuid4()),
             _clean(model, field="모델명", max_length=50, required=True),
@@ -268,32 +287,41 @@ class SpecRepository:
             _choice(category, PRODUCT_CATEGORIES, field="제품 종류", default="notebook"),
             _choice(status, PRODUCT_STATUSES, field="상태", default="active"),
             _clean(note, field="비고", max_length=500),
+            parent_id or None,
         )
         with self.db.transaction() as conn:
+            _check_parent(conn, None, values[6])
             try:
-                conn.execute("INSERT INTO product (id, model, name, category, status, note) VALUES (?,?,?,?,?,?)", values)
+                conn.execute(
+                    "INSERT INTO product (id, model, name, category, status, note, parent_id) VALUES (?,?,?,?,?,?,?)", values,
+                )
             except sqlite3.IntegrityError as exc:
                 raise SpecConflictError(f"이미 등록된 모델명입니다: {values[1]}") from exc
         return self.get_product(values[0])
 
     def update_product(self, product_id: str, **fields) -> dict:
+        """넘긴 값만 바꾼다. parent_id는 넘기면 None·빈 값도 반영해 최상위 모델로 올린다."""
         current = self.get_product(product_id)
         if current is None:
             raise SpecNotFoundError("제품을 찾을 수 없습니다.")
         merged = {**current, **{k: v for k, v in fields.items() if v is not None}}
+        parent_id = (fields["parent_id"] or None) if "parent_id" in fields else current["parent_id"]
         values = (
             _clean(merged["model"], field="모델명", max_length=50, required=True),
             _clean(merged["name"], field="제품 이름", max_length=100),
             _choice(merged["category"], PRODUCT_CATEGORIES, field="제품 종류", default="notebook"),
             _choice(merged["status"], PRODUCT_STATUSES, field="상태", default="active"),
             _clean(merged["note"], field="비고", max_length=500),
+            parent_id,
             _now(),
             product_id,
         )
         with self.db.transaction() as conn:
+            _check_parent(conn, product_id, parent_id)
             try:
                 conn.execute(
-                    "UPDATE product SET model = ?, name = ?, category = ?, status = ?, note = ?, updated_at = ? WHERE id = ?",
+                    "UPDATE product SET model = ?, name = ?, category = ?, status = ?, note = ?, parent_id = ?, updated_at = ?"
+                    " WHERE id = ?",
                     values,
                 )
             except sqlite3.IntegrityError as exc:
@@ -302,6 +330,9 @@ class SpecRepository:
 
     def delete_product(self, product_id: str) -> None:
         with self.db.transaction() as conn:
+            children = conn.execute("SELECT COUNT(*) FROM product WHERE parent_id = ?", (product_id,)).fetchone()[0]
+            if children:
+                raise SpecConflictError(f"하위 모델 {children}개가 있어 지울 수 없습니다. 하위 모델을 먼저 지우거나 옮기세요.")
             conn.execute("DELETE FROM spec_value WHERE owner_type = 'product' AND owner_id = ?", (product_id,))
             cursor = conn.execute("DELETE FROM product WHERE id = ?", (product_id,))  # product_component는 cascade
             if cursor.rowcount == 0:
@@ -526,7 +557,10 @@ class SpecRepository:
     ) -> dict:
         """미리보기에서 고친 표를 한 트랜잭션으로 저장한다.
 
-        columns: [{"header": 모델명, "owner_id": 기존 id 또는 None, "create": 없으면 새로 등록할지, "skip": 열 건너뛰기}]
+        columns: [{"header": 모델명, "owner_id": 기존 id 또는 None, "create": 없으면 새로 등록할지, "skip": 열 건너뛰기,
+                   "parent_model": 상위 모델명 (제품만, 선택), "name": 제품 이름 (제품만, 선택)}]
+                 parent_model이 있으면 그 제품의 하위 모델로 옮긴다. 같은 표의 다른 열이거나 이미 등록된 모델이어야 한다.
+                 비어 있으면 기존 상위 모델을 그대로 둔다. 자기 모델명을 적은 칸(병합 셀이 시리즈 열까지 덮은 경우)은 무시한다.
         rows:    [{"attribute_key": 키 또는 None, "new_attribute": {...} 또는 None, "cells": [열 순서대로 원문 문자열]}]
                  attribute_key도 new_attribute도 없는 행은 건너뛴다.
         replace: True면 표에 나온 (제품, 속성)의 기존 값을 지우고 표의 값으로 바꾼다. False면 없는 값만 더한다.
@@ -540,7 +574,7 @@ class SpecRepository:
             kind = _choice(kind, COMPONENT_KINDS, field="부품 종류", default="other")
         source_note = _clean(source_note, field="출처 메모", max_length=200)
         errors: list[dict] = []
-        summary = {"owners_created": 0, "attributes_created": 0, "values_added": 0, "values_replaced": 0, "rows_skipped": 0}
+        summary = {"owners_created": 0, "parents_set": 0, "attributes_created": 0, "values_added": 0, "values_replaced": 0, "rows_skipped": 0}
 
         with self.db.transaction() as conn:
             # 1) 열 → 제품/부품 id
@@ -572,6 +606,40 @@ class SpecRepository:
                         owner_ids.append(None)
                         continue
                 owner_ids.append(owner_id)
+
+            # 1-1) 제품 정보: 이름과 상위 모델. 모든 열의 제품이 생긴 뒤에 맞춰야 앞 열이 뒤 열을 상위로 가리킬 수 있다
+            if owner_type == "product":
+                for ci, column in enumerate(columns):
+                    owner_id = owner_ids[ci]
+                    if owner_id is None:
+                        continue
+                    name = " ".join((column.get("name") or "").split())
+                    if name:
+                        try:
+                            conn.execute(
+                                "UPDATE product SET name = ?, updated_at = ? WHERE id = ?",
+                                (_clean(name, field="제품 이름", max_length=100), _now(), owner_id),
+                            )
+                        except ValueError as exc:
+                            errors.append({"row": None, "column": ci, "message": str(exc)})
+                    parent_model = " ".join((column.get("parent_model") or "").split())
+                    header = " ".join((column.get("header") or "").split())
+                    if not parent_model or parent_model.lower() == header.lower():
+                        continue
+                    parent = _find_owner(conn, "product", parent_model, None)
+                    if parent is None:
+                        errors.append({
+                            "row": None, "column": ci,
+                            "message": f"'{header}'의 상위 모델 '{parent_model}'을(를) 찾을 수 없습니다. 같은 표에 열로 넣거나 먼저 등록하세요.",
+                        })
+                        continue
+                    try:
+                        _check_parent(conn, owner_id, parent["id"])
+                    except (ValueError, SpecNotFoundError) as exc:
+                        errors.append({"row": None, "column": ci, "message": f"'{header}': {exc}"})
+                        continue
+                    conn.execute("UPDATE product SET parent_id = ?, updated_at = ? WHERE id = ?", (parent["id"], _now(), owner_id))
+                    summary["parents_set"] += 1
 
             # 2) 행 → 속성 키 (새 속성은 여기서 만든다)
             row_keys: list[str | None] = []
@@ -642,6 +710,22 @@ class SpecRepository:
 
         summary["owners"] = [oid for oid in owner_ids if oid]
         return summary
+
+
+def _check_parent(conn: sqlite3.Connection, product_id: str | None, parent_id: str | None) -> None:
+    """상위 모델이 있는지, 자기 자신이나 자기 하위 모델을 상위로 고르지 않았는지 본다."""
+    if parent_id is None:
+        return
+    if parent_id == product_id:
+        raise ValueError("자기 자신을 상위 모델로 지정할 수 없습니다.")
+    current = parent_id
+    while current:
+        row = conn.execute("SELECT parent_id FROM product WHERE id = ?", (current,)).fetchone()
+        if row is None:
+            raise SpecNotFoundError("상위 모델을 찾을 수 없습니다.")
+        current = row["parent_id"]
+        if product_id is not None and current == product_id:
+            raise ValueError("하위 모델을 상위 모델로 지정할 수 없습니다.")
 
 
 def _find_owner(conn: sqlite3.Connection, owner_type: str, model: str, kind: str | None) -> sqlite3.Row | None:

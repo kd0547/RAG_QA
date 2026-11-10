@@ -1,18 +1,43 @@
-import { useCallback, useEffect, useState } from 'react';
-import { TrashIcon } from '../components/icons';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronIcon, TrashIcon } from '../components/icons';
 import { specApi, type Component, type Product, type ProductDetail, type ProductInput, type SpecAttribute, type SpecMeta } from './api';
 import { SpecValuesEditor } from './SpecValuesEditor';
 import { btnDanger, btnGhost, btnPrimary, btnTiny, errorMessage, formatDate, inputCls, labelOf, selectCls, smallInputCls } from './styles';
 import { Card, Field, ListItem, Notice, Pill } from './ui';
 
-const EMPTY: ProductInput = { model: '', name: '', category: 'notebook', status: 'active', note: '' };
+const EMPTY: ProductInput = { model: '', name: '', category: 'notebook', status: 'active', note: '', parent_id: null };
 type ActiveId = string | 'new' | null;
+type TreeRow = { product: Product; depth: number };
 
 function toInput(p: ProductDetail): ProductInput {
-    return { model: p.model, name: p.name, category: p.category, status: p.status, note: p.note };
+    return { model: p.model, name: p.name, category: p.category, status: p.status, note: p.note, parent_id: p.parent_id };
 }
 
-/** 제품 탭: 왼쪽 제품 목록, 오른쪽에 제품 정보·사양 값·부품 구성 */
+/** 상위 모델 id → 바로 아래 하위 모델 목록. 상위가 목록에 없으면 최상위(null)로 둔다 */
+function groupByParent(products: Product[]): Map<string | null, Product[]> {
+    const ids = new Set(products.map((p) => p.id));
+    const map = new Map<string | null, Product[]>();
+    for (const p of products) {
+        const key = p.parent_id && ids.has(p.parent_id) ? p.parent_id : null;
+        map.set(key, [...(map.get(key) ?? []), p]);
+    }
+    return map;
+}
+
+/** rootId 아래 트리를 위에서부터 펼친 순서. open을 주면 펼친 모델의 하위만 넣는다 */
+function flattenTree(byParent: Map<string | null, Product[]>, rootId: string | null, open?: Set<string>): TreeRow[] {
+    const rows: TreeRow[] = [];
+    const walk = (parentId: string | null, depth: number) => {
+        for (const product of byParent.get(parentId) ?? []) {
+            rows.push({ product, depth });
+            if (!open || open.has(product.id)) walk(product.id, depth + 1);
+        }
+    };
+    walk(rootId, 0);
+    return rows;
+}
+
+/** 제품 탭: 왼쪽 제품 트리(모델 → 하위 모델), 오른쪽에 제품 정보·제품 사양·구성 부품·하위 모델 */
 export function ProductsTab({
     meta,
     attributes,
@@ -33,6 +58,10 @@ export function ProductsTab({
     const [detail, setDetail] = useState<ProductDetail | null>(null);
     const [detailKey, setDetailKey] = useState(0);
     const [draft, setDraft] = useState<ProductInput>(EMPTY);
+    /** 새 제품 폼의 처음 값. 하위 모델 추가는 상위 모델 값을 채워 시작한다 */
+    const [newBase, setNewBase] = useState<ProductInput>(EMPTY);
+    /** 왼쪽 트리에서 하위 모델을 펼친 제품 */
+    const [open, setOpen] = useState<Set<string>>(() => new Set());
     const [busy, setBusy] = useState(false);
     const [notice, setNotice] = useState('');
     const [error, setError] = useState('');
@@ -77,18 +106,63 @@ export function ProductsTab({
     }, [activeId, detailKey]);
 
     const isNew = activeId === 'new';
-    const base = detail && !isNew ? toInput(detail) : EMPTY;
+    const base = isNew ? newBase : detail ? toInput(detail) : EMPTY;
     const dirty = (Object.keys(EMPTY) as (keyof ProductInput)[]).some((k) => draft[k] !== base[k]);
     const canSave = !busy && draft.model.trim().length > 0 && (isNew || dirty);
 
+    const byId = useMemo(() => new Map((products ?? []).map((p) => [p.id, p])), [products]);
+    const byParent = useMemo(() => groupByParent(products ?? []), [products]);
+    const treeRows = flattenTree(byParent, null, open);
+    const hasTree = (products ?? []).some((p) => p.parent_id && byId.has(p.parent_id));
+
+    /** 최상위 모델부터 id까지의 경로 (id 포함) */
+    function pathTo(id: string | null): Product[] {
+        const path: Product[] = [];
+        for (let p = id ? byId.get(id) : undefined; p && path.length < 20; p = p.parent_id ? byId.get(p.parent_id) : undefined) {
+            path.unshift(p);
+        }
+        return path;
+    }
+
+    /** 트리에서 id가 보이도록 상위 모델들을 펼친다 */
+    function reveal(ancestorIds: string[]) {
+        if (ancestorIds.length === 0) return;
+        setOpen((prev) => new Set([...prev, ...ancestorIds]));
+    }
+
+    function toggleOpen(id: string) {
+        setOpen((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    }
+
     function clear() { setNotice(''); setError(''); }
 
-    function switchTo(id: ActiveId) {
-        if (id === activeId) return;
-        if (dirty && !window.confirm('저장하지 않은 변경 사항이 있습니다. 버리고 이동할까요?')) return;
+    function confirmLeave() {
+        return !dirty || window.confirm('저장하지 않은 변경 사항이 있습니다. 버리고 이동할까요?');
+    }
+
+    function switchTo(id: string | null) {
+        if (id === activeId || !confirmLeave()) return;
         clear();
         setActiveId(id);
-        if (id === 'new') { setDetail(null); setDraft(EMPTY); }
+        reveal(pathTo(id).slice(0, -1).map((p) => p.id));
+    }
+
+    /** 새 제품 폼을 연다. parent가 있으면 그 모델의 하위 모델로 시작한다 */
+    function startNew(parent?: ProductDetail) {
+        if (isNew && newBase.parent_id === (parent?.id ?? null)) return;
+        if (!confirmLeave()) return;
+        const start: ProductInput = parent
+            ? { ...EMPTY, model: `${parent.model}-`, category: parent.category, status: parent.status, parent_id: parent.id }
+            : EMPTY;
+        clear();
+        setActiveId('new');
+        setDetail(null);
+        setNewBase(start);
+        setDraft(start);
     }
 
     const refreshDetail = () => { setDetailKey((k) => k + 1); void loadList(); };
@@ -103,7 +177,8 @@ export function ProductsTab({
             setDetail(saved);
             setDraft(toInput(saved));
             setActiveId(saved.id);
-            setNotice(isNew ? `'${saved.model}' 제품을 등록했습니다. 아래에서 사양 값을 넣으세요.` : '저장했습니다.');
+            reveal(saved.ancestors.map((a) => a.id));
+            setNotice(isNew ? `'${saved.model}' ${saved.parent_id ? '하위 모델' : '제품'}을 등록했습니다. 아래에서 사양과 부품을 넣으세요.` : '저장했습니다.');
         } catch (e) {
             setError(errorMessage(e, '저장하지 못했습니다.'));
         } finally {
@@ -113,14 +188,14 @@ export function ProductsTab({
 
     async function remove() {
         if (!detail || isNew || busy) return;
-        if (!window.confirm(`'${detail.model}' 제품을 삭제할까요?\n사양 값 ${detail.spec_count}건과 부품 연결도 함께 지워집니다.`)) return;
+        if (!window.confirm(`'${detail.model}' 제품을 삭제할까요?\n제품 사양과 부품 연결도 함께 지워집니다.`)) return;
         setBusy(true);
         clear();
         try {
             await specApi.deleteProduct(detail.id);
             const list = await loadList();
             setDetail(null);
-            setActiveId(list?.[0]?.id ?? null);
+            setActiveId(detail.parent_id ?? list?.[0]?.id ?? null);
             setNotice(`'${detail.model}' 제품을 삭제했습니다.`);
             onComponentsChanged();
         } catch (e) {
@@ -175,6 +250,16 @@ export function ProductsTab({
         }
     }
 
+    // 위치 표시: 저장된 제품은 서버가 준 상위 경로, 새 제품은 고른 상위 모델까지의 경로
+    const crumbs = isNew ? pathTo(draft.parent_id) : detail?.ancestors ?? [];
+    // 상위 모델 후보: 자기 자신과 자기 하위 모델은 뺀다
+    const blocked = new Set<string>();
+    if (!isNew && detail) {
+        blocked.add(detail.id);
+        for (const { product } of flattenTree(byParent, detail.id)) blocked.add(product.id);
+    }
+    const parentOptions = flattenTree(byParent, null).filter(({ product }) => !blocked.has(product.id));
+
     const linkedIds = new Set(detail?.components.map((c) => c.id) ?? []);
     const kinds = meta ? Object.keys(meta.component_kinds) : [];
     const kindOrder = (k: string) => { const i = kinds.indexOf(k); return i < 0 ? 99 : i; };
@@ -187,13 +272,13 @@ export function ProductsTab({
         <div className="flex-1 min-h-0 flex flex-col md:flex-row">
             <aside className="md:w-[260px] lg:w-[290px] shrink-0 border-b md:border-b-0 md:border-r border-divide p-4 md:p-5 md:overflow-y-auto">
                 <h1 className="text-[16px] font-bold">제품</h1>
-                <p className="mt-1 text-[12px] leading-5 text-muted">입찰 조건과 대조할 우리 제품입니다. 모델별로 사양 값과 부품을 등록합니다.</p>
+                <p className="mt-1 text-[12px] leading-5 text-muted">입찰 조건과 대조할 우리 제품입니다. 모델 아래에 하위 모델(파생 모델)을 두고, 모델마다 사양과 부품을 등록합니다.</p>
                 <button
                     type="button"
-                    onClick={() => switchTo('new')}
+                    onClick={() => startNew()}
                     disabled={products === null}
-                    aria-pressed={isNew}
-                    className={`mt-4 w-full h-9 rounded-lg border text-[12px] font-semibold transition-colors disabled:opacity-40 ${isNew ? 'border-brand/25 bg-brand-tint text-brand-hover' : 'border-line hover:bg-chip'}`}
+                    aria-pressed={isNew && !draft.parent_id}
+                    className={`mt-4 w-full h-9 rounded-lg border text-[12px] font-semibold transition-colors disabled:opacity-40 ${isNew && !draft.parent_id ? 'border-brand/25 bg-brand-tint text-brand-hover' : 'border-line hover:bg-chip'}`}
                 >
                     + 새 제품
                 </button>
@@ -201,17 +286,36 @@ export function ProductsTab({
                     {products === null && !loadError && <p className="text-[12px] text-muted px-1 py-2">불러오는 중…</p>}
                     {loadError && <Notice kind="error">{loadError}</Notice>}
                     {products?.length === 0 && <p className="text-[12px] text-muted px-1 py-2">아직 등록된 제품이 없습니다.</p>}
-                    {products?.map((p) => (
-                        <div key={p.id} className="shrink-0 min-w-[200px] md:min-w-0">
-                            <ListItem
-                                active={activeId === p.id}
-                                title={p.model}
-                                subtitle={[p.name, `사양 ${p.spec_count}`, `부품 ${p.component_count}`].filter(Boolean).join(' · ')}
-                                badge={p.status !== 'active' ? <Pill tone={p.status === 'eol' ? 'muted' : 'warn'}>{labelOf(meta?.product_statuses, p.status)}</Pill> : undefined}
-                                onClick={() => switchTo(p.id)}
-                            />
-                        </div>
-                    ))}
+                    {treeRows.map(({ product: p, depth }) => {
+                        const hasChildren = (byParent.get(p.id)?.length ?? 0) > 0;
+                        const expanded = open.has(p.id);
+                        return (
+                            <div key={p.id} className="shrink-0 min-w-[200px] md:min-w-0 flex items-center gap-0.5" style={{ paddingLeft: depth * 14 }}>
+                                {hasChildren ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => toggleOpen(p.id)}
+                                        aria-expanded={expanded}
+                                        aria-label={`${p.model} 하위 모델 ${expanded ? '접기' : '펼치기'}`}
+                                        className="w-5 h-7 shrink-0 inline-flex items-center justify-center rounded text-muted hover:text-ink hover:bg-chip"
+                                    >
+                                        <ChevronIcon className={`w-2 h-2 transition-transform ${expanded ? '' : '-rotate-90'}`} />
+                                    </button>
+                                ) : (
+                                    hasTree && <span className="w-5 shrink-0" aria-hidden />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                    <ListItem
+                                        active={activeId === p.id}
+                                        title={p.model}
+                                        subtitle={p.name || undefined}
+                                        badge={p.status !== 'active' ? <Pill tone={p.status === 'eol' ? 'muted' : 'warn'}>{labelOf(meta?.product_statuses, p.status)}</Pill> : undefined}
+                                        onClick={() => switchTo(p.id)}
+                                    />
+                                </div>
+                            </div>
+                        );
+                    })}
                 </nav>
             </aside>
 
@@ -222,12 +326,22 @@ export function ProductsTab({
                     ) : (
                         <>
                             <div>
+                                {crumbs.length > 0 && (
+                                    <nav aria-label="상위 모델" className="mb-1 flex flex-wrap items-center gap-1 text-[12px] text-muted">
+                                        {crumbs.map((c) => (
+                                            <span key={c.id} className="inline-flex items-center gap-1">
+                                                <button type="button" onClick={() => switchTo(c.id)} className="font-semibold hover:text-ink hover:underline">{c.model}</button>
+                                                <span aria-hidden>›</span>
+                                            </span>
+                                        ))}
+                                    </nav>
+                                )}
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <h2 className="text-[22px] font-bold tracking-tight break-all">{isNew ? '새 제품' : detail?.model ?? '…'}</h2>
+                                    <h2 className="text-[22px] font-bold tracking-tight break-all">{isNew ? (draft.parent_id ? '새 하위 모델' : '새 제품') : detail?.model ?? '…'}</h2>
                                     {detail && !isNew && <Pill tone={detail.status === 'active' ? 'brand' : 'muted'}>{labelOf(meta?.product_statuses, detail.status)}</Pill>}
                                 </div>
                                 <p className="mt-1.5 text-[12.5px] text-muted">
-                                    {isNew ? '모델명을 입력해 저장하면 사양 값과 부품을 넣을 수 있습니다.' : detail ? `${formatDate(detail.updated_at)} 저장` : ''}
+                                    {isNew ? '모델명을 입력해 저장하면 사양과 부품을 넣을 수 있습니다.' : detail ? `${formatDate(detail.updated_at)} 저장` : ''}
                                 </p>
                             </div>
 
@@ -239,7 +353,15 @@ export function ProductsTab({
                                 aside={
                                     <div className="flex items-center gap-2">
                                         {!isNew && detail && (
-                                            <button type="button" onClick={() => void remove()} disabled={busy} className={btnDanger}><TrashIcon />삭제</button>
+                                            <button
+                                                type="button"
+                                                onClick={() => void remove()}
+                                                disabled={busy || detail.children.length > 0}
+                                                title={detail.children.length > 0 ? '하위 모델이 있어 지울 수 없습니다. 하위 모델을 먼저 지우거나 옮기세요.' : undefined}
+                                                className={btnDanger}
+                                            >
+                                                <TrashIcon />삭제
+                                            </button>
                                         )}
                                         <button type="button" onClick={() => void save()} disabled={!canSave} className={btnPrimary}>
                                             {busy ? '저장 중…' : isNew ? '등록' : '저장'}
@@ -248,7 +370,7 @@ export function ProductsTab({
                                 }
                             >
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <Field label="모델명" htmlFor="product-model" hint="입찰 답변과 검색에 쓰는 기준 이름. 예: N5800, A650">
+                                    <Field label="모델명" htmlFor="product-model" hint="입찰 답변과 검색에 쓰는 기준 이름. 예: N5800, N5800-GB70-PU02">
                                         <input id="product-model" value={draft.model} onChange={(e) => { setDraft((d) => ({ ...d, model: e.target.value })); clear(); }} maxLength={50} placeholder="N5800" className={inputCls} />
                                     </Field>
                                     <Field label="제품 이름" htmlFor="product-name" hint="세대나 설명을 붙인 표시 이름">
@@ -264,6 +386,14 @@ export function ProductsTab({
                                             {Object.entries(meta?.product_statuses ?? { active: '판매 중' }).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                                         </select>
                                     </Field>
+                                    <Field label="상위 모델" htmlFor="product-parent" className="sm:col-span-2" hint="파생 모델이면 갈라져 나온 모델을 고릅니다. 비우면 최상위 모델입니다.">
+                                        <select id="product-parent" value={draft.parent_id ?? ''} onChange={(e) => { setDraft((d) => ({ ...d, parent_id: e.target.value || null })); clear(); }} className={selectCls}>
+                                            <option value="">없음 (최상위 모델)</option>
+                                            {parentOptions.map(({ product: p, depth }) => (
+                                                <option key={p.id} value={p.id}>{'\u00a0\u00a0'.repeat(depth)}{p.model}{p.name ? ` · ${p.name}` : ''}</option>
+                                            ))}
+                                        </select>
+                                    </Field>
                                     <Field label="비고" htmlFor="product-note" className="sm:col-span-2">
                                         <input id="product-note" value={draft.note} onChange={(e) => { setDraft((d) => ({ ...d, note: e.target.value })); clear(); }} maxLength={500} placeholder="예: 공공 입찰 주력 모델" className={inputCls} />
                                     </Field>
@@ -272,7 +402,7 @@ export function ProductsTab({
 
                             {!isNew && detail && (
                                 <>
-                                    <Card title={`사양 값 ${detail.specs.length}`}>
+                                    <Card title="제품 사양">
                                         <SpecValuesEditor
                                             ownerType="product"
                                             ownerId={detail.id}
@@ -285,7 +415,7 @@ export function ProductsTab({
                                         />
                                     </Card>
 
-                                    <Card title={`부품 구성 ${detail.components.length}`}>
+                                    <Card title="구성 부품">
                                         {detail.components.length === 0 ? (
                                             <p className="text-[12.5px] text-muted py-1">연결된 부품이 없습니다. CPU, GPU, SSD처럼 코어 수·클럭 등 세부 값이 부품 쪽에 있는 항목을 연결하세요.</p>
                                         ) : (
@@ -349,12 +479,37 @@ export function ProductsTab({
                                             )}
                                         </div>
                                     </Card>
+
+                                    <Card
+                                        title="하위 모델"
+                                        aside={<button type="button" onClick={() => startNew(detail)} disabled={busy} className={btnGhost}>+ 하위 모델 추가</button>}
+                                    >
+                                        {detail.children.length === 0 ? (
+                                            <p className="text-[12.5px] text-muted py-1">등록된 하위 모델이 없습니다. {detail.model}-GB70-PU02처럼 이 모델에서 갈라진 파생 모델을 추가하세요.</p>
+                                        ) : (
+                                            <ul className="flex flex-col gap-1">
+                                                {detail.children.map((c) => (
+                                                    <li key={c.id}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => switchTo(c.id)}
+                                                            className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left text-[12.5px] hover:bg-chip"
+                                                        >
+                                                            <span className="font-semibold">{c.model}</span>
+                                                            {c.name && <span className="min-w-0 flex-1 truncate text-muted">{c.name}</span>}
+                                                            {c.status !== 'active' && <Pill tone={c.status === 'eol' ? 'muted' : 'warn'}>{labelOf(meta?.product_statuses, c.status)}</Pill>}
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </Card>
                                 </>
                             )}
 
                             {isNew && (
                                 <p className="text-[12px] text-muted">
-                                    <button type="button" onClick={() => switchTo(products?.[0]?.id ?? null)} className={btnGhost}>취소</button>
+                                    <button type="button" onClick={() => switchTo(draft.parent_id ?? products?.[0]?.id ?? null)} className={btnGhost}>취소</button>
                                 </p>
                             )}
                         </>
