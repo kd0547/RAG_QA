@@ -558,7 +558,8 @@ class SpecRepository:
         """미리보기에서 고친 표를 한 트랜잭션으로 저장한다.
 
         columns: [{"header": 모델명, "owner_id": 기존 id 또는 None, "create": 없으면 새로 등록할지, "skip": 열 건너뛰기,
-                   "parent_model": 상위 모델명 (제품만, 선택), "name": 제품 이름 (제품만, 선택)}]
+                   "parent_model": 상위 모델명 (제품만, 선택), "name": 제품 이름 (제품만, 선택),
+                   "category": 제품 종류 키 (제품만, 선택. 데스크톱 양식이면 desktop)}]
                  parent_model이 있으면 그 제품의 하위 모델로 옮긴다. 같은 표의 다른 열이거나 이미 등록된 모델이어야 한다.
                  비어 있으면 기존 상위 모델을 그대로 둔다. 자기 모델명을 적은 칸(병합 셀이 시리즈 열까지 덮은 경우)은 무시한다.
         rows:    [{"attribute_key": 키 또는 None, "new_attribute": {...} 또는 None, "cells": [열 순서대로 원문 문자열]}]
@@ -613,6 +614,15 @@ class SpecRepository:
                     owner_id = owner_ids[ci]
                     if owner_id is None:
                         continue
+                    category = (column.get("category") or "").strip()
+                    if category:
+                        try:
+                            conn.execute(
+                                "UPDATE product SET category = ?, updated_at = ? WHERE id = ?",
+                                (_choice(category, PRODUCT_CATEGORIES, field="제품 종류", default="notebook"), _now(), owner_id),
+                            )
+                        except ValueError as exc:
+                            errors.append({"row": None, "column": ci, "message": str(exc)})
                     name = " ".join((column.get("name") or "").split())
                     if name:
                         try:

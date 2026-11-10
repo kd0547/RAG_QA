@@ -342,7 +342,7 @@ def _apply_preview(c, preview):
     return c.post("/specs/import/apply", json={
         "owner_type": "product",
         "columns": [{"header": col["header"], "owner_id": col["owner_id"], "create": True,
-                     "parent_model": col["parent_model"], "name": col["name"]} for col in preview["columns"]],
+                     "parent_model": col["parent_model"], "name": col["name"], "category": col.get("category")} for col in preview["columns"]],
         "rows": [{"attribute_key": r["attribute_key"], "new_attribute": r["new_attribute"],
                   "cells": [cell["raw"] for cell in r["cells"]]} for r in preview["rows"]],
     })
@@ -431,3 +431,59 @@ def test_component_template_keeps_only_that_kind(client):
     assert categories <= {"저장장치", "기타"}
     assert ws.cell(2, 3).value != "상위 모델"
 
+
+
+# ---------- 데스크톱 양식 (별도 파일) ----------
+
+def test_desktop_template_follows_proposal_rows_and_saves_category(client, tmp_path):
+    c, repo = client
+    response = c.get("/specs/import/template", params={"owner_type": "product", "category": "desktop"})
+    assert response.status_code == 200
+    assert "spec_template_product_desktop.xlsx" in response.headers["content-disposition"]
+    wb = openpyxl.load_workbook(filename=__import__("io").BytesIO(response.content))
+    assert wb.sheetnames == ["데스크톱 사양", "작성 안내"]
+    ws = wb.worksheets[0]
+    assert [cell.value for cell in ws[1]][4:] == ["모델명1", "모델명2", "모델명3"]  # 노트북 제품(N5800)은 넣지 않는다
+    sections = [ws.cell(r, 1).value for r in range(4, ws.max_row + 1) if ws.cell(r, 1).value]
+    assert sections == ["CPU", "CPU Socket", "Chipset", "Memory", "Graphics", "HDD", "SSD", "ODD", "LAN", "Sound",
+                        "PCI 확장", "파워", "전면 포트", "후면 포트", "케이스", "사이즈", "무게", "소비 전력량"]
+    row_of = {ws.cell(r, 2).value: r for r in range(2, ws.max_row + 1)}
+
+    # DT281 아래 Q670 보드 모델 둘. 칩셋은 병합(공통), 파워는 칸마다
+    for col, model in enumerate(["DT281", "DT281 Q670", "DG481 Q670"], start=5):
+        ws.cell(1, col, model)
+    ws.cell(row_of["parent_model"], 6, "DT281")
+    ws.cell(row_of["chipset"], 6, "Q670")
+    ws.merge_cells(start_row=row_of["chipset"], start_column=6, end_row=row_of["chipset"], end_column=7)
+    ws.cell(row_of["psu_w"], 6, "500W 80+ (700W 개별 상품화 가능)"), ws.cell(row_of["psu_w"], 7, "400W 80+")
+    ws.cell(row_of["energy_kwh_year"], 6, "161.13 kWh/년 이하")
+    ws.cell(row_of["front_ports"], 6, "USB 3.0 x 1ea, USB 2.0 x 2ea")
+
+    preview = _upload(c, wb, tmp_path, "desktop.xlsx")
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert {col["category"] for col in body["columns"]} == {"desktop"}
+    assert _apply_preview(c, body).status_code == 200
+
+    by_model = {p["model"]: p for p in repo.list_products()}
+    assert {by_model[m]["category"] for m in ("DT281", "DT281 Q670", "DG481 Q670")} == {"desktop"}
+    assert by_model["N5800"]["category"] == "notebook"  # 다른 제품은 그대로
+    dt = {s["attribute_key"]: s["value_num"] for s in repo.get_product(by_model["DT281 Q670"]["id"])["specs"]}
+    assert dt["psu_w"] == 500.0 and dt["energy_kwh_year"] == 161.13
+    assert repo.get_product(by_model["DT281 Q670"]["id"])["ancestors"][0]["model"] == "DT281"
+
+    # 다시 받은 데스크톱 양식에는 데스크톱 제품만 트리 순서로 있다
+    again = openpyxl.load_workbook(filename=__import__("io").BytesIO(
+        c.get("/specs/import/template", params={"owner_type": "product", "category": "desktop"}).content)).worksheets[0]
+    assert [cell.value for cell in again[1]][4:] == ["DG481 Q670", "DT281", "DT281 Q670"]
+
+
+def test_notebook_template_upload_does_not_change_category(client, tmp_path):
+    c, repo = client
+    wb = openpyxl.load_workbook(filename=__import__("io").BytesIO(c.get("/specs/import/template").content))
+    ws = wb.worksheets[0]
+    row_of = {ws.cell(r, 2).value: r for r in range(2, ws.max_row + 1)}
+    ws.cell(row_of["os"], 5, "Windows 11")
+    body = _upload(c, wb, tmp_path).json()
+    assert {col["category"] for col in body["columns"]} == {None}
+    assert c.get("/specs/import/template", params={"category": "monitor"}).status_code == 400

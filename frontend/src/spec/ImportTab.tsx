@@ -33,6 +33,7 @@ interface EditColumn {
     skip: boolean;
     parent_model?: string | null;
     name?: string | null;
+    category?: string | null;
 }
 
 const OPTION_MARK = /\(?\s*(옵션|option|opt|선택)\s*\)?/i;
@@ -229,7 +230,7 @@ export function ImportTab({
             const preview = await specApi.parseImport({ owner_type: ownerType, kind: effectiveKind, text: upload ? undefined : text.trim() || undefined, file: upload });
             setColumns(preview.columns.map((c) => ({
                 header: c.header, owner_id: c.owner_id, owner_label: c.owner_label, create: true, skip: false,
-                parent_model: c.parent_model, name: c.name,
+                parent_model: c.parent_model, name: c.name, category: c.category ?? null,
             })));
             setRows(toRows(preview));
             setSource(preview.source);
@@ -260,7 +261,7 @@ export function ImportTab({
             replace,
             source_note: sourceNote.trim(),
             source_page: null,
-            columns: columns.map((c) => ({ header: c.header, owner_id: c.owner_id, create: c.create, skip: c.skip, parent_model: c.parent_model ?? null, name: c.name ?? null })),
+            columns: columns.map((c) => ({ header: c.header, owner_id: c.owner_id, create: c.create, skip: c.skip, parent_model: c.parent_model ?? null, name: c.name ?? null, category: c.category ?? null })),
             rows: rows.map((r) => ({
                 attribute_key: r.mode === 'attribute' ? r.attribute_key || null : null,
                 new_attribute: r.mode === 'new' ? { ...r.newAttribute, key: r.newAttribute.key.trim().toLowerCase() } : null,
@@ -341,6 +342,7 @@ export function ImportTab({
                         </Field>
                     )}
                     <a href={specApi.templateUrl(ownerType, effectiveKind)} download className={btnGhost}>엑셀 양식 내려받기</a>
+                    {ownerType === 'product' && <a href={specApi.templateUrl(ownerType, null, 'desktop')} download className={btnGhost}>데스크톱 양식 내려받기</a>}
                     <span className="text-[11.5px] leading-5 text-muted max-w-[560px]">
                         {ownerType === 'product'
                             ? '열 하나가 모델 하나입니다. 위쪽 상위 모델·제품 이름 행을 채우면 시리즈와 파생 모델이 함께 등록되고, 여러 모델에 같은 값은 제안서처럼 셀을 병합하면 됩니다. 등록된 제품과 값이 채워져 있어 고쳐서 다시 올려도 됩니다.'
@@ -527,6 +529,7 @@ export function ImportTab({
                                         {c.owner_id ? <Pill tone="brand">기존</Pill> : c.create ? <Pill tone="warn">새로 등록</Pill> : <Pill>미등록</Pill>}
                                     </div>
                                     {c.owner_label && c.owner_label !== c.header && <div className="mt-0.5 text-[11px] font-normal text-muted truncate">{c.owner_label}</div>}
+                                    {c.category && <div className="mt-0.5 text-[11px] font-normal text-muted">{labelOf(meta?.product_categories, c.category)}</div>}
                                     {(c.parent_model || c.name) && (
                                         <div className="mt-0.5 text-[11px] font-normal text-muted truncate" title={[c.parent_model && `상위 모델 ${c.parent_model}`, c.name && `이름 ${c.name}`].filter(Boolean).join(' · ')}>
                                             {c.parent_model && <>상위 <span className="font-semibold text-ink">{c.parent_model}</span></>}

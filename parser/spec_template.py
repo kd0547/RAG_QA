@@ -11,6 +11,9 @@
 - 속성은 분류 순서로 묶고, 분류 칸은 세로로 병합한다.
 - 사전에 있는 속성에 더해 아직 사전에 없는 기본 속성(entity/spec.py)도 넣는다. 값을 넣고 가져오면 속성도 같이 등록된다.
 - 부품 양식은 모델 정보 행이 없고, 그 부품 종류에 쓰는 분류(KIND_CATEGORIES)의 속성만 넣는다.
+- 데스크톱 양식(category="desktop")은 별도 파일이다. 데스크톱 제안서 사양표 순서(DESKTOP_LAYOUT)로 행을 놓고,
+  분류 칸에 제안서 항목 이름(CPU Socket, 파워, 전면 포트 …)을 쓴다. 등록된 데스크톱 제품만 열로 넣는다.
+  시트 이름이 DESKTOP_SHEET라 가져올 때 그 열의 제품을 데스크톱으로 저장한다.
 """
 from __future__ import annotations
 
@@ -21,6 +24,29 @@ from entity.spec import ATTRIBUTE_CATEGORIES, COMPONENT_KINDS, DEFAULT_ATTRIBUTE
 INFO_LABEL = "모델 정보"
 PRODUCT_INFO = (("parent_model", "상위 모델"), ("product_name", "제품 이름"))
 FIXED_COLUMNS = ("분류", "속성키", "속성명", "단위")
+
+DESKTOP_SHEET = "데스크톱 사양"
+# 데스크톱 제안서 사양표 행 순서: (제안서 항목, 속성 키들)
+DESKTOP_LAYOUT: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("CPU", ("cpu_model",)),
+    ("CPU Socket", ("cpu_socket",)),
+    ("Chipset", ("chipset",)),
+    ("Memory", ("ram_type", "ram_gb", "ram_max_gb", "ram_slots")),
+    ("Graphics", ("gpu_model", "vram_gb")),
+    ("HDD", ("hdd_gb",)),
+    ("SSD", ("ssd_gb", "ssd_interface", "ssd_slots", "m2_slots")),
+    ("ODD", ("odd",)),
+    ("LAN", ("lan_controller",)),
+    ("Sound", ("audio",)),
+    ("PCI 확장", ("pci_slots",)),
+    ("파워", ("psu_w",)),
+    ("전면 포트", ("front_ports",)),
+    ("후면 포트", ("io_ports",)),
+    ("케이스", ("case_type",)),
+    ("사이즈", ("dimensions_mm",)),
+    ("무게", ("weight_kg",)),
+    ("소비 전력량", ("energy_kwh_year",)),
+)
 
 _HEADER_FILL = "EBF8FC"
 _INFO_FILL = "FFF7E0"
@@ -40,6 +66,12 @@ def template_attributes(attributes: list[dict], kind: str | None) -> list[dict]:
         merged = [a for a in merged if a["category"] in allowed]
     order = {key: i for i, key in enumerate(ATTRIBUTE_CATEGORIES)}
     return sorted(merged, key=lambda a: (order.get(a["category"], len(order)), a.get("sort_order", 0), a["name"]))
+
+
+def desktop_attributes(attributes: list[dict]) -> list[dict]:
+    """데스크톱 양식 행: DESKTOP_LAYOUT 순서. 각 속성에 제안서 항목 이름(_section)을 붙인다."""
+    by_key = {a["key"]: a for a in template_attributes(attributes, None)}
+    return [{**by_key[key], "_section": section} for section, keys in DESKTOP_LAYOUT for key in keys if key in by_key]
 
 
 def tree_order(products: list[dict]) -> list[dict]:
@@ -62,17 +94,21 @@ def tree_order(products: list[dict]) -> list[dict]:
     return ordered
 
 
-def build_template(owner_type: str, kind: str | None, attributes: list[dict], owners: list[dict]) -> bytes:
-    """owners: 제품(또는 부품) 상세 목록. 각 항목에 model, specs가 있고 제품이면 parent_id, name도 있다."""
+def build_template(owner_type: str, kind: str | None, attributes: list[dict], owners: list[dict], category: str | None = None) -> bytes:
+    """owners: 제품(또는 부품) 상세 목록. 각 항목에 model, specs가 있고 제품이면 parent_id, name도 있다.
+    category="desktop"이면 데스크톱 양식 (데스크톱 제품만, 데스크톱 제안서 행 순서)."""
     import openpyxl
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.datavalidation import DataValidation
 
     is_product = owner_type == "product"
+    is_desktop = is_product and category == "desktop"
+    if is_desktop:
+        owners = [o for o in owners if o.get("category") == "desktop"]
     if is_product:
         owners = tree_order(owners)
-    rows = template_attributes(attributes, kind if not is_product else None)
+    rows = desktop_attributes(attributes) if is_desktop else template_attributes(attributes, kind if not is_product else None)
     values: dict[tuple[str, str], list[str]] = {}
     for owner in owners:
         for spec in owner.get("specs", []):
@@ -85,7 +121,7 @@ def build_template(owner_type: str, kind: str | None, attributes: list[dict], ow
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "제품 사양" if is_product else f"부품 사양 ({COMPONENT_KINDS.get(kind or '', kind or '')})"
+    ws.title = DESKTOP_SHEET if is_desktop else "제품 사양" if is_product else f"부품 사양 ({COMPONENT_KINDS.get(kind or '', kind or '')})"
     ws.append(list(FIXED_COLUMNS) + headers)
 
     if is_product:
@@ -101,7 +137,7 @@ def build_template(owner_type: str, kind: str | None, attributes: list[dict], ow
 
     groups: list[tuple[str, int, int]] = []  # (분류, 시작 행, 끝 행)
     for attribute in rows:
-        label = ATTRIBUTE_CATEGORIES.get(attribute["category"], attribute["category"])
+        label = attribute.get("_section") or ATTRIBUTE_CATEGORIES.get(attribute["category"], attribute["category"])
         row = [label, attribute["key"], attribute["name"], attribute.get("unit") or ""]
         for owner in owners:
             row.append(" / ".join(values.get((owner["id"], attribute["key"]), [])))
@@ -156,8 +192,8 @@ def build_template(owner_type: str, kind: str | None, attributes: list[dict], ow
         ws.add_data_validation(validation)
         validation.add(f"{get_column_letter(first_value_col)}2:AZ2")
 
-    _add_guide(wb, is_product)
-    if is_product:
+    _add_guide(wb, is_product, is_desktop)
+    if is_product and not is_desktop:
         _add_example(wb)
 
     buffer = io.BytesIO()
@@ -165,16 +201,24 @@ def build_template(owner_type: str, kind: str | None, attributes: list[dict], ow
     return buffer.getvalue()
 
 
-def _add_guide(wb, is_product: bool) -> None:
+def _add_guide(wb, is_product: bool, is_desktop: bool = False) -> None:
     guide = wb.create_sheet("작성 안내")
     lines = ["첫 시트만 읽습니다. 시트 이름과 순서는 바꾸지 마세요.",
              "1행: E열부터 한 열이 모델 하나입니다. 모델명을 적으세요. 없는 모델은 가져올 때 새로 등록됩니다."]
+    if is_desktop:
+        lines += [
+            "데스크톱 양식입니다. 행은 데스크톱 제안서 사양표 순서이고, 이 양식으로 가져온 제품은 '데스크톱'으로 저장됩니다.",
+            "보드마다 구성이 다르면 보드별 하위 모델을 둡니다. 예: DT281 아래 DT281 H610 / B760 / Q670. "
+            "같은 보드 열(DT281 Q670, DG481 Q670)을 나란히 두면 보드 공통 값(칩셋, 메모리, 후면 포트 …)을 병합해 한 번에 넣을 수 있습니다.",
+            "파워·소비 전력량은 설명을 같이 적어도 첫 숫자를 값으로 읽습니다 (500W 80+ → 500). 용량은 GB 숫자로 적습니다 (2TB → 2048).",
+        ]
     if is_product:
         lines += [
             "2행 상위 모델: 파생 모델이면 갈라져 나온 시리즈(상위) 모델명을 적습니다. 시리즈 열은 비웁니다. "
             "같은 표의 다른 열이거나 이미 등록된 모델이어야 합니다. 칸을 누르면 1행 모델명 목록에서 고를 수 있습니다.",
             "3행 제품 이름: 화면에 보일 이름입니다. 예: Home, Pro, N5800 14세대",
-            "여러 모델에 같은 값이면 제안서처럼 셀을 가로로 병합하세요. 병합된 모든 모델에 같은 값이 들어갑니다. ('작성 예시' 시트 참고)",
+            "여러 모델에 같은 값이면 제안서처럼 셀을 가로로 병합하세요. 병합된 모든 모델에 같은 값이 들어갑니다."
+            + ("" if is_desktop else " ('작성 예시' 시트 참고)"),
         ]
     lines += [
         "B열 속성키는 바꾸지 마세요. 새 항목이 필요하면 행을 추가하고 속성명(C열)만 적어도 됩니다. 가져오기 화면에서 속성을 고르거나 새로 만듭니다.",

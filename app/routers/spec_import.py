@@ -1,6 +1,6 @@
 """사양 표 가져오기 API (/specs/import).
 
-- GET  /specs/import/template  엑셀 양식. 제품은 상위 모델·제품 이름 행과 분류별 속성, 등록된 값을 채워 내려준다 (채워서 그대로 올리면 된다).
+- GET  /specs/import/template  엑셀 양식 (제품은 category=desktop이면 데스크톱 양식). 제품은 상위 모델·제품 이름 행과 분류별 속성, 등록된 값을 채워 내려준다 (채워서 그대로 올리면 된다).
 - POST /specs/import/parse     붙여넣은 표(text) 또는 엑셀(file)을 읽어 미리보기를 만든다. 저장하지 않는다.
 - POST /specs/import/apply     미리보기에서 고친 표를 저장한다. 한 곳이라도 못 읽으면 400과 함께 위치를 돌려주고 아무것도 저장하지 않는다.
 """
@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from entity.spec import COMPONENT_KINDS
 from parser.spec_table import analyze_grid, extract_table_text, grid_from_text, grid_from_xlsx
-from parser.spec_template import build_template
+from parser.spec_template import DESKTOP_SHEET, build_template
 from repository import spec_repo
 from repository.spec_repository import OWNER_TYPES, SpecImportError
 
@@ -46,15 +46,28 @@ def _check_owner(owner_type: str, kind: str | None) -> str | None:
     return None
 
 
+def _first_sheet_title(path: Path) -> str:
+    import openpyxl
+
+    wb = openpyxl.load_workbook(path, read_only=True)
+    try:
+        return wb.worksheets[0].title
+    finally:
+        wb.close()
+
+
 @router.get("/template")
-def download_template(owner_type: str = "product", kind: str | None = None) -> Response:
+def download_template(owner_type: str = "product", kind: str | None = None, category: str | None = None) -> Response:
     """엑셀 양식 (parser/spec_template.py). 제품은 모델 정보 행(상위 모델·제품 이름)과 트리 순서 열, 부품은 그 종류의 속성만.
-    등록된 값이 있으면 채워서 준다."""
+    category=desktop이면 데스크톱 제안서 순서의 데스크톱 양식 (별도 파일). 등록된 값이 있으면 채워서 준다."""
     kind = _check_owner(owner_type, kind)
+    if category not in (None, "", "desktop"):
+        raise HTTPException(status_code=400, detail="양식 종류(category)는 비우거나 desktop이어야 합니다.")
+    desktop = owner_type == "product" and category == "desktop"
     owners = spec_repo.list_products() if owner_type == "product" else spec_repo.list_components(kind)
     details = [spec_repo.get_product(o["id"]) if owner_type == "product" else spec_repo.get_component(o["id"]) for o in owners]
-    content = build_template(owner_type, kind, spec_repo.list_attributes(), [d for d in details if d])
-    filename = f"spec_template_{owner_type}{'_' + kind if kind else ''}.xlsx"
+    content = build_template(owner_type, kind, spec_repo.list_attributes(), [d for d in details if d], "desktop" if desktop else None)
+    filename = f"spec_template_{owner_type}{'_' + kind if kind else ''}{'_desktop' if desktop else ''}.xlsx"
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -73,6 +86,7 @@ async def parse_table(
     kind = _check_owner(owner_type, kind or None)
 
     recognized_text: str | None = None
+    sheet_title: str | None = None  # 엑셀 첫 시트 이름. 데스크톱 양식이면 제품 종류를 데스크톱으로 둔다
     if file is not None and file.filename:
         suffix = Path(file.filename).suffix.lower()
         is_image = suffix in IMAGE_SUFFIXES or (file.content_type or "").startswith("image/")
@@ -103,6 +117,7 @@ async def parse_table(
             tmp_path = Path(tmp.name)
         try:
             grid = grid_from_xlsx(tmp_path)
+            sheet_title = _first_sheet_title(tmp_path)
         except Exception as exc:
             logger.warning("사양 엑셀 읽기 실패: %s (%s)", file.filename, exc)
             raise HTTPException(status_code=400, detail=f"엑셀 파일을 읽지 못했습니다: {exc}") from exc
@@ -124,7 +139,9 @@ async def parse_table(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    category = "desktop" if owner_type == "product" and (sheet_title or "").strip() == DESKTOP_SHEET else None
     for column in preview["columns"]:
+        column["category"] = category
         owner = spec_repo.find_owner(owner_type, column["header"], kind)
         column["owner_id"] = owner["id"] if owner else None
         column["owner_label"] = (owner.get("name") or owner["model"]) if owner else None
@@ -144,6 +161,7 @@ class ImportColumn(BaseModel):
     skip: bool = False
     parent_model: str | None = None  # 제품만: 상위 모델명. 있으면 그 모델의 하위 모델로 옮긴다
     name: str | None = None  # 제품만: 제품 이름
+    category: str | None = None  # 제품만: 제품 종류 (데스크톱 양식이면 desktop)
 
 
 class NewAttribute(BaseModel):

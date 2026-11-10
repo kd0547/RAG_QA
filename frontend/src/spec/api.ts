@@ -171,6 +171,8 @@ export interface ImportPreviewColumn {
     parent_model: string | null;
     /** 제품 표의 '제품 이름' 행 값 */
     name: string | null;
+    /** 제품 종류. 데스크톱 양식으로 올리면 'desktop' */
+    category?: string | null;
 }
 
 export interface ImportPreview {
@@ -200,7 +202,7 @@ export interface ImportBody {
     replace: boolean;
     source_note: string;
     source_page: number | null;
-    columns: { header: string; owner_id: string | null; create: boolean; skip: boolean; parent_model?: string | null; name?: string | null }[];
+    columns: { header: string; owner_id: string | null; create: boolean; skip: boolean; parent_model?: string | null; name?: string | null; category?: string | null }[];
     rows: { attribute_key: string | null; new_attribute: ImportNewAttribute | null; cells: string[] }[];
 }
 
@@ -290,9 +292,11 @@ export const specApi = {
     },
 
     // 표 가져오기
-    templateUrl(ownerType: OwnerType, kind: string | null): string {
+    /** category='desktop'이면 데스크톱 양식 (데스크톱 제안서 행 순서, 별도 파일) */
+    templateUrl(ownerType: OwnerType, kind: string | null, category?: 'desktop'): string {
         const query = new URLSearchParams({ owner_type: ownerType });
         if (kind) query.set('kind', kind);
+        if (category) query.set('category', category);
         return `${API_BASE}/specs/import/template?${query.toString()}`;
     },
     parseImport(input: { owner_type: OwnerType; kind: string | null; text?: string; file?: File | null }): Promise<ImportPreview> {
