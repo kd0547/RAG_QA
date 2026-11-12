@@ -112,17 +112,31 @@ def test_empty_answer_raises_and_records_error(agent_env):
     assert (run["status"], run["error"]) == ("error", "빈 답변")
 
 
-def test_recursion_limit_is_recorded_as_limit(agent_env):
+def test_recursion_limit_is_recorded_as_limit(agent_env, monkeypatch):
     from langgraph.errors import GraphRecursionError
 
     from agent import agent as agent_module
 
+    monkeypatch.setattr(agent_module, "RECURSION_LIMIT", 10)
     agent_env.install([tool_call("list_documents", {}, f"c{i}") for i in range(40)])
 
     with pytest.raises(GraphRecursionError):
         agent_module.run_agent_temp_attachments("질문", mode="local", owner=OWNER)
 
     assert agent_env.evidence_repo.latest_run("task", "t1")["status"] == "limit"
+
+
+def test_model_call_limit_is_recorded_as_limit(agent_env):
+    """모델 호출 20회 한도로 끝나면 마지막 메시지는 답변이 아니다 → limit + 예외 (drafted 저장 없음)."""
+    from agent import agent as agent_module
+
+    agent_env.install([tool_call("list_documents", {}, f"c{i}") for i in range(40)])
+
+    with pytest.raises(agent_module.AgentRunError):
+        agent_module.run_agent_temp_attachments("질문", mode="local", owner=OWNER)
+
+    run = agent_env.evidence_repo.latest_run("task", "t1")
+    assert run["status"] == "limit" and run["error"].startswith("Model call limits exceeded")
 
 
 def test_consumer_marks_failed_not_drafted_when_run_fails(monkeypatch):

@@ -60,6 +60,17 @@ DEFAULT_CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 SEARCH_TOP_K = int(os.getenv("SEARCH_TOP_K", "5"))
 RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "3"))
 
+# ---------- 에이전트 맥락 예산 (agent/agent.py 미들웨어) ----------
+# 로컬 모델(qwen3.8-flash-next)의 최대 컨텍스트는 262,144토큰(vLLM /v1/models max_model_len)이다.
+# 아래 값은 모델 한계가 아니라 비용·지연 예산이다. 2026-11-12 실제 질문 1건이 모델 호출 9회에 입력 63,264토큰을 썼다.
+# 오래된 도구 결과를 자리표시자로 바꾸는 기준 (모델 입력의 대략적 토큰 수)
+CTX_CLEAR_TRIGGER_TOKENS = int(os.getenv("CTX_CLEAR_TRIGGER_TOKENS", "24000"))
+# 대화가 이보다 길어지면 앞부분을 요약한다
+CTX_SUMMARY_TRIGGER_TOKENS = int(os.getenv("CTX_SUMMARY_TRIGGER_TOKENS", "40000"))
+# 그래프 단계 한도. 미들웨어 노드 때문에 모델 호출 1회에 약 7단계를 쓴다.
+# 모델 호출 한도(20회, ModelCallLimitMiddleware)가 먼저 걸리도록 넉넉히 둔다 (40이면 도구 9회 호출에서 끊긴다)
+AGENT_RECURSION_LIMIT = int(os.getenv("AGENT_RECURSION_LIMIT", "200"))
+
 # ---------- 문서 그래프 (Graph RAG) ----------
 # 업로드·페이지 검수 저장 뒤 백그라운드로 개체·관계를 뽑을지 (0이면 끈다. /graph/rebuild로 따로 뽑을 수 있다)
 GRAPH_EXTRACT_ENABLED = os.getenv("GRAPH_EXTRACT_ENABLED", "1") not in ("0", "false", "False", "")

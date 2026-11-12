@@ -27,7 +27,11 @@ from tools.tool import (
     attachment_page_texts, graph_search, grep_documents, list_documents, list_evidence,
     read_attachment, read_pages, rerank_documents, search_documents,
 )
-from langchain.agents.middleware import dynamic_prompt, ModelRequest
+from langchain.agents.middleware import (
+    ClearToolUsesEdit, ContextEditingMiddleware, ModelCallLimitMiddleware, ModelRequest, SummarizationMiddleware,
+    ToolCallLimitMiddleware, dynamic_prompt,
+)
+from langchain.agents.middleware.summarization import DEFAULT_SUMMARY_PROMPT
 import logging
 import yaml
 load_dotenv()
@@ -61,8 +65,24 @@ def _system_prompt(request:ModelRequest):
 # 대화 기록(checkpoint) 저장소. main.py lifespan이 열고(set_checkpointer) 닫는다. 없으면 기록 없이 동작한다.
 _checkpointer: SqliteSaver | None = None
 AGENT_THREADS_DB = Path(__file__).resolve().parents[1] / "storage" / "agent_threads.db"
-# 한 번의 실행에서 그래프가 밟을 수 있는 최대 단계 수
-RECURSION_LIMIT = 40
+# 한 번의 실행에서 그래프가 밟을 수 있는 최대 단계 수 (config.AGENT_RECURSION_LIMIT 설명 참고)
+RECURSION_LIMIT = config.AGENT_RECURSION_LIMIT
+
+# 실행 한도 (서버 코드로 강제한다. 프롬프트에는 횟수를 쓰지 않는다)
+SEARCH_CALLS_PER_RUN = 6
+TOOL_CALLS_PER_RUN = 25
+MODEL_CALLS_PER_RUN = 20
+# ModelCallLimitMiddleware(exit_behavior="end")가 한도에 걸리면 마지막에 넣는 메시지의 앞부분
+MODEL_LIMIT_MESSAGE_PREFIX = "Model call limits exceeded"
+
+CLEARED_TOOL_PLACEHOLDER = "[축약됨 — list_evidence로 근거 ID를 다시 조회하세요]"
+SUMMARY_PROMPT = DEFAULT_SUMMARY_PROMPT.replace(
+    "<messages>",
+    "IMPORTANT: Keep these exactly as written, never paraphrase or drop them: evidence IDs (e followed by hex, "
+    "e.g. e1a2b3c4d), product model names, numbers with units, certification numbers, and reviewer rejection "
+    "reasons ([검토 담당자 반려]). 근거 ID(e…), 제품 모델명, 수치, 인증번호, 반려 사유는 반드시 원문 그대로 보존한다.\n\n<messages>",
+    1,
+)
 
 
 def open_checkpointer(path: str | Path = AGENT_THREADS_DB) -> SqliteSaver:
@@ -78,19 +98,49 @@ def set_checkpointer(checkpointer: SqliteSaver | None) -> None:
     _agents.clear()
 
 
-def create_rag_agent(llm, *, checkpointer=None):
+def build_middleware(summary_model) -> list:
+    """맥락 예산·실행 한도 미들웨어 (순서 중요: 시스템 프롬프트 → 도구 결과 축약 → 요약 → 한도).
+
+    - ContextEditing: 입력이 CTX_CLEAR_TRIGGER_TOKENS를 넘으면 최근 3개를 뺀 오래된 도구 결과를 자리표시자로.
+      list_evidence 결과는 지우지 않는다 (자리표시자로 바뀐 결과의 근거 ID를 다시 볼 곳).
+    - Summarization: 대화가 CTX_SUMMARY_TRIGGER_TOKENS를 넘으면 앞부분 요약, 최근 12개 메시지는 그대로.
+      로컬 모델에 profile이 없어 비율 기준은 쓰지 않는다.
+    - 실행당 한도: search_documents 6회, 도구 25회, 모델 호출 20회(넘으면 종료 → 답변으로 쓰지 않음).
+    """
+    return [
+        _system_prompt,
+        ContextEditingMiddleware(edits=[ClearToolUsesEdit(
+            trigger=config.CTX_CLEAR_TRIGGER_TOKENS,
+            keep=3,
+            exclude_tools=("list_evidence",),
+            placeholder=CLEARED_TOOL_PLACEHOLDER,
+        )]),
+        SummarizationMiddleware(
+            model=summary_model,
+            trigger=("tokens", config.CTX_SUMMARY_TRIGGER_TOKENS),
+            keep=("messages", 12),
+            summary_prompt=SUMMARY_PROMPT,
+        ),
+        ToolCallLimitMiddleware(tool_name="search_documents", run_limit=SEARCH_CALLS_PER_RUN),
+        ToolCallLimitMiddleware(run_limit=TOOL_CALLS_PER_RUN),
+        ModelCallLimitMiddleware(run_limit=MODEL_CALLS_PER_RUN, exit_behavior="end"),
+    ]
+
+
+def create_rag_agent(llm, *, checkpointer=None, summary_model=None):
     """도구·미들웨어·대화 기록을 붙인 에이전트. 테스트는 대역 모델로 이 함수를 그대로 쓴다."""
     return create_agent(
         model=llm,
         tools=TOOLS,
-        middleware=[_system_prompt],
+        middleware=build_middleware(summary_model or llm),
         context_schema=AgentContext,
         checkpointer=checkpointer,
     )
 
 
 def build_agent(mode: Literal["claude", "local"], checkpointer: SqliteSaver | None = None):
-    return create_rag_agent(get_llm_model(mode), checkpointer=checkpointer)
+    # 요약은 모드와 관계없이 로컬 모델로 한다 (메일 처리는 항상 local)
+    return create_rag_agent(get_llm_model(mode), checkpointer=checkpointer, summary_model=get_llm_model("local"))
 
 
 # 같은 대화(thread)를 두 실행이 동시에 이어 쓰지 않게 한다 (메일 소비자는 하나지만 /ask와 공유 대비)
@@ -279,6 +329,11 @@ def _invoke_logged(
     tokens_in, tokens_out = _token_usage(new_messages)
     final = result["messages"][-1] if result["messages"] else None
     answer = answer_text(final).strip() if getattr(final, "type", None) == "ai" else ""
+    if answer.startswith(MODEL_LIMIT_MESSAGE_PREFIX):
+        # 모델 호출 한도로 끝난 경우: 마지막 메시지는 업무 답변이 아니다
+        repository.evidence_repo.finish_run(run_id, "limit", trace.calls, tokens_in, tokens_out, answer)
+        logger.warning("에이전트 실행이 모델 호출 한도로 끝남: %s, mode=%s, run=%s", label, mode, run_id)
+        raise AgentRunError(f"모델 호출 한도({MODEL_CALLS_PER_RUN}회)를 넘어 답변을 만들지 못했습니다")
     if not answer or getattr(final, "tool_calls", None):
         # 마지막이 도구 호출이거나 본문이 비면 업무 답변이 아니다
         repository.evidence_repo.finish_run(run_id, "error", trace.calls, tokens_in, tokens_out, "빈 답변")
