@@ -11,7 +11,7 @@ from .email_receiver import fetch_new_emails
 from entity.type import TaskStatus
 import logging
 
-from mail.email_send import send_email
+from mail.email_send import SendOutcome, send_email
 from logging_config import mask_email
 from mail.templates import render_mail_review_email
 
@@ -45,7 +45,7 @@ def build_review_feedback(previous_draft: str, reject_reasons: list[str]) -> str
 def _notify_reviewer(reviewer: str, mail: MailEntity, answer: str, task_id: str) -> None:
     """검토 담당자에게 초안 알림 메일을 보낸다. 실패는 로그만 남기고 상태는 바꾸지 않는다."""
     try:
-        send_email(
+        result = send_email(
             reviewer,
             f"[테스트][검토]{mail.subject}",
             render_mail_review_email(
@@ -58,6 +58,12 @@ def _notify_reviewer(reviewer: str, mail: MailEntity, answer: str, task_id: str)
         )
     except Exception:
         logger.exception("검토 알림 발송 실패(초안은 저장됨): task_id=%s, reviewer=%s", task_id, mask_email(reviewer))
+        return
+    if result.outcome != SendOutcome.SENT:
+        logger.error(
+            "검토 알림 발송 실패(초안은 저장됨): task_id=%s, reviewer=%s, %s, %s",
+            task_id, mask_email(reviewer), result.outcome.value, result.detail,
+        )
         return
     logger.info("검토 알림 발송: task_id=%s, reviewer=%s", task_id, mask_email(reviewer))
 
@@ -113,6 +119,9 @@ def email_consumer_loop(stop_event: threading.Event,
 
         for task in pending_tasks:
             try:
+                # 생성 중 표시. 서버가 도중에 재시작되면 main.py가 pending으로 되돌린다.
+                task_repo.update_status(task.task_id, TaskStatus.PROCESSING)
+
                 # 처리할 수 없는 작업은 pending에서 빼야 10초마다 같은 경고가 반복되지 않는다.
                 # failed로 두면 대시보드 기본 목록에 보여 담당자가 직접 확인할 수 있다.
                 mail = email_repo.get_mail_by_id(task.mail_uid)

@@ -60,6 +60,17 @@ export const mailApi = {
         });
     },
 
+    /**
+     * 발송 결과 불명(send_unknown) 건을 담당자가 '실제로 나갔다'고 확인해 sent 로 바꾼다.
+     * 메일은 보내지 않는다. reason 필수.
+     */
+    markSent(taskId: string, reason: string): Promise<{ task_id: string; status: MailStatus }> {
+        return request(`/mails/${encodeURIComponent(taskId)}/mark-sent`, {
+            method: 'POST',
+            body: JSON.stringify({ reason }),
+        });
+    },
+
     /** 반려. requeue=true(기본)면 pending 으로 되돌려 재작성 */
     reject(
         taskId: string,

@@ -62,6 +62,14 @@ def mail_data(tmp_path, monkeypatch):
     return ids
 
 
+def _sent_ok(sent: list, kwargs: dict):
+    """발송 대역: 호출을 기록하고 서버가 수락한 것으로 돌려준다."""
+    from mail.email_send import SendOutcome, SendResult
+
+    sent.append(kwargs)
+    return SendResult(SendOutcome.SENT, "DATA 250")
+
+
 @pytest.fixture
 def mail_client(mail_data):
     from app.routers import mail_links, mails
@@ -159,7 +167,7 @@ def test_approve_uses_task_id(mail_client, monkeypatch):
     from mail.templates import render_answer_email
 
     sent = []
-    monkeypatch.setattr(mails, "send_email", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setattr(mails, "send_email", lambda **kwargs: _sent_ok(sent, kwargs))
 
     response = client.post(f"/mails/{ids['drafted']}/approve")
 
@@ -183,7 +191,7 @@ def test_approve_with_edited_body_sends_and_saves_it(mail_client, monkeypatch):
     from mail.templates import render_answer_email
 
     sent = []
-    monkeypatch.setattr(mails, "send_email", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setattr(mails, "send_email", lambda **kwargs: _sent_ok(sent, kwargs))
 
     response = client.post(
         f"/mails/{ids['drafted']}/approve",
@@ -202,7 +210,7 @@ def test_send_link_page_does_not_send_by_itself(mail_client, monkeypatch):
     from app.routers import mails
 
     sent = []
-    monkeypatch.setattr(mails, "send_email", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setattr(mails, "send_email", lambda **kwargs: _sent_ok(sent, kwargs))
 
     response = client.get(f"/mails/{ids['drafted']}/send")
 

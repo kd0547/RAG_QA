@@ -7,9 +7,10 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from entity.type import parse_status_filter, TaskStatus
-from mail.email_send import SENDER_EMAIL, send_email
+from mail.email_send import SENDER_EMAIL, SendOutcome, SendResult, send_email
 from mail.templates import render_answer_email
 from repository import task_repo
+from repository.task_repository import TaskRepository
 from logging_config import mask_email
 
 logger = logging.getLogger(__name__)
@@ -138,6 +139,23 @@ def mail_reject(task_id: str, payload: RejectBody, request: Request):
     )
     return {"task_id": task_id, "status": next_status.value}
 
+# 승인(발송)할 수 있는 상태. 실패·불명 건은 담당자가 다시 승인할 때만 다시 보낸다 (자동 재발송 없음).
+SENDABLE = [s.value for s in TaskRepository.SENDABLE]
+
+_SEND_STATUS = {
+    SendOutcome.SENT: TaskStatus.SENT,
+    SendOutcome.FAILED: TaskStatus.SEND_FAILED,
+    SendOutcome.UNKNOWN: TaskStatus.SEND_UNKNOWN,
+}
+
+# 화면과 메일 링크 페이지가 그대로 보여주는 안내 문구
+SEND_FAILED_MESSAGE = "메일 서버가 발송을 받지 않았습니다(send_failed). 원인을 확인한 뒤 다시 승인할 수 있습니다."
+SEND_UNKNOWN_MESSAGE = (
+    "발송 중 연결이 끊겨 메일이 전달됐는지 알 수 없습니다(send_unknown). "
+    "보낸편지함·수신자에게 확인한 뒤 '발송 확인됨' 또는 '재발송'을 선택하세요. 자동으로 다시 보내지 않습니다."
+)
+
+
 @router.post("/mails/{task_id}/approve")
 def mail_approve(task_id: str, request: Request, payload:ApproveBody | None = None):
     #먼저 task를 가져옴
@@ -145,8 +163,8 @@ def mail_approve(task_id: str, request: Request, payload:ApproveBody | None = No
     if task is None:
         raise HTTPException(status_code=404, detail="not_found")
 
-    #상태 체크
-    if task.get("status") != "drafted":
+    #상태 체크 (빠른 거절용. 실제 중복 방지는 아래 claim_for_send가 한다)
+    if task.get("status") not in SENDABLE:
         # 버튼을 두 번 누르거나 이미 보낸 메일을 다시 승인한 경우. 중복 전송 시도를 추적할 수 있게 남긴다.
         logger.warning(
             "승인 거부(상태 불일치): task_id=%s, status=%s, client=%s",
@@ -174,40 +192,83 @@ def mail_approve(task_id: str, request: Request, payload:ApproveBody | None = No
         for file_id in selected
     ]
 
-    # 수정본이면 task에 먼저 반영 (전송이 실패해도 재전송 때 수정본이 나가도록)
+    recipient = task.get("sender")
+    # 발송 선점: 상태를 sending으로 바꾸고 본문·수신자·첨부를 고정한다. 동시에 두 번 승인하면 한쪽만 성공한다.
+    send_id = task_repo.claim_for_send(task_id, answer, recipient, attachments)
+    if send_id is None:
+        logger.warning("승인 거부(다른 요청이 먼저 발송 시작): task_id=%s, client=%s", task_id, _client_ip(request))
+        raise HTTPException(status_code=409, detail="이미 발송 중이거나 처리된 메일입니다")
+
+    # 수정본이면 task에도 반영 (발송이 실패해도 재승인 때 수정본이 보이도록)
     if payload and payload.body:
         task_repo.update_draft_answer(task_id, answer)
 
     subject = f"[응답] {task.get('subject')}"
 
-    #메일 전송
+    #메일 전송. send_email은 예외 대신 결과를 돌려준다.
     try:
-        send_email(
-            to_addr=task.get("sender"),
+        result = send_email(
+            to_addr=recipient,
             subject=subject,
             body=render_answer_email(answer, question=task.get("body") or ""),
             html=True,
             attachments=attachments,
         )
-    except Exception:
-        # 클라이언트에는 smtp_error만 가므로 원인(인증 실패, 연결 끊김 등)은 여기서 남긴다
-        logger.exception(
-            "답변 메일 전송 실패: task_id=%s, to=%s, attachments=%d, client=%s",
-            task_id, mask_email(task.get("sender")), len(attachments), _client_ip(request),
-        )
-        task_repo.update_status(task_id, TaskStatus.FAILED)
-        raise HTTPException(status_code=502, detail="smtp_error")
+    except Exception as exc:
+        # send_email이 예외를 던지는 것은 예상 밖이다. 메일이 나갔는지 모르므로 불명으로 둔다.
+        logger.exception("답변 메일 발송 중 예상하지 못한 오류: task_id=%s", task_id)
+        result = SendResult(SendOutcome.UNKNOWN, f"{type(exc).__name__}: {exc}"[:500])
 
-    #상태 변경
-    task_repo.update_status(task_id, TaskStatus.SENT)
+    status = _SEND_STATUS[result.outcome]
+    task_repo.finish_send(send_id, task_id, status, result.detail, result.cleanup_warning)
+    if result.cleanup_warning:
+        logger.warning("답변 메일은 수락됐지만 연결 정리 실패: task_id=%s, %s", task_id, result.cleanup_warning)
+
+    if status == TaskStatus.SEND_FAILED:
+        logger.error(
+            "답변 메일 발송 실패: task_id=%s, send_id=%s, to=%s, attachments=%d, client=%s, %s",
+            task_id, send_id, mask_email(recipient), len(attachments), _client_ip(request), result.detail,
+        )
+        raise HTTPException(status_code=502, detail=SEND_FAILED_MESSAGE)
+    if status == TaskStatus.SEND_UNKNOWN:
+        logger.error(
+            "답변 메일 발송 결과 불명: task_id=%s, send_id=%s, to=%s, client=%s, %s",
+            task_id, send_id, mask_email(recipient), _client_ip(request), result.detail,
+        )
+        raise HTTPException(status_code=502, detail=SEND_UNKNOWN_MESSAGE)
+
     logger.info(
-        "답변 승인·전송 완료: task_id=%s, to=%s, edited=%s, attachments=%d, client=%s",
-        task_id, mask_email(task.get("sender")), bool(payload and payload.body), len(attachments), _client_ip(request),
+        "답변 승인·전송 완료: task_id=%s, send_id=%s, to=%s, edited=%s, attachments=%d, client=%s",
+        task_id, send_id, mask_email(recipient), bool(payload and payload.body), len(attachments), _client_ip(request),
     )
 
     return {
         "task_id": task_id,
         "status": TaskStatus.SENT.value,
         "sent_at": datetime.now().astimezone().isoformat(),
-        "to": task.get("sender"),
+        "to": recipient,
     }
+
+
+class MarkSentBody(BaseModel):
+    reason: str
+
+
+@router.post("/mails/{task_id}/mark-sent")
+def mail_mark_sent(task_id: str, payload: MarkSentBody, request: Request):
+    """수락 여부를 모르는 발송(send_unknown)을 담당자가 '실제로 나갔다'고 확인해 sent로 바꾼다. 메일은 보내지 않는다."""
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="확인 사유가 필요합니다")
+
+    task = task_repo.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not task_repo.mark_sent(task_id, reason):
+        raise HTTPException(status_code=409, detail=f"발송 결과 불명(send_unknown) 상태에서만 확인할 수 있습니다: {task.status.value}")
+
+    logger.info(
+        "발송 확인 처리: task_id=%s, send_unknown -> sent, client=%s, reason=%s",
+        task_id, _client_ip(request), reason[:200],
+    )
+    return {"task_id": task_id, "status": TaskStatus.SENT.value}

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -284,6 +285,98 @@ class TaskRepository:
                 (task_id,),
             ).fetchall()
         return [row["reason"] for row in rows]
+
+    # ------------------------------------------------------------ 발송
+
+    # 승인(발송)할 수 있는 상태. send_failed·send_unknown은 담당자가 다시 승인할 때만 다시 보낸다.
+    SENDABLE = (TaskStatus.DRAFTED, TaskStatus.SEND_FAILED, TaskStatus.SEND_UNKNOWN)
+
+    def claim_for_send(self, task_id: str, body: str, recipient: str, attachments: list[dict]) -> int | None:
+        """발송 권한을 선점한다. 한 트랜잭션에서 상태를 sending으로 바꾸고 발송 시도 행을 만든다.
+
+        이미 다른 요청이 선점했거나 보낼 수 없는 상태면 None. 본문·수신자·첨부는 이 시점에 고정된다.
+        """
+        now = datetime.now().isoformat()
+        placeholders = ",".join("?" for _ in self.SENDABLE)
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                f"UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ? AND status IN ({placeholders})",
+                (TaskStatus.SENDING.value, now, task_id, *(s.value for s in self.SENDABLE)),
+            )
+            if cursor.rowcount != 1:
+                return None
+            cursor = conn.execute(
+                """
+                INSERT INTO task_send (task_id, body, recipient, attachments_json, attempted_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (task_id, body, recipient, json.dumps(attachments, ensure_ascii=False), now),
+            )
+            return cursor.lastrowid
+
+    def finish_send(
+        self,
+        send_id: int,
+        task_id: str,
+        status: TaskStatus,
+        detail: str,
+        cleanup_warning: str | None = None,
+    ) -> None:
+        """발송 결과를 시도 행에 남기고 작업 상태를 sent / send_failed / send_unknown으로 바꾼다."""
+        if status not in (TaskStatus.SENT, TaskStatus.SEND_FAILED, TaskStatus.SEND_UNKNOWN):
+            raise ValueError(f"발송 결과 상태가 아닙니다: {status}")
+        now = datetime.now().isoformat()
+        with self.db.transaction() as conn:
+            conn.execute(
+                "UPDATE task_send SET outcome = ?, detail = ?, cleanup_warning = ? WHERE send_id = ?",
+                (status.value, detail, cleanup_warning, send_id),
+            )
+            conn.execute(
+                "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ? AND status = ?",
+                (status.value, now, task_id, TaskStatus.SENDING.value),
+            )
+
+    def get_sends(self, task_id: str) -> list[dict]:
+        """발송 시도 이력 (오래된 순)."""
+        with self.db.lock, self.db.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM task_send WHERE task_id = ? ORDER BY send_id", (task_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_sent(self, task_id: str, reason: str) -> bool:
+        """수락 여부를 모르던 발송(send_unknown)을 담당자 확인에 따라 sent로 바꾼다.
+
+        send_unknown이 아니면 아무것도 하지 않고 False. 확인 사유는 task_reviews에 남긴다.
+        """
+        now = datetime.now().isoformat()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ? AND status = ?",
+                (TaskStatus.SENT.value, now, task_id, TaskStatus.SEND_UNKNOWN.value),
+            )
+            if cursor.rowcount != 1:
+                return False
+            conn.execute(
+                """
+                INSERT INTO task_reviews (task_id, action, reason, requeue, reviewed_at)
+                VALUES (?, 'mark_sent', ?, 0, ?)
+                """,
+                (task_id, reason, now),
+            )
+        return True
+
+    def reset_processing(self) -> int:
+        """서버 시작 시 답변 생성 중(processing)이던 작업을 pending으로 되돌린다.
+
+        sending은 되돌리지 않는다 (메일이 이미 나갔을 수 있어 담당자가 확인해야 한다).
+        """
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE tasks SET status = ?, updated_at = ? WHERE status = ?",
+                (TaskStatus.PENDING.value, datetime.now().isoformat(), TaskStatus.PROCESSING.value),
+            )
+            return cursor.rowcount
 
     def approve(self, task_id):
         select_sql = """

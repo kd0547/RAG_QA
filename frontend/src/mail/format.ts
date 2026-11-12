@@ -59,17 +59,26 @@ export const isLongBody = (body: string) => body.split('\n').length > 4 || body.
 
 export const STATUS_META: Record<MailStatus, { label: string; chip: string }> = {
     pending: { label: '초안 생성 대기', chip: 'bg-chip text-muted' },
+    processing: { label: '초안 생성 중', chip: 'bg-chip text-muted' },
     drafted: { label: '초안 준비', chip: 'bg-chip text-ink/70' },
     in_review: { label: '검토 중', chip: 'bg-brand-soft text-brand' },
     rejected: { label: '반려', chip: 'bg-danger-soft text-danger' },
     approved: { label: '전송 대기', chip: 'bg-brand-soft text-brand' },
+    sending: { label: '전송 중', chip: 'bg-brand-soft text-brand' },
     sent: { label: '전송 완료', chip: 'bg-brand-soft text-brand' },
-    failed: { label: '전송 실패', chip: 'bg-danger-soft text-danger' },
+    send_failed: { label: '전송 실패', chip: 'bg-danger-soft text-danger' },
+    send_unknown: { label: '전송 확인 필요', chip: 'bg-danger-soft text-danger' },
+    failed: { label: '초안 생성 실패', chip: 'bg-danger-soft text-danger' },
 };
 
+/** 발송 결과를 사람이 처리해야 하는 상태 (재발송·발송 확인) */
+export const SEND_ISSUE_STATUSES: MailStatus[] = ['sending', 'send_failed', 'send_unknown'];
 /** 사람이 손대야 하는 상태 — 메일 검토 페이지의 대기열 */
-export const REVIEW_STATUSES: MailStatus[] = ['drafted', 'in_review', 'failed'];
-export const ALL_STATUSES: MailStatus[] = ['pending', 'drafted', 'in_review', 'rejected', 'approved', 'sent', 'failed'];
+export const REVIEW_STATUSES: MailStatus[] = ['drafted', 'in_review', ...SEND_ISSUE_STATUSES, 'failed'];
+export const ALL_STATUSES: MailStatus[] = [
+    'pending', 'processing', 'drafted', 'in_review', 'rejected', 'approved',
+    'sending', 'sent', 'send_failed', 'send_unknown', 'failed',
+];
 export const isReviewable = (s: MailStatus) => REVIEW_STATUSES.includes(s);
 
 /** 메일 섹션 경로 */

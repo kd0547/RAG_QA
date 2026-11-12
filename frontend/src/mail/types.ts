@@ -5,12 +5,16 @@
 
 export type MailStatus =
     | 'pending'      // 메일 수신, AI 초안 생성 대기
+    | 'processing'   // AI 초안 생성 중 (서버 재시작 시 pending으로 돌아감)
     | 'drafted'      // 초안 생성 완료, 검토 대기
     | 'in_review'    // 담당자 검토 중
     | 'rejected'     // 반려 → 재작성 대기
     | 'approved'     // 승인, 전송 대기
+    | 'sending'      // 승인 후 발송 중
     | 'sent'         // 전송 완료
-    | 'failed';      // 전송 실패 (재시도 대상)
+    | 'send_failed'  // 메일 서버가 받지 않음 → 담당자가 다시 승인하면 재발송
+    | 'send_unknown' // 발송 중 끊겨 전달 여부 모름 → 담당자가 '발송 확인됨' 또는 '재발송' 선택
+    | 'failed';      // AI 초안 생성 실패
 
 /** 목록(GET /mails)의 행 */
 export interface MailSummary {

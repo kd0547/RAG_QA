@@ -13,8 +13,8 @@ type Tab = 'all' | 'review' | 'pending' | 'done' | 'rejected';
 
 const TAB_STATUSES: Record<Tab, MailStatus[] | null> = {
     all: null,
-    review: ['drafted', 'in_review', 'failed'],
-    pending: ['pending'],
+    review: ['drafted', 'in_review', 'sending', 'send_failed', 'send_unknown', 'failed'],
+    pending: ['pending', 'processing'],
     done: ['approved', 'sent'],
     rejected: ['rejected'],
 };
@@ -22,12 +22,16 @@ const TAB_STATUSES: Record<Tab, MailStatus[] | null> = {
 /** 답장 영역 제목 — 상태에 따라 무엇을 보고 있는지 알려준다 */
 const REPLY_TITLE: Record<MailStatus, string> = {
     pending: 'AI 초안 작성 대기',
+    processing: 'AI 초안 작성 중',
     drafted: 'AI 답장 초안',
     in_review: 'AI 답장 초안',
     rejected: '반려된 초안',
     approved: '승인된 답장',
+    sending: '보내는 중인 답장',
     sent: '보낸 답장',
-    failed: '전송에 실패한 답장',
+    send_failed: '전송에 실패한 답장',
+    send_unknown: '전달 여부를 확인해야 하는 답장',
+    failed: '초안 생성에 실패한 메일',
 };
 
 /**

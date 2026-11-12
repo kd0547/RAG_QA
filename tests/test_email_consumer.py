@@ -5,6 +5,9 @@ import pytest
 
 from entity.type import MailEntity, TaskEntity, TaskStatus
 from mail import email_service
+from mail.email_send import SendOutcome, SendResult
+
+SENT = SendResult(SendOutcome.SENT, "DATA 250")
 
 
 class OneShotStop:
@@ -54,6 +57,7 @@ def consumer(monkeypatch):
     email_repo = SimpleNamespace(get_mail_by_id=lambda uid: mail)
     monkeypatch.setattr(email_service, "run_agent_temp_attachments",
                         lambda *a, **k: {"answer": "1.5kg입니다.", "sources": []})
+
     def run(task_repo, send_email):
         monkeypatch.setattr(email_service, "send_email", send_email)
         email_service.email_consumer_loop(OneShotStop(), email_repo, task_repo)
@@ -69,11 +73,13 @@ def test_draft_is_saved_before_reviewer_notification(consumer):
     def send_email(*args, **kwargs):
         order.append("send_email")
         assert ("save_draft", "1.5kg입니다.") in repo.calls, "알림 전에 초안이 저장돼 있어야 한다"
+        return SENT
 
     run(repo, send_email)
 
     assert order == ["send_email"]
-    assert repo.statuses[-1] == TaskStatus.DRAFTED
+    # 생성 시작 시 processing으로 표시하고, 저장 후 drafted
+    assert repo.statuses == [TaskStatus.PROCESSING, TaskStatus.DRAFTED]
 
 
 def test_notification_not_sent_when_draft_save_fails(consumer):
@@ -81,7 +87,7 @@ def test_notification_not_sent_when_draft_save_fails(consumer):
     repo = FakeTaskRepo(TaskEntity(task_id="t1", mail_uid="m1"), fail_save=True)
     sent = []
 
-    run(repo, lambda *a, **k: sent.append(a))
+    run(repo, lambda *a, **k: sent.append(a) or SENT)
 
     assert sent == []
     assert repo.statuses[-1] == TaskStatus.FAILED
@@ -98,3 +104,13 @@ def test_notification_failure_keeps_drafted(consumer):
 
     assert TaskStatus.FAILED not in repo.statuses
     assert repo.statuses[-1] == TaskStatus.DRAFTED
+
+
+def test_notification_rejected_by_server_keeps_drafted(consumer):
+    """알림이 예외 없이 send_failed로 돌아와도 초안 상태는 그대로다."""
+    run = consumer
+    repo = FakeTaskRepo(TaskEntity(task_id="t1", mail_uid="m1"))
+
+    run(repo, lambda *a, **k: SendResult(SendOutcome.FAILED, "RCPT 550"))
+
+    assert repo.statuses == [TaskStatus.PROCESSING, TaskStatus.DRAFTED]

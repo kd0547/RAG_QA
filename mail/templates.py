@@ -575,12 +575,16 @@ def render_mail_review_email(
 # 상태값 → 화면 표시 이름 (frontend/src/mail/format.ts 의 STATUS_META 와 맞춘다)
 _STATUS_LABEL = {
     "pending": "초안 생성 대기",
+    "processing": "초안 생성 중",
     "drafted": "초안 준비",
     "in_review": "검토 중",
     "rejected": "반려",
     "approved": "전송 대기",
+    "sending": "전송 중",
     "sent": "전송 완료",
-    "failed": "전송 실패",
+    "send_failed": "전송 실패 (웹에서 재발송)",
+    "send_unknown": "전송 결과 불명 (웹에서 확인)",
+    "failed": "초안 생성 실패",
 }
 
 

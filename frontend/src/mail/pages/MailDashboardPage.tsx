@@ -17,7 +17,13 @@ import { useMailList } from '../useMailList';
 import { VolumeChart } from '../VolumeChart';
 
 /** 처리 흐름 순서대로 보여줄 상태 */
-const PIPELINE: MailStatus[] = ['pending', 'drafted', 'in_review', 'approved', 'sent', 'rejected', 'failed'];
+const PIPELINE: MailStatus[] = [
+    'pending', 'processing', 'drafted', 'in_review', 'approved', 'sending', 'sent',
+    'send_failed', 'send_unknown', 'rejected', 'failed',
+];
+
+const FAILURE_STATUSES: MailStatus[] = ['failed', 'send_failed', 'send_unknown'];
+const isFailure = (s: MailStatus) => FAILURE_STATUSES.includes(s);
 
 /**
  * 대시보드: 한눈에 보는 현황. 여기서는 아무것도 결정하지 않고, 해야 할 일을 메일 검토 페이지로 안내한다.
@@ -35,7 +41,8 @@ export function MailDashboardPage({
     const all = useMailList(ALL_STATUSES);
 
     const waiting = useMemo(() => queue.rows.filter((r) => r.status === 'drafted' || r.status === 'in_review'), [queue.rows]);
-    const failed = useMemo(() => queue.rows.filter((r) => r.status === 'failed'), [queue.rows]);
+    // 사람이 처리해야 하는 실패: 초안 생성 실패 + 전송 실패 + 전송 결과 불명
+    const failed = useMemo(() => queue.rows.filter((r) => isFailure(r.status)), [queue.rows]);
     const oldestWaiting = useMemo(
         () => waiting.reduce<string | null>((o, r) => (!o || r.received_at < o ? r.received_at : o), null),
         [waiting],
@@ -46,9 +53,9 @@ export function MailDashboardPage({
         () =>
             [...queue.rows]
                 .sort((a, b) =>
-                    a.status === 'failed' && b.status !== 'failed'
+                    isFailure(a.status) && !isFailure(b.status)
                         ? -1
-                        : b.status === 'failed' && a.status !== 'failed'
+                        : isFailure(b.status) && !isFailure(a.status)
                           ? 1
                           : a.received_at.localeCompare(b.received_at),
                 )
@@ -103,10 +110,10 @@ export function MailDashboardPage({
                     />
                     <Kpi label="오늘 반려" value={stats ? String(stats.rejected_today) : '—'} hint={stats ? '재작성 요청' : noStats} />
                     <Kpi
-                        label="전송 실패"
+                        label="실패·확인 필요"
                         value={queue.loading ? '—' : String(failed.length)}
                         tone={failed.length > 0 ? 'danger' : undefined}
-                        hint={failed.length > 0 ? '재전송이 필요합니다' : '실패한 메일 없음'}
+                        hint={failed.length > 0 ? '초안 생성 실패 또는 전송 실패·결과 불명' : '실패한 메일 없음'}
                         action={
                             failed.length > 0 && (
                                 <a {...linkProps(reviewPath(failed[0].task_id))} className="font-semibold text-danger hover:underline">

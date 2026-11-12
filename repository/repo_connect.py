@@ -52,7 +52,37 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if product_columns and "parent_id" not in product_columns:
         conn.execute("ALTER TABLE product ADD COLUMN parent_id TEXT REFERENCES product(id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_product_parent ON product(parent_id)")
+    _migrate_task_reviews_action(conn)
     conn.commit()
+
+
+def _migrate_task_reviews_action(conn: sqlite3.Connection) -> None:
+    """task_reviews.action의 CHECK에 'mark_sent'를 넣는다.
+
+    SQLite는 CHECK 제약을 ALTER로 바꿀 수 없어서, 예전 제약을 가진 테이블은 새 테이블로 옮겨 만든다.
+    기존 반려 이력(review_id 포함)은 그대로 복사한다.
+    """
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_reviews'").fetchone()
+    if row is None or "mark_sent" in row["sql"]:
+        return
+    conn.execute("""
+        CREATE TABLE task_reviews_new (
+            review_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id     TEXT NOT NULL,
+            action      TEXT NOT NULL CHECK (action IN ('reject', 'mark_sent')),
+            reason      TEXT,
+            requeue     INTEGER NOT NULL DEFAULT 1,
+            reviewed_at TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        INSERT INTO task_reviews_new (review_id, task_id, action, reason, requeue, reviewed_at)
+        SELECT review_id, task_id, action, reason, requeue, reviewed_at FROM task_reviews
+    """)
+    conn.execute("DROP TABLE task_reviews")
+    conn.execute("ALTER TABLE task_reviews_new RENAME TO task_reviews")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_task_reviews_task_id ON task_reviews(task_id)")
 
 
 class _Transaction:

@@ -63,13 +63,30 @@ CREATE INDEX IF NOT EXISTS idx_task_sources_task_id ON task_sources(task_id);
 CREATE TABLE IF NOT EXISTS task_reviews (
     review_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id     TEXT NOT NULL,
-    action      TEXT NOT NULL CHECK (action IN ('reject')),
+    action      TEXT NOT NULL CHECK (action IN ('reject', 'mark_sent')),  -- mark_sent: 수락 여부를 모르던 발송을 담당자가 보낸 것으로 확인
     reason      TEXT,
     requeue     INTEGER NOT NULL DEFAULT 1,   -- 반려 후 재작성 대기로 돌렸는지 (0/1)
     reviewed_at TEXT NOT NULL,
     FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_task_reviews_task_id ON task_reviews(task_id);
+
+
+-- task_send: 답변 발송 시도. 승인 시점의 본문·수신자·첨부를 고정하고 SMTP 결과를 남긴다.
+-- outcome: NULL(발송 중) | sent | send_failed | send_unknown. 자동 재발송은 하지 않는다.
+CREATE TABLE IF NOT EXISTS task_send (
+    send_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id          TEXT NOT NULL,
+    body             TEXT NOT NULL,
+    recipient        TEXT NOT NULL,
+    attachments_json TEXT NOT NULL DEFAULT '[]',
+    attempted_at     TEXT NOT NULL,
+    outcome          TEXT,
+    detail           TEXT,
+    cleanup_warning  TEXT,
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_task_send_task_id ON task_send(task_id);
 
 
 -- file_group: 사용자가 만드는 문서 묶음. 소속 파일과 검색 청크에 같은 group_id를 저장한다.

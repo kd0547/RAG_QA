@@ -3,9 +3,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { LazyMarkdownEditor } from '../../components/LazyMarkdownEditor';
 import { ApiError, mailApi } from '../api';
-import { fmtReceived, reviewPath } from '../format';
+import { fmtReceived, reviewPath, SEND_ISSUE_STATUSES } from '../format';
 import { mockDetail } from '../mockData';
-import type { MailDetail, MailSummary } from '../types';
+import type { MailDetail, MailStatus, MailSummary } from '../types';
 import {
     AttachmentPicker,
     CenterNote,
@@ -18,8 +18,33 @@ import {
 } from '../ui';
 import type { MailList } from '../useMailList';
 
-type Filter = 'all' | 'drafted' | 'in_review' | 'failed';
-type Busy = '' | 'approve' | 'reject' | 'save' | 'retry' | 'claim';
+type Filter = 'all' | 'drafted' | 'in_review' | 'send' | 'failed';
+type Busy = '' | 'approve' | 'reject' | 'save' | 'retry' | 'claim' | 'mark';
+
+/** 필터별 상태. '발송'은 발송 중·실패·결과 불명을 함께 본다. */
+const FILTER_STATUSES: Record<Exclude<Filter, 'all'>, MailStatus[]> = {
+    drafted: ['drafted'],
+    in_review: ['in_review'],
+    send: SEND_ISSUE_STATUSES,
+    failed: ['failed'],
+};
+
+const isSendIssue = (s: MailStatus) => SEND_ISSUE_STATUSES.includes(s);
+
+/** 발송 문제 상태의 안내 문구 (검토 캔버스) */
+const SEND_NOTICE: Partial<Record<MailStatus, string>> = {
+    sending: '발송 중입니다. 오래 이 상태로 남아 있으면 서버가 발송 도중 재시작된 것일 수 있습니다. 보낸편지함에서 확인해 주세요.',
+    send_failed: '메일 서버가 이 답장을 받지 않았습니다. 원인(수신 주소, 메일 계정 등)을 확인한 뒤 "재발송"을 누르세요.',
+    send_unknown:
+        '발송 중 연결이 끊겨 답장이 전달됐는지 알 수 없습니다. 보낸편지함이나 수신자에게 확인한 뒤 "발송 확인됨" 또는 "재발송"을 고르세요.',
+};
+
+/** 재발송 확인 문구 */
+const RESEND_CONFIRM: Partial<Record<MailStatus, string>> = {
+    send_failed: '이 답장을 다시 보냅니다.\n\n자동 재발송은 하지 않습니다. 지금 확인을 누르면 한 번 더 발송합니다.',
+    send_unknown:
+        '이 답장은 이미 전달됐을 수 있습니다. 다시 보내면 고객이 같은 메일을 두 번 받을 수 있습니다.\n\n자동 재발송은 하지 않습니다. 지금 확인을 누르면 한 번 더 발송합니다.',
+};
 
 /**
  * 메일 검토 페이지: 왼쪽은 검토가 필요한 메일(대기열), 오른쪽은 원문 → AI 답장 → 근거 순서의 검토 캔버스.
@@ -60,6 +85,9 @@ export function MailReviewPage({
     const [editorFailed, setEditorFailed] = useState(false);
     const [rejecting, setRejecting] = useState(false);
     const [rejectReason, setRejectReason] = useState('');
+    // 발송 결과 불명 건을 '발송 확인됨'으로 처리할 때의 사유 입력
+    const [marking, setMarking] = useState(false);
+    const [markReason, setMarkReason] = useState('');
     // 답장에 첨부할 참고 문서 (file_id). 메일을 바꾸면 비운다 — 기본은 첨부 없음.
     const [attachIds, setAttachIds] = useState<ReadonlySet<string>>(() => new Set());
     const [busy, setBusy] = useState<Busy>('');
@@ -71,8 +99,8 @@ export function MailReviewPage({
 
     // 편집·작업 중에는 상위의 자동 새로고침을 멈춘다.
     useEffect(() => {
-        onWorkingChange(dirty || busy !== '' || rejecting);
-    }, [dirty, busy, rejecting, onWorkingChange]);
+        onWorkingChange(dirty || busy !== '' || rejecting || marking);
+    }, [dirty, busy, rejecting, marking, onWorkingChange]);
     useEffect(() => () => onWorkingChange(false), [onWorkingChange]);
 
     useEffect(() => {
@@ -89,6 +117,8 @@ export function MailReviewPage({
         setEditorFailed(false);
         setRejecting(false);
         setRejectReason('');
+        setMarking(false);
+        setMarkReason('');
         setAttachIds(new Set());
         setDirty(false);
         setDetailLoading(!!row);
@@ -136,15 +166,19 @@ export function MailReviewPage({
     const visible = useMemo(() => {
         const q = query.trim().toLowerCase();
         return rows.filter((r) => {
-            if (filter !== 'all' && r.status !== filter) return false;
+            if (filter !== 'all' && !FILTER_STATUSES[filter].includes(r.status)) return false;
             if (!q) return true;
             return r.subject.toLowerCase().includes(q) || r.sender.toLowerCase().includes(q);
         });
     }, [rows, filter, query]);
 
     const counts = useMemo(() => {
-        const c: Record<Filter, number> = { all: rows.length, drafted: 0, in_review: 0, failed: 0 };
-        for (const r of rows) if (r.status in c) c[r.status as Filter]++;
+        const c: Record<Filter, number> = { all: rows.length, drafted: 0, in_review: 0, send: 0, failed: 0 };
+        for (const r of rows) {
+            for (const k of Object.keys(FILTER_STATUSES) as Exclude<Filter, 'all'>[]) {
+                if (FILTER_STATUSES[k].includes(r.status)) c[k]++;
+            }
+        }
         return c;
     }, [rows]);
 
@@ -199,9 +233,22 @@ export function MailReviewPage({
         setEditing((v) => !v);
     };
 
+    /** 발송 결과(실패·불명)가 서버에 기록된 뒤 상세와 목록의 상태를 맞춘다 */
+    const refreshDetail = async (taskId: string) => {
+        try {
+            const d = await mailApi.detail(taskId);
+            setDetail((cur) => (cur && cur.task_id === taskId ? d : cur));
+            patchRow(taskId, { status: d.status });
+        } catch {
+            /* 다음 목록 새로고침 때 맞춰진다 */
+        }
+    };
+
     const handleApprove = async () => {
         if (!detail) return;
         const taskId = detail.task_id;
+        const confirmText = RESEND_CONFIRM[detail.status];
+        if (confirmText && !window.confirm(confirmText)) return;
         if (offline) {
             dropRow(taskId);
             notify('ok', '전송 완료 (예시 데이터)');
@@ -220,6 +267,30 @@ export function MailReviewPage({
             refreshAll();
         } catch (e) {
             notify('err', e instanceof ApiError ? e.message : '전송 실패');
+            // 502(전송 실패·결과 불명)·409(다른 요청이 먼저 발송)는 서버 상태가 바뀌었으므로 다시 읽는다
+            if (e instanceof ApiError && (e.status === 502 || e.status === 409)) void refreshDetail(taskId);
+        } finally {
+            setBusy('');
+        }
+    };
+
+    const handleMarkSent = async () => {
+        if (!detail || !markReason.trim()) return;
+        const taskId = detail.task_id;
+        if (offline) {
+            dropRow(taskId);
+            notify('ok', '발송 확인 처리 (예시 데이터)');
+            return;
+        }
+        setBusy('mark');
+        try {
+            await mailApi.markSent(taskId, markReason.trim());
+            dropRow(taskId);
+            notify('ok', '보낸 것으로 확인했습니다 — 전송 완료로 이동');
+            refreshAll();
+        } catch (e) {
+            notify('err', e instanceof ApiError ? e.message : '발송 확인 실패');
+            if (e instanceof ApiError && e.status === 409) void refreshDetail(taskId);
         } finally {
             setBusy('');
         }
@@ -315,6 +386,10 @@ export function MailReviewPage({
         setRejecting(false);
         setRejectReason('');
     };
+    const cancelMark = () => {
+        setMarking(false);
+        setMarkReason('');
+    };
 
     /* ---- 렌더 ---- */
     return (
@@ -343,6 +418,7 @@ export function MailReviewPage({
                             ['all', '전체', counts.all],
                             ['drafted', '초안', counts.drafted],
                             ['in_review', '검토중', counts.in_review],
+                            ['send', '발송', counts.send],
                             ['failed', '실패', counts.failed],
                         ]}
                     />
@@ -492,8 +568,17 @@ export function MailReviewPage({
                                 </div>
                             </section>
 
+                            {SEND_NOTICE[detail.status] && (
+                                <p
+                                    role="alert"
+                                    className="mt-6 px-4 py-3 rounded-xl bg-danger-surface border border-danger/30 text-[13px] leading-relaxed text-danger"
+                                >
+                                    {SEND_NOTICE[detail.status]}
+                                </p>
+                            )}
+
                             {/* 승인과 함께 나가는 것이므로 초안 바로 아래에 둔다 */}
-                            {detail.status !== 'failed' && (
+                            {detail.status !== 'failed' && detail.status !== 'sending' && (
                                 <div className="mt-8">
                                     <AttachmentPicker
                                         attachments={detail.attachments ?? []}
@@ -539,15 +624,44 @@ export function MailReviewPage({
                                             {busy === 'reject' ? '처리 중…' : '반려 확정'}
                                         </button>
                                     </>
+                                ) : marking ? (
+                                    <>
+                                        <input
+                                            value={markReason}
+                                            onChange={(e) => setMarkReason(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') void handleMarkSent();
+                                                if (e.key === 'Escape') cancelMark();
+                                            }}
+                                            placeholder="확인 근거 (예: 보낸편지함에 있음, 고객 수신 확인)"
+                                            autoFocus
+                                            className="w-[min(380px,52vw)] h-10 px-3.5 rounded-xl bg-chip text-[13px] focus:outline-none focus:bg-white focus:ring-2 focus:ring-brand/30"
+                                        />
+                                        <button
+                                            onClick={cancelMark}
+                                            className="h-10 px-3 rounded-xl text-[13px] font-semibold text-muted whitespace-nowrap hover:text-ink hover:bg-chip"
+                                        >
+                                            취소
+                                        </button>
+                                        <button
+                                            onClick={() => void handleMarkSent()}
+                                            disabled={!markReason.trim() || busy !== ''}
+                                            className="h-10 px-4 rounded-xl bg-brand text-white text-[13px] font-bold whitespace-nowrap hover:bg-brand-hover disabled:opacity-50"
+                                        >
+                                            {busy === 'mark' ? '처리 중…' : '발송 확인 확정'}
+                                        </button>
+                                    </>
                                 ) : (
                                     <>
-                                        <button
-                                            onClick={() => setRejecting(true)}
-                                            className="h-10 px-3.5 rounded-xl text-[13px] font-semibold text-danger hover:bg-danger-soft"
-                                        >
-                                            반려
-                                        </button>
-                                        {detail.status !== 'failed' && (
+                                        {!isSendIssue(detail.status) && (
+                                            <button
+                                                onClick={() => setRejecting(true)}
+                                                className="h-10 px-3.5 rounded-xl text-[13px] font-semibold text-danger hover:bg-danger-soft"
+                                            >
+                                                반려
+                                            </button>
+                                        )}
+                                        {detail.status !== 'failed' && !isSendIssue(detail.status) && (
                                             <button
                                                 onClick={() => void handleClaimToggle()}
                                                 disabled={busy !== ''}
@@ -574,14 +688,37 @@ export function MailReviewPage({
                                             >
                                                 {busy === 'retry' ? '재전송 중…' : '재전송'}
                                             </button>
+                                        ) : detail.status === 'sending' ? (
+                                            <span className="h-10 px-4 inline-flex items-center text-[13px] font-semibold text-muted whitespace-nowrap">
+                                                전송 중…
+                                            </span>
                                         ) : (
-                                            <button
-                                                onClick={() => void handleApprove()}
-                                                disabled={busy !== '' || !detail.draft}
-                                                className="h-10 px-6 rounded-xl bg-brand text-white text-[13.5px] font-bold whitespace-nowrap hover:bg-brand-hover disabled:opacity-50"
-                                            >
-                                                {busy === 'approve' ? '전송 중…' : editedFlag ? '수정본 승인하고 전송' : '승인하고 전송'}
-                                            </button>
+                                            <>
+                                                {detail.status === 'send_unknown' && (
+                                                    <button
+                                                        onClick={() => setMarking(true)}
+                                                        disabled={busy !== ''}
+                                                        className="h-10 px-4 rounded-xl text-[13px] font-semibold text-ink/80 whitespace-nowrap hover:text-ink hover:bg-chip disabled:opacity-50"
+                                                    >
+                                                        발송 확인됨
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => void handleApprove()}
+                                                    disabled={busy !== '' || !detail.draft}
+                                                    className="h-10 px-6 rounded-xl bg-brand text-white text-[13.5px] font-bold whitespace-nowrap hover:bg-brand-hover disabled:opacity-50"
+                                                >
+                                                    {busy === 'approve'
+                                                        ? '전송 중…'
+                                                        : isSendIssue(detail.status)
+                                                          ? editedFlag
+                                                              ? '수정본 재발송'
+                                                              : '재발송'
+                                                          : editedFlag
+                                                            ? '수정본 승인하고 전송'
+                                                            : '승인하고 전송'}
+                                                </button>
+                                            </>
                                         )}
                                     </>
                                 )}
