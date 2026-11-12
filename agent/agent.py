@@ -63,25 +63,9 @@ def run_agent(
         agent, [{"role": "user", "content": question}], mode, label="질문",
     )
 
-    final_message = result["messages"][-1]
-
-    sources = []
-    for msg in result["messages"]:
-        if getattr(msg, "name", None) in ("search_documents", "rerank_documents"):
-            content = msg.content
-
-            if isinstance(content, str):
-                try:
-                    content = json.loads(content)
-                    sources.extend(content)
-                except json.JSONDecodeError:
-                    continue
-            if isinstance(content, list):
-                sources.extend(content)
-
     return {
-        "answer": final_message.content,
-        "sources": sources,
+        "answer": result["messages"][-1].content,
+        "sources": _collect_sources(result["messages"]),
     }
 
 
@@ -179,10 +163,26 @@ def _attachment_to_block(attachment: Attachment) -> dict | None:
 
 
 def _collect_sources(messages: list) -> list:
-    """검색/리랭크 도구 결과 메시지에서 출처 목록을 모은다."""
-    sources = []
+    """검색·리랭크·그래프 도구 결과 메시지에서 출처 목록을 모은다.
+
+    검색 결과를 리랭크하면 같은 청크가 두 번 나오므로 청크 ID 기준으로 한 번만 남긴다.
+    그래프 결과는 문서의 페이지마다 한 건씩 넣는다 (본문 대신 그 페이지에서 찾은 개체 이름).
+    """
+    sources: list[dict] = []
+    seen: set = set()
+
+    def _add(doc) -> None:
+        if not isinstance(doc, dict):
+            return
+        key = doc.get("id") or (doc.get("source"), doc.get("page"), doc.get("text"))
+        if key in seen:
+            return
+        seen.add(key)
+        sources.append(doc)
+
     for msg in messages:
-        if getattr(msg, "name", None) not in ("search_documents", "rerank_documents"):
+        name = getattr(msg, "name", None)
+        if name not in ("search_documents", "rerank_documents", "graph_search"):
             continue
         content = msg.content
         if isinstance(content, str):
@@ -190,8 +190,32 @@ def _collect_sources(messages: list) -> list:
                 content = json.loads(content)
             except json.JSONDecodeError:
                 continue
-        if isinstance(content, list):
-            sources.extend(content)
+        if name == "graph_search":
+            for doc in _graph_sources(content):
+                _add(doc)
+        elif isinstance(content, list):
+            for doc in content:
+                _add(doc)
+    return sources
+
+
+def _graph_sources(result) -> list[dict]:
+    """graph_search 결과의 documents[*]를 페이지 단위 출처로 바꾼다."""
+    if not isinstance(result, dict):
+        return []
+    sources = []
+    for doc in result.get("documents") or []:
+        file_id = doc.get("file_id")
+        text = "개체: " + ", ".join(doc.get("entities") or [])
+        for page in doc.get("pages") or []:
+            sources.append({
+                "id": f"graph:{file_id}:{page}",
+                "file_id": file_id,
+                "source": doc.get("original_name") or doc.get("source") or "",
+                "page": page,
+                "text": text,
+                "score": None,
+            })
     return sources
 
 _agents: dict[str, object] = {}
