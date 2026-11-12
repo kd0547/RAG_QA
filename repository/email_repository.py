@@ -68,7 +68,7 @@ class EmailRepository:
     ) -> list[Attachment]:
         rows = conn.execute(
             """
-            SELECT type, filename, content_type, image_data, stored_path
+            SELECT attachment_id, type, filename, content_type, image_data, stored_path
             FROM mail_attachments
             WHERE mail_uid = ?
             ORDER BY attachment_id
@@ -83,6 +83,7 @@ class EmailRepository:
                 content_type=row["content_type"],
                 image=row["image_data"],
                 path=row["stored_path"],
+                attachment_id=row["attachment_id"],
             )
             for row in rows
         ]
@@ -106,3 +107,35 @@ class EmailRepository:
             received_at=datetime.fromisoformat(row["received_at"]),
             attachments=attachments,
         )
+
+    # ------------------------------------------------------------ 첨부 페이지 (read_attachment)
+
+    def attachment_for_task(self, attachment_id: int, task_id: str) -> dict | None:
+        """task의 메일에 속한 첨부 하나. 다른 메일의 첨부거나 없으면 None."""
+        with self.db.get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT a.attachment_id, a.type, a.filename, a.content_type, a.stored_path
+                FROM mail_attachments a JOIN tasks t ON t.mail_uid = a.mail_uid
+                WHERE a.attachment_id = ? AND t.task_id = ?
+                """,
+                (attachment_id, task_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def attachment_pages(self, attachment_id: int) -> list[dict]:
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT seq, page, text, parser_version FROM attachment_page WHERE attachment_id = ? ORDER BY seq",
+                (attachment_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_attachment_pages(self, attachment_id: int, pages: list, parser_version: str) -> None:
+        """첨부를 파싱한 페이지들을 저장한다 (이미 있으면 갈아끼운다). pages: PageText 목록."""
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM attachment_page WHERE attachment_id = ?", (attachment_id,))
+            conn.executemany(
+                "INSERT INTO attachment_page (attachment_id, seq, page, text, parser_version) VALUES (?, ?, ?, ?, ?)",
+                [(attachment_id, seq, p.page, p.text or "", parser_version) for seq, p in enumerate(pages)],
+            )

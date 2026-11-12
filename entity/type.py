@@ -62,6 +62,8 @@ class Attachment:
     content_type: str
     image:Optional[str]
     path: Optional[str]
+    # mail_attachments.attachment_id. 메일 첨부만 있고 /ask/attachments의 임시 첨부는 None
+    attachment_id: Optional[int] = None
 
 @dataclass
 class MailEntity:

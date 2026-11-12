@@ -5,7 +5,7 @@ from pathlib import PureWindowsPath
 from langchain_core.tools import tool
 
 import repository
-from agent.evidence_context import current_owner, current_run
+from agent.evidence_context import current_owner, current_run, temp_attachments
 
 from agent.llm_provider import get_llm_model
 from agent.type import AnswerabilityCheck
@@ -469,4 +469,108 @@ def grep_documents(pattern: str, file_id: str | None = None, limit: int = 20) ->
     except re.error as exc:
         return {"error": f"정규식 오류: {exc}. ( ) [ ] . + * ? 같은 기호는 앞에 \\를 붙이세요."}
     logger.info("[grep_documents] pattern=%r file_id=%r -> %d건", pattern, file_id, len(result))
+    return result
+
+
+# ---------- 첨부 읽기 ----------
+
+# attachment_page.parser_version과 첨부 근거의 revision. 파서를 바꿔 다시 파싱해야 하면 올린다.
+ATTACHMENT_PARSER_VERSION = "parse_file/1"
+
+
+def resolve_attachment(attachment_id: int) -> dict | None:
+    """현재 소유자가 읽을 수 있는 첨부. 아니면 None.
+
+    - 음수 번호: /ask/attachments의 임시 첨부 (이번 세션 안에서만 있다)
+    - 양수 번호: 메일 첨부 (mail_attachments.attachment_id). 현재 task의 메일에 속한 것만
+    반환: {"attachment_id", "filename", "type", "path", "temp", "pages"(임시 첨부의 파싱 결과 보관)}
+    """
+    owner = current_owner()
+    if owner is None:
+        return None
+    if attachment_id < 0:
+        return temp_attachments().get(attachment_id)
+    if owner.type != "task":
+        return None
+    row = repository.email_repo.attachment_for_task(attachment_id, owner.id)
+    if row is None:
+        return None
+    return {"attachment_id": row["attachment_id"], "filename": row["filename"], "type": row["type"],
+            "path": row["stored_path"], "temp": False}
+
+
+def attachment_page_texts(entry: dict) -> list[tuple[int, str]]:
+    """첨부 문서의 [(페이지, 텍스트)]. 같은 페이지 번호의 블록(xlsx 시트 등)은 합친다.
+
+    처음 읽을 때 그 첨부만 한 번 파싱한다. 메일 첨부는 attachment_page에 저장하고,
+    임시 첨부는 세션 안에만 보관한다 (응답 뒤 파일과 함께 사라진다).
+    """
+    if entry["temp"]:
+        if entry.get("pages") is None:
+            entry["pages"] = [(p.page, p.text or "") for p in parse_file(entry["path"])]
+        raw = entry["pages"]
+    else:
+        rows = repository.email_repo.attachment_pages(entry["attachment_id"])
+        if not rows:
+            parsed = parse_file(entry["path"])
+            repository.email_repo.save_attachment_pages(entry["attachment_id"], parsed, ATTACHMENT_PARSER_VERSION)
+            logger.info("첨부 파싱·저장: attachment_id=%s, %s, %d블록", entry["attachment_id"], entry["filename"], len(parsed))
+            rows = repository.email_repo.attachment_pages(entry["attachment_id"])
+        raw = [(row["page"], row["text"]) for row in rows]
+    grouped: dict[int, list[str]] = {}
+    for page, text in raw:
+        grouped.setdefault(page, []).append(text)
+    return [(page, "\n\n".join(texts)) for page, texts in grouped.items()]
+
+
+@tool
+def read_attachment(attachment_id: int, pages: list[int] | None = None, max_chars: int = 6000) -> dict:
+    """이 질문(메일)에 붙은 첨부 문서를 페이지 단위로 읽습니다.
+
+    메시지에는 첨부 본문이 들어 있지 않고 "[첨부 1] 파일명 (attachment_id=…, N페이지)" 안내만 있습니다.
+    읽은 페이지마다 evidence_id가 붙고, 답변에서 이 ID로 인용할 수 있습니다.
+
+    Args:
+        attachment_id: 메시지 안내에 적힌 attachment_id.
+        pages: 읽을 페이지 번호 목록 (1부터). 비우면 처음부터 max_chars만큼 읽습니다.
+        max_chars: 이번 호출에서 돌려받을 최대 글자 수. 기본 6000, 최대 20000.
+
+    Returns:
+        read_pages와 같은 형식: pages[{evidence_id, page, text}], truncated, next_pages, missing_pages, page_count.
+    """
+    error = _context_error()
+    if error:
+        return error
+    entry = resolve_attachment(int(attachment_id))
+    if entry is None:
+        logger.warning("[read_attachment] 현재 질문의 첨부가 아니어서 거부: attachment_id=%s", attachment_id)
+        return {"error": f"이 질문의 첨부가 아닙니다: attachment_id={attachment_id}"}
+    if entry["type"] == "image":
+        return {"error": "이미지 첨부는 메시지에 그림으로 들어 있습니다. read_attachment로 읽을 수 없습니다."}
+    try:
+        page_texts = dict(attachment_page_texts(entry))
+    except Exception:
+        logger.exception("[read_attachment] 첨부 파싱 실패: attachment_id=%s, %s", attachment_id, entry["filename"])
+        return {"error": f"첨부를 읽지 못했습니다: {entry['filename']}"}
+
+    wanted = _page_numbers(pages) if pages else list(page_texts)
+    missing = [p for p in wanted if p not in page_texts]
+    selected = [(p, page_texts[p], {}) for p in wanted if p in page_texts]
+
+    def register(text, page, fields):
+        return _register_read(
+            "attachment", text, attachment_id=entry["attachment_id"], page=page,
+            revision=ATTACHMENT_PARSER_VERSION, source_name=entry["filename"],
+        )
+
+    result = {
+        "attachment_id": entry["attachment_id"], "filename": entry["filename"], "page_count": len(page_texts),
+        **read_page_texts(selected, max_chars, register),
+    }
+    if missing:
+        result["missing_pages"] = missing
+    logger.info(
+        "[read_attachment] %s pages=%s -> %d쪽, truncated=%s",
+        entry["filename"], wanted[:20], len(result["pages"]), result["truncated"],
+    )
     return result

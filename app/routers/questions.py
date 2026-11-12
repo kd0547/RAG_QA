@@ -75,7 +75,8 @@ async def ask_question(payload: QuestionRequest) -> dict:
 # 화면에서 사양서·캡처 같은 파일을 질문에 붙여 보낸다. 문서 저장소에 올리지 않고 그 질문에만 쓴다.
 # 메일 수신부(mail/email_receiver.py)와 같은 Attachment 형태로 만들어 run_agent_temp_attachments 에 넘긴다.
 #   - 이미지: data URL 로 모델에 직접 보여준다 (VLM)
-#   - 그 외 문서(pdf/docx/pptx/xlsx/hwp/hwpx): 임시 폴더에 저장 → 에이전트가 parse_file 로 텍스트를 뽑는다 → 응답 후 삭제
+#   - 그 외 문서(pdf/docx/pptx/xlsx/hwp/hwpx): 임시 폴더에 저장 → 메시지에는 안내 한 줄만 넣고 에이전트가
+#     read_attachment(음수 번호)로 필요한 페이지만 읽는다 (파싱 결과는 이 질문 동안만 메모리에) → 응답 후 삭제
 
 ATTACHMENT_TEMP_DIR = Path(__file__).resolve().parents[2] / "temp" / "ask"
 MAX_ATTACHMENTS = 5

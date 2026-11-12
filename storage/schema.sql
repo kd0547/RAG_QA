@@ -28,6 +28,18 @@ CREATE TABLE IF NOT EXISTS mail_attachments (
 );
 CREATE INDEX IF NOT EXISTS idx_mail_attachments_mail_uid ON mail_attachments(mail_uid);
 
+-- attachment_page: 메일 첨부 문서의 페이지별 텍스트. 에이전트가 read_attachment로 처음 읽을 때 한 번 파싱해 저장한다.
+-- (등록 문서와 달리 첨부는 업로드 단계가 없어 질의 시점 파싱을 허용한다. 같은 첨부는 다시 파싱하지 않는다)
+CREATE TABLE IF NOT EXISTS attachment_page (
+    attachment_id  INTEGER NOT NULL REFERENCES mail_attachments(attachment_id) ON DELETE CASCADE,
+    seq            INTEGER NOT NULL,          -- 파서가 돌려준 순서 (0부터)
+    page           INTEGER NOT NULL,
+    text           TEXT NOT NULL,
+    parser_version TEXT NOT NULL,
+    created_at     TEXT NOT NULL DEFAULT current_timestamp,
+    PRIMARY KEY (attachment_id, seq)
+);
+
 
 -- tasks: mail 하나당 처리 워크플로우 상태
 CREATE TABLE IF NOT EXISTS tasks (

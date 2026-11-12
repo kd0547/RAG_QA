@@ -31,8 +31,10 @@ def current_run() -> str | None:
 
 
 def temp_attachments() -> dict:
-    """현재 세션의 임시 첨부 {번호: 첨부 정보}. 세션 밖이면 빈 dict."""
-    return _temp_attachments.get() or {}
+    """현재 세션의 임시 첨부 {번호: 첨부 정보}. owner_scope 안에서는 같은 dict를 돌려줘 등록이 유지된다.
+    세션 밖이면 버려지는 빈 dict."""
+    registry = _temp_attachments.get()
+    return registry if registry is not None else {}
 
 
 @contextmanager

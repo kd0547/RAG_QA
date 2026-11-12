@@ -11,14 +11,14 @@ from pathlib import Path
 
 import config
 import repository
-from agent.evidence_context import Owner, current_owner, owner_scope, run_scope
+from agent.evidence_context import Owner, current_owner, owner_scope, run_scope, temp_attachments
 from agent.llm_provider import get_llm_model
 from agent.prompt import render_prompt
 from entity.type import Attachment, DocumentType
-from parser.file_parser import parse_file
 from repository import graph_repo, group_repo, prompt_repo
 from tools.tool import (
-    check_answerability, graph_search, grep_documents, list_documents, read_pages, rerank_documents, search_documents,
+    attachment_page_texts, check_answerability, graph_search, grep_documents, list_documents, read_attachment,
+    read_pages, rerank_documents, search_documents,
 )
 from langchain.agents.middleware import dynamic_prompt, ModelRequest
 import logging
@@ -27,7 +27,10 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-TOOLS = [graph_search, list_documents, grep_documents, read_pages, search_documents, rerank_documents, check_answerability]
+TOOLS = [
+    graph_search, list_documents, grep_documents, read_pages, read_attachment,
+    search_documents, rerank_documents, check_answerability,
+]
 
 
 # ---------- Agent ----------
@@ -94,11 +97,11 @@ def run_agent_temp_attachments(
     agent = get_agent(mode)
 
     with owner_scope(owner or new_session_owner()):
+        # 첨부 본문은 메시지에 넣지 않는다. 안내 한 줄만 넣고 모델이 read_attachment로 필요한 페이지를 읽는다.
         content: list[dict] = [{"type": "text", "text": question}]
-        for attachment in attachments or []:
-            block = _attachment_to_block(attachment)
-            if block is not None:
-                content.append(block)
+        preread: list[str] = []
+        for index, attachment in enumerate(attachments or [], start=1):
+            content.extend(_attachment_to_blocks(attachment, index, preread))
 
         # 담당자 반려 피드백은 질문과 섞이지 않도록 별도 블록으로 붙인다.
         if review_feedback:
@@ -107,6 +110,7 @@ def run_agent_temp_attachments(
         result = _invoke_logged(
             agent, [{"role": "user", "content": content}], mode,
             label=f"메일(첨부 {len(attachments or [])}건, 반려피드백 {'있음' if review_feedback else '없음'})",
+            preread=preread,
         )
 
     return {
@@ -128,10 +132,11 @@ def _selected_prompt_id() -> int | None:
     return selected.id if selected else None
 
 
-def _invoke_logged(agent, messages: list[dict], mode: str, label: str) -> dict:
+def _invoke_logged(agent, messages: list[dict], mode: str, label: str, preread: list[str] | None = None) -> dict:
     """에이전트를 실행하고 실행 기록(run)과 소요시간·도구 호출 수 로그를 남긴다.
 
     현재 근거 소유자(owner_scope) 안에서 불러야 한다. 결과 dict에 run_id를 더해 돌려준다.
+    preread: 실행 전에 모델에 이미 보여 준 근거 (이미지 첨부). 이번 실행에서 읽은 것으로 기록한다.
     예외는 실행 기록을 error로 남긴 뒤 호출부가 처리하도록 다시 던진다.
     """
     owner = current_owner()
@@ -139,6 +144,8 @@ def _invoke_logged(agent, messages: list[dict], mode: str, label: str) -> dict:
         raise RuntimeError("근거 소유자 없이 에이전트를 실행할 수 없습니다 (owner_scope 안에서 호출)")
     started = time.perf_counter()
     run_id = repository.evidence_repo.start_run(owner.type, owner.id, _model_name(mode), _selected_prompt_id())
+    for evidence_id in preread or []:
+        repository.evidence_repo.record_use(run_id, evidence_id, "read")
     try:
         with run_scope(run_id):
             groups = group_repo.list_all()
@@ -176,31 +183,57 @@ def _graph_concepts() -> list[dict] | None:
         return None
 
 
-def _attachment_to_block(attachment: Attachment) -> dict | None:
-    """첨부 하나를 메시지 content 블록으로 바꾼다. 처리할 수 없으면 None."""
+def _attachment_to_blocks(attachment: Attachment, index: int, preread: list[str]) -> list[dict]:
+    """첨부 하나를 메시지 content 블록으로 바꾼다. 처리할 수 없으면 빈 목록.
+
+    - 문서: 본문 대신 "[첨부 1] 파일명 (pdf, attachment_id=17, 12페이지) — read_attachment로 읽으세요" 한 줄.
+      페이지 수를 알려고 처음 한 번 파싱해 둔다 (메일 첨부는 attachment_page에 저장, 임시 첨부는 세션에 보관).
+    - 이미지: 지금처럼 image_url 블록. 이미지도 근거로 등록하고(파일명·크기) 이미 본 것으로 기록한다.
+    """
     # 메일 수신부는 type을 "image"/"pdf"/"docx" 등 문자열로 넣으므로 Enum으로 맞춘다.
     try:
         doc_type = DocumentType(attachment.type)
     except ValueError:
         logger.warning("지원하지 않는 첨부 형식: %s (%s)", attachment.filename, attachment.type)
-        return None
+        return []
+    name = attachment.filename or f"attachment.{doc_type.value}"
+    owner = current_owner()
 
     if doc_type == DocumentType.IMAGE:
         if not attachment.image:
-            return None
-        return {"type": "image_url", "image_url": {"url": attachment.image}}
+            return []
+        size_kb = len(attachment.image) * 3 // 4 // 1024
+        evidence_id = repository.evidence_repo.register(
+            owner.type, owner.id, "attachment", f"이미지 첨부: {name} (약 {size_kb}KB)",
+            attachment_id=attachment.attachment_id, source_name=name,
+        )
+        preread.append(evidence_id)
+        return [
+            {"type": "text", "text": f"[첨부 {index}] {name} (이미지, evidence_id={evidence_id})"},
+            {"type": "image_url", "image_url": {"url": attachment.image}},
+        ]
 
-    # 이미지 외 문서(pdf, docx, xlsx, pptx, hwp, hwpx)는 확장자별 파서로 텍스트를 뽑는다.
-    name = attachment.filename or f"attachment.{doc_type.value}"
+    if attachment.attachment_id is not None:
+        entry = {"attachment_id": attachment.attachment_id, "filename": name, "type": doc_type.value,
+                 "path": attachment.path, "temp": False}
+    else:
+        # /ask/attachments의 임시 첨부: 이번 세션 안에서만 음수 번호로 찾는다 (메일 첨부 번호와 겹치지 않게)
+        registry = temp_attachments()
+        temp_id = -(len(registry) + 1)
+        entry = {"attachment_id": temp_id, "filename": name, "type": doc_type.value,
+                 "path": attachment.path, "temp": True, "pages": None}
+        registry[temp_id] = entry
+
     try:
-        pages = parse_file(attachment.path)
+        page_count = len(attachment_page_texts(entry))
     except Exception:
         logger.exception("첨부 파일 파싱 실패: %s", name)
         # 모델이 첨부가 있었다는 사실은 알도록 남긴다.
-        return {"type": "text", "text": f"[첨부 파일: {name}]\n(파일을 읽지 못했습니다)"}
-
-    text = "\n\n".join(page.text for page in pages if page.text)
-    return {"type": "text", "text": f"[첨부 파일: {name}]\n{text}"}
+        return [{"type": "text", "text": f"[첨부 {index}] {name} ({doc_type.value}) — 파일을 읽지 못했습니다"}]
+    return [{"type": "text", "text": (
+        f"[첨부 {index}] {name} ({doc_type.value}, attachment_id={entry['attachment_id']}, {page_count}페이지)"
+        " — read_attachment로 읽으세요"
+    )}]
 
 
 def _collect_sources(messages: list) -> list:
