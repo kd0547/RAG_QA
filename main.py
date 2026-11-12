@@ -74,6 +74,8 @@ async def lifespan(app: FastAPI):
     # 실패해도 에이전트는 agent/prompt.py 원문으로 동작하므로 서버 시작은 막지 않는다.
     try:
         prompt_repo.ensure_default()
+        # 근거 ID 방식의 프롬프트 v2를 처음 한 번 넣고 선택한다 (기존 프롬프트는 그대로 둔다)
+        prompt_repo.ensure_v2()
     except Exception:
         logger.exception("기본 프롬프트 등록 실패")
 

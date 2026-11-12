@@ -9,7 +9,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 
-from agent.prompt import SYSTEM_PROMPT_TEMPLATE
+from agent.prompt import PROMPT_V2_NAME, SYSTEM_PROMPT_TEMPLATE
 from repository.repo_connect import Database
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,32 @@ class PromptRepository:
                 logger.info("선택된 프롬프트가 없어 기본 프롬프트를 선택: id=%d", default.id)
                 default = _fetch(conn, default.id)
         return default
+
+    def ensure_seeded(self, name: str, content: str) -> Prompt | None:
+        """이 이름의 프롬프트가 없으면 넣고 선택한다. 이미 있으면 아무것도 하지 않는다 (None).
+
+        한 번만 선택하므로, 담당자가 나중에 다른 프롬프트를 고르면 서버를 다시 켜도 그 선택이 유지된다.
+        기존 프롬프트(기본 포함)는 지우거나 고치지 않는다.
+        """
+        with self.db.transaction() as conn:
+            if conn.execute("SELECT 1 FROM prompt WHERE name = ?", (name,)).fetchone():
+                return None
+            now = _now()
+            cursor = conn.execute(
+                """
+                INSERT INTO prompt (name, content, is_default, is_selected, created_at, updated_at)
+                VALUES (?, ?, 0, 0, ?, ?)
+                """,
+                (name, content, now, now),
+            )
+            conn.execute("UPDATE prompt SET is_selected = 0 WHERE is_selected = 1")
+            conn.execute("UPDATE prompt SET is_selected = 1 WHERE id = ?", (cursor.lastrowid,))
+            logger.info("프롬프트 등록·선택: %s (id=%d)", name, cursor.lastrowid)
+            return _fetch(conn, cursor.lastrowid)
+
+    def ensure_v2(self) -> Prompt | None:
+        """프롬프트 v2(근거 ID)를 한 번 넣고 선택한다."""
+        return self.ensure_seeded(PROMPT_V2_NAME, SYSTEM_PROMPT_TEMPLATE.template)
 
     def list_all(self) -> list[Prompt]:
         """저장된 프롬프트 전체 (만든 순서라 기본 프롬프트가 보통 맨 앞)."""

@@ -55,6 +55,11 @@ REVIEWER_EMAIL = os.getenv("REVIEWER_EMAIL", "dongwook.kim@trigem.co.kr")
 DEFAULT_CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "2000"))
 DEFAULT_CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 
+# ---------- 에이전트 검색 기본값 ----------
+# search_documents·rerank_documents 도구의 기본값. 화면(/ask)의 query_top_n·rerank_top_n은 더 이상 쓰지 않는다.
+SEARCH_TOP_K = int(os.getenv("SEARCH_TOP_K", "5"))
+RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "3"))
+
 # ---------- 문서 그래프 (Graph RAG) ----------
 # 업로드·페이지 검수 저장 뒤 백그라운드로 개체·관계를 뽑을지 (0이면 끈다. /graph/rebuild로 따로 뽑을 수 있다)
 GRAPH_EXTRACT_ENABLED = os.getenv("GRAPH_EXTRACT_ENABLED", "1") not in ("0", "false", "False", "")

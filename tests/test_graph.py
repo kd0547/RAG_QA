@@ -13,7 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 if not hasattr(sys.modules.get("parser"), "__path__"):
     sys.modules.pop("parser", None)
 
-from agent.prompt import GRAPH_GUIDE, render_prompt  # noqa: E402
+from agent.prompt import render_prompt  # noqa: E402
 from entity.file import create_file  # noqa: E402
 from graph_rag import service  # noqa: E402
 from graph_rag.extractor import extract_page_graph  # noqa: E402
@@ -224,11 +224,12 @@ def test_index_file_combines_blocks_and_skips_failed_pages(env, monkeypatch):
     assert graph.stats()["indexed_files"] == 1
 
 
-def test_prompt_adds_graph_guide_only_when_graph_is_available():
+def test_prompt_adds_concept_list_only_when_graph_has_concepts():
+    """그래프 사용법은 프롬프트 v2 본문에 있고, render_prompt는 상위 개념 목록만 덧붙인다."""
     assert render_prompt("지침", {}, [], None) == "지침"
+    assert render_prompt("지침", {}, [], []) == "지침"
     rendered = render_prompt("지침", {}, [], [{"name": "KC 인증", "members": ["안전확인 신고"]}])
-    assert GRAPH_GUIDE in rendered
-    assert "- KC 인증 = 안전확인 신고" in rendered
+    assert rendered == "지침\n\n**상위 개념 (개념 = 속한 인증 종류)**\n- KC 인증 = 안전확인 신고"
 
 
 # ---------------------------------------------------------------- A5 한국어 개체 매칭

@@ -4,6 +4,7 @@ from pathlib import PureWindowsPath
 
 from langchain_core.tools import tool
 
+import config
 import repository
 from agent.evidence_context import current_owner, current_run, temp_attachments
 
@@ -21,7 +22,7 @@ SNIPPET_CHARS = 300
 @tool
 def search_documents(
     query: str,
-    top_k: int = 5,
+    top_k: int = config.SEARCH_TOP_K,
     page: int = -1,
     file_id: str | None = None,
     score_threshold: float = 0.2,
@@ -164,7 +165,7 @@ def _owned_evidence(evidence_ids: list[str], tool_name: str) -> list[dict]:
 
 
 @tool
-def rerank_documents(query: str, evidence_ids: list[str], top_n: int = 3) -> list[str] | dict:
+def rerank_documents(query: str, evidence_ids: list[str], top_n: int = config.RERANK_TOP_N) -> list[str] | dict:
     """검색된 청크가 많을 때 질문과의 관련성으로 다시 정렬해 후보를 줄입니다.
 
     search_documents 결과가 많거나 여러 검색 결과를 합쳤을 때 사용합니다.

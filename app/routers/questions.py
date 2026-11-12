@@ -22,10 +22,15 @@ router = APIRouter()
 
 
 class QuestionRequest(BaseModel):
+    """질문 요청.
+
+    query_top_n·rerank_top_n은 예전 화면과의 호환을 위해 받기만 하고 무시한다.
+    검색·리랭크 개수는 서버 설정(config.SEARCH_TOP_K, config.RERANK_TOP_N)과 도구 기본값이 정한다.
+    """
     question: str
     mode: Literal['claude', 'local'] = 'local'
-    rerank_top_n:int
-    query_top_n:int
+    rerank_top_n: int | None = None   # 무시됨
+    query_top_n: int | None = None    # 무시됨
 
 from agent.agent import run_agent
 
@@ -33,17 +38,10 @@ from agent.agent import run_agent
 async def ask_question(payload: QuestionRequest) -> dict:
     question = payload.question.strip()
     mode = payload.mode
-    query_top_n = payload.query_top_n
-    rerank_top_n = payload.rerank_top_n
     if not question:
         raise HTTPException(status_code=400, detail="질문을 입력해주세요.")
 
     user_message = question
-    #if query_top_n or rerank_top_n:
-    #    user_message += (
-    #        f"\n\n(참고: 검색 시 top_k는 {query_top_n or 5}, "
-    #        f"리랭킹 시 top_n은 {rerank_top_n or 3}을 기본값으로 사용하세요.)"
-    #    )
 
     started = time.perf_counter()
     logger.debug("질문 수신: mode=%s, question=%s", mode, question[:200])
@@ -134,8 +132,8 @@ async def _build_attachments(files: list[UploadFile], work_dir: Path) -> list[At
 async def ask_question_with_attachments(
     question: Annotated[str, Form()],
     mode: Annotated[Literal["claude", "local"], Form()] = "local",
-    query_top_n: Annotated[int, Form()] = 5,
-    rerank_top_n: Annotated[int, Form()] = 3,
+    query_top_n: Annotated[int | None, Form()] = None,   # 무시됨 (QuestionRequest 참고)
+    rerank_top_n: Annotated[int | None, Form()] = None,  # 무시됨
     files: list[UploadFile] | None = None,
 ) -> dict:
     """첨부 파일·이미지와 함께 질문한다. 첨부는 이 질문에만 쓰고 저장소에는 남기지 않는다."""
