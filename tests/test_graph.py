@@ -229,3 +229,63 @@ def test_prompt_adds_graph_guide_only_when_graph_is_available():
     rendered = render_prompt("지침", {}, [], [{"name": "KC 인증", "members": ["안전확인 신고"]}])
     assert GRAPH_GUIDE in rendered
     assert "- KC 인증 = 안전확인 신고" in rendered
+
+
+# ---------------------------------------------------------------- A5 한국어 개체 매칭
+
+@pytest.fixture
+def aliases(env):
+    """제품·인증번호 별칭을 심은 그래프. 이름 -> 개체 ID."""
+    _, _, graph, add_file = env
+    graph.seed_concepts(KC)
+    file = add_file("guide.pdf")
+    graph.replace_page(file.file_id, 1, PageGraph(entities=[
+        _entity("product", "N5800 14세대"),
+        _entity("product", "N5800-GB70-PU02"),
+        _entity("cert_number", "R-R-TGE-N5800"),
+        _entity("product", "A650"),
+    ]))
+    return graph
+
+
+def _names(graph, query):
+    return [e["name"] for e in graph.find_entities(query)]
+
+
+def test_korean_particle_is_stripped_for_model_name(aliases):
+    assert _names(aliases, "N5800의 사양") == ["N5800 14세대"]
+    assert _names(aliases, "N5800에서 쓰는 SSD") == ["N5800 14세대"]
+
+
+def test_model_name_alone_matches_word_prefix(aliases):
+    assert _names(aliases, "N5800") == ["N5800 14세대"]
+
+
+def test_longer_part_number_is_not_confused_with_model(aliases):
+    assert _names(aliases, "N5800-GB70-PU02 인증") == ["N5800-GB70-PU02"]
+
+
+def test_kc_spacing_gives_same_result(aliases):
+    joined = _names(aliases, "KC인증 자료")
+    spaced = _names(aliases, "KC 인증 자료")
+    assert joined == spaced == ["KC 인증"]
+
+
+def test_cert_number_not_matched_by_model_suffix(aliases):
+    assert "R-R-TGE-N5800" not in _names(aliases, "N5800")
+    assert _names(aliases, "R-R-TGE-N5800 인증서") == ["R-R-TGE-N5800"]
+
+
+def test_korean_suffix_is_not_removed_from_alias_words(aliases):
+    """조사 떼기는 후보를 더할 뿐이다. '14세대'처럼 한글로 끝나는 어절도 그대로 맞는다."""
+    assert _names(aliases, "N5800 14세대 무게") == ["N5800 14세대"]
+    assert _names(aliases, "A650 무게") == ["A650"]
+
+
+def test_query_tokens_add_particle_stripped_candidates():
+    from repository.graph_repository import _query_tokens
+
+    tokens = _query_tokens("N5800의 사양, KC인증을 보내줘")
+    assert {"n5800", "n5800의", "kc인증", "kc인증을", "보내줘"} <= set(tokens)
+    # 3자 미만은 접두 일치에 쓰지 않는다
+    assert "사양" not in tokens

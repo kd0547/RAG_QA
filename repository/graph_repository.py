@@ -22,6 +22,29 @@ MIN_NORM_LEN = 2
 # 검색어 단어로 시작하는 개체 표기도 찾는 최소 길이 (예: "N5800" -> "N5800 14세대")
 MIN_PARTIAL_LEN = 3
 
+# 어절 끝에서 뗄 조사. 긴 것부터 본다 ("에서"를 "에"보다 먼저)
+_PARTICLES = ("에서", "부터", "까지", "으로", "의", "은", "는", "이", "가", "을", "를", "에", "로", "과", "와", "도")
+# 영숫자 식별자: N5800, N5800-GB70-PU02, R-R-TGE-N5800, v1.3
+_IDENTIFIER = re.compile(r"[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*")
+
+
+def _query_tokens(query: str) -> list[str]:
+    """접두 일치에 쓸 검색어 단어 (정규화, MIN_PARTIAL_LEN자 이상).
+
+    (a) 영숫자 식별자, (b) 공백·쉼표로 나눈 어절, (c) 어절 끝 조사 하나를 뗀 것.
+    한글 접미사를 무조건 지우지 않는다. (c)는 후보를 더할 뿐이다.
+    """
+    words = [w for w in re.split(r"[\s,]+", query) if w]
+    candidates = list(_IDENTIFIER.findall(query)) + words
+    for word in words:
+        for particle in _PARTICLES:
+            if word.endswith(particle) and len(word) > len(particle):
+                candidates.append(word[: -len(particle)])
+                break
+    tokens = {normalize(t) for t in candidates}
+    return sorted(t for t in tokens if len(t) >= MIN_PARTIAL_LEN)
+
+
 _RELATION_COLUMNS = """r.id, r.type, r.origin, r.page, r.file_id, f.original_name,
                        s.id AS source_id, s.type AS source_type, s.name AS source_name,
                        d.id AS target_id, d.type AS target_type, d.name AS target_name"""
@@ -315,31 +338,44 @@ class GraphRepository:
         """검색어에 들어 있는 개체를 찾는다.
 
         - 개체 표기(이름·별칭)가 검색어 안에 들어 있으면 찾는다: "KC인증 자료 보내줘" -> KC 인증
-        - 검색어의 단어(3자 이상)로 시작하는 개체 표기도 찾는다: "N5800" -> "N5800 14세대"
+        - 검색어의 단어(3자 이상)로 시작하는 개체 표기도 찾되, 그 단어가 표기의 한 어절과 정확히 같을 때만 쓴다:
+          "N5800" -> "N5800 14세대" (어절 "N5800"), "N5800-GB70-PU02"는 한 어절이라 제외.
           (중간 일치는 "R-R-TGE-N5800"처럼 다른 개체까지 잡아서 쓰지 않는다)
+        - 어절 끝 조사 하나를 뗀 것도 검색어 단어로 쓴다: "N5800의 사양" -> "N5800"
         """
         query_norm = normalize(query)
         if len(query_norm) < MIN_NORM_LEN:
             return []
-        tokens = sorted({normalize(t) for t in re.split(r"[\s,]+", query)} - {""})
-        partial = [t for t in tokens if len(t) >= MIN_PARTIAL_LEN]
+        tokens = _query_tokens(query)
 
         conditions = ["(length(a.alias_norm) >= ? AND instr(?, a.alias_norm) > 0)"]
         params: list = [MIN_NORM_LEN, query_norm]
-        for token in partial:
+        for token in tokens:
             conditions.append("a.alias_norm LIKE ?")
             params.append(f"{token}%")
+        # SQL은 후보를 넉넉히 뽑고(별칭 원문 포함), 접두 일치는 아래에서 어절 단위로 다시 거른다
         sql = f"""
-            SELECT e.id, e.type, e.name, max(length(a.alias_norm)) AS match_len
+            SELECT e.id, e.type, e.name, a.alias, a.alias_norm
             FROM graph_alias a JOIN graph_entity e ON e.id = a.entity_id
             WHERE {' OR '.join(conditions)}
-            GROUP BY e.id
-            ORDER BY match_len DESC, e.id
-            LIMIT ?
         """
         with self.db.get_conn() as conn:
-            rows = conn.execute(sql, (*params, limit)).fetchall()
-            return [{"id": r["id"], "type": r["type"], "name": r["name"]} for r in rows]
+            rows = conn.execute(sql, params).fetchall()
+
+        token_set = set(tokens)
+        best: dict[int, tuple[int, sqlite3.Row]] = {}
+        for row in rows:
+            alias_norm = row["alias_norm"]
+            contained = len(alias_norm) >= MIN_NORM_LEN and alias_norm in query_norm
+            if not contained:
+                alias_words = {normalize(word) for word in row["alias"].split()}
+                if not token_set & alias_words:
+                    continue
+            match_len = len(alias_norm)
+            if row["id"] not in best or match_len > best[row["id"]][0]:
+                best[row["id"]] = (match_len, row)
+        ranked = sorted(best.values(), key=lambda item: (-item[0], item[1]["id"]))
+        return [{"id": r["id"], "type": r["type"], "name": r["name"]} for _, r in ranked[:limit]]
 
     def concept_members(self, concept_ids: list[int]) -> list[dict]:
         """상위 개념에 속한 인증 종류 (part_of의 src)."""
