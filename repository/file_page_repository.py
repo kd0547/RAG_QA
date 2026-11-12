@@ -3,8 +3,15 @@
 업로드 때 파서 결과를 그대로 저장해 두고, 파일 검수에서는 text만 고친다.
 original_text는 처음 파싱한 결과로 남겨 두어 무엇이 바뀌었는지 비교할 수 있게 한다.
 """
+import re
+
 from parser.pdf.type import PageText
 from repository.repo_connect import Database
+
+# grep_documents 결과 snippet: 일치 앞뒤로 보여 줄 글자 수
+SNIPPET_MARGIN = 80
+# 이 글자가 있으면 정규식으로 보고 SQL LIKE 1차 필터를 쓰지 않는다
+_REGEX_META = set(".^$*+?{}[]|()") | {chr(92)}
 
 
 def _row(row) -> dict:
@@ -67,3 +74,51 @@ class FilePageRepository:
                 (text, page_id),
             )
             conn.commit()
+
+    def page_counts(self) -> dict[str, int]:
+        """파일별 페이지(시트) 수. 페이지 텍스트가 없는 파일은 빠진다."""
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT file_id, COUNT(DISTINCT page) AS pages FROM file_page GROUP BY file_id"
+            ).fetchall()
+            return {r["file_id"]: r["pages"] for r in rows}
+
+    def search_text(self, pattern: str, file_id: str | None = None, limit: int = 20) -> list[dict]:
+        """페이지 텍스트에서 정규식(대소문자 무시)을 찾는다. 행마다 첫 일치 하나, 앞뒤 80자를 snippet으로.
+
+        정규식 기호가 없는 패턴은 SQL LIKE로 먼저 거르고, 기호가 있으면 LIKE로 거를 수 없어 전체 행을 본다.
+        잘못된 정규식이면 re.error를 그대로 던진다.
+        """
+        regex = re.compile(pattern, re.IGNORECASE)
+        conditions, params = [], []
+        if file_id:
+            conditions.append("fp.file_id = ?")
+            params.append(file_id)
+        if not any(ch in pattern for ch in _REGEX_META):
+            conditions.append("fp.text LIKE '%' || ? || '%'")
+            params.append(pattern)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        results: list[dict] = []
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT fp.file_id, fp.page, fp.text, f.original_name
+                    FROM file_page fp JOIN file f ON f.file_id = fp.file_id
+                    {where}
+                    ORDER BY f.original_name, fp.seq""",
+                params,
+            )
+            for row in rows:
+                match = regex.search(row["text"])
+                if match is None:
+                    continue
+                start, end = max(0, match.start() - SNIPPET_MARGIN), match.end() + SNIPPET_MARGIN
+                snippet = " ".join(row["text"][start:end].split())
+                results.append({
+                    "file_id": row["file_id"],
+                    "original_name": row["original_name"],
+                    "page": row["page"],
+                    "snippet": snippet,
+                })
+                if len(results) >= limit:
+                    break
+        return results

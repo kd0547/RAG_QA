@@ -1,8 +1,10 @@
 import logging
-from functools import lru_cache
-from pathlib import Path
+import re
 
 from langchain_core.tools import tool
+
+import repository
+from agent.evidence_context import current_owner, current_run
 
 from agent.llm_provider import get_llm_model
 from agent.type import AnswerabilityCheck
@@ -96,7 +98,7 @@ Returns:
     각 항목은 다음 값을 포함합니다.
     - id: 청크 ID
     - file_id: 파일 ID
-    - source: 원본 문서 경로 (read_source_document에 그대로 전달)
+    - source: 원본 문서 경로 (페이지 전체는 read_pages에 file_id와 page를 넘겨 읽는다)
     - page: 페이지 번호
     - chunk_index: 청크 번호
     - text: 본문
@@ -222,7 +224,7 @@ def graph_search(query: str, group_id: str | None = None) -> dict:
     - "KC인증 자료"처럼 여러 인증 종류를 묶는 상위 개념을 묻는 질문 (속한 인증 종류로 펼쳐서 찾습니다)
     - 한 제품의 인증·부품·시험 문서를 모아야 하는 질문
 
-    결과 documents의 source를 read_source_document에 그대로 넘겨 원본을 읽은 뒤 답합니다.
+    결과 documents의 file_id와 pages를 read_pages에 넘겨 원본 페이지를 읽은 뒤 답합니다.
     documents가 비었거나 질문과 맞지 않으면 search_documents로 검색합니다.
 
     Args:
@@ -246,59 +248,183 @@ def graph_search(query: str, group_id: str | None = None) -> dict:
     return result
 
 
-# 업로드된 원본 문서 폴더 (app/routers/files.py의 UPLOAD_DIR과 같은 위치)
-DOCS_ROOT = (Path(__file__).resolve().parent.parent / "data" / "uploads").resolve()
+# ---------- 문서 페이지 읽기 (근거 등록) ----------
+
+# read_pages·read_attachment 한 번에 돌려줄 최대 글자 수
 MAX_READ_CHARS = 20000
+MAX_LIST_LIMIT = 200
 
 
-@lru_cache(maxsize=16)
-def _extract_text(path_str: str, mtime_ns: int) -> str:
-    """파일을 파싱해 페이지 구분자를 붙인 전체 텍스트를 반환한다.
+def _context_error() -> dict | None:
+    """근거를 등록할 실행 컨텍스트가 없으면 오류 dict. 에이전트 밖에서 도구를 직접 부른 경우다."""
+    if current_owner() is None or current_run() is None:
+        return {"error": "실행 컨텍스트가 없습니다 (에이전트 실행 중에만 쓸 수 있는 도구입니다)."}
+    return None
 
-    파싱 비용이 크므로 (경로, 수정시각) 기준으로 캐시한다. 파일이 바뀌면 mtime이 달라져 다시 파싱된다.
+
+def _register_read(origin_type: str, text: str, **fields) -> str:
+    """근거를 현재 소유자로 등록하고 이번 실행에서 읽었다고 기록한다."""
+    owner = current_owner()
+    evidence_id = repository.evidence_repo.register(owner.type, owner.id, origin_type, text, **fields)
+    repository.evidence_repo.record_use(current_run(), evidence_id, "read")
+    return evidence_id
+
+
+def _page_numbers(pages) -> list[int]:
+    """요청 페이지 번호를 중복 없이 순서대로 (1 이상 정수만)."""
+    if isinstance(pages, int):
+        pages = [pages]
+    numbers = []
+    for page in pages or []:
+        try:
+            number = int(page)
+        except (TypeError, ValueError):
+            continue
+        if number >= 1:
+            numbers.append(number)
+    return list(dict.fromkeys(numbers))
+
+
+def read_page_texts(page_texts, max_chars: int, register) -> dict:
+    """[(page, text, register_kwargs)]를 max_chars 안에서 잘라 근거로 등록한다. read_pages·read_attachment 공통.
+
+    한 페이지가 남은 분량보다 길면 그 페이지는 앞부분만 보여 주고 truncated=True. 등록하는 근거는 페이지 전체다.
     """
-    pages = parse_file(path_str)
-    return "\n\n".join(f"[page {page.page}]\n{page.text}" for page in pages if page.text)
+    budget = min(max(1, int(max_chars or 1)), MAX_READ_CHARS)
+    items: list[dict] = []
+    truncated = False
+    next_pages: list[int] = []
+    for index, (page, text, fields) in enumerate(page_texts):
+        if budget <= 0:
+            truncated = True
+            next_pages = [p for p, _, _ in page_texts[index:]]
+            break
+        evidence_id = register(text, page, fields)
+        shown = text[:budget]
+        item = {"evidence_id": evidence_id, "page": page, "text": shown}
+        if len(shown) < len(text):
+            item["truncated"] = True
+            item["page_chars"] = len(text)
+            truncated = True
+        items.append(item)
+        budget -= len(shown)
+    result: dict = {"pages": items, "truncated": truncated}
+    if next_pages:
+        result["next_pages"] = next_pages
+    if truncated:
+        result["message"] = (
+            f"max_chars({min(max(1, int(max_chars or 1)), MAX_READ_CHARS)}자)를 넘어 일부만 돌려줬습니다. "
+            + (f"남은 페이지 {next_pages}는 다시 호출해 읽으세요. " if next_pages else "")
+            + "한 페이지가 길어 잘렸다면 max_chars를 늘리거나(최대 20000) grep_documents로 필요한 부분을 찾으세요."
+        )
+    return result
 
 
 @tool
-def read_source_document(source: str, start: int = 0, max_chars: int = 8000) -> str:
-    """검색 결과의 source에 해당하는 원본 문서 전체 텍스트를 순서대로 읽습니다.
+def read_pages(file_id: str, pages: list[int], max_chars: int = 6000) -> dict:
+    """문서의 페이지 텍스트를 읽습니다. 답변 근거를 얻는 주 도구입니다.
 
-    검색된 청크가 잘려 앞뒤 맥락이 부족하거나, 문서 전체 흐름(목차, 표, 여러 페이지에 걸친
-    설명)을 봐야 할 때 사용합니다. 문서를 검색하지는 않으므로 먼저 search_documents로
-    관련 문서를 찾은 뒤 호출합니다.
+    검수로 고친 최신 텍스트(file_page)를 읽으며 원본 파일을 다시 파싱하지 않습니다.
+    읽은 페이지마다 evidence_id가 붙습니다. 답변에 인용하는 근거는 반드시 이 도구(또는 read_attachment)로 읽은 것이어야 합니다.
 
     Args:
-        source: search_documents 결과의 source 값을 그대로 전달합니다.
-        start: 읽기 시작할 글자 위치. 처음에는 0입니다.
-        max_chars: 한 번에 읽을 최대 글자 수. 기본값은 8000, 최대 20000입니다.
+        file_id: 문서 ID. list_documents, grep_documents, search_documents, graph_search 결과의 file_id.
+        pages: 읽을 페이지 번호 목록 (1부터). 예: [3] 또는 [3, 4]. xlsx는 시트 번호입니다.
+        max_chars: 이번 호출에서 돌려받을 최대 글자 수. 기본 6000, 최대 20000.
 
     Returns:
-        본문 일부와 마지막 줄의 위치 정보 [파일명: 시작~끝 / 전체 N자].
-        본문에는 [page N] 표시가 있어 페이지를 알 수 있습니다.
-        끝 < 전체이면 start=끝으로 다시 호출해 이어서 읽습니다.
+        - pages: [{evidence_id, page, text}] 요청 순서대로
+        - missing_pages: 문서에 없는 페이지 번호
+        - truncated: 분량 초과로 일부만 돌려줬으면 true. next_pages에 남은 페이지가 있습니다
+        - error: 문서가 없거나 페이지 텍스트가 저장돼 있지 않은 경우
     """
-    path = Path(source)
-    if not path.is_absolute():
-        path = DOCS_ROOT / path  # 파일명만 넘어온 경우
-    path = path.resolve()
-    if not path.is_relative_to(DOCS_ROOT) or not path.is_file():
-        logger.info("[read_source_document] 거부: source=%r", source)
-        return "허용되지 않거나 존재하지 않는 경로입니다. search_documents 결과의 source 값을 그대로 전달하세요."
+    error = _context_error()
+    if error:
+        return error
+    file = repository.file_repo.get_file_by_id(file_id)
+    if file is None:
+        return {"error": f"없는 file_id입니다: {file_id}. list_documents로 문서를 찾으세요."}
+    if not repository.page_repo.has_pages(file_id):
+        # 질의 시점에 원본을 다시 파싱하지 않는다 (페이지 텍스트는 업로드 때 저장된다)
+        return {"error": f"페이지 텍스트 없음: {file.original_name}은 페이지별 텍스트가 저장돼 있지 않습니다. search_documents로 찾으세요."}
 
+    page_texts, missing = [], []
+    for number in _page_numbers(pages):
+        rows = repository.page_repo.pages_with_number(file_id, number)
+        if not rows:
+            missing.append(number)
+            continue
+        text = "\n\n".join(row["text"] for row in rows)
+        fields = {"page_id": rows[0]["page_id"], "revision": max(row["updated_at"] for row in rows)}
+        page_texts.append((number, text, fields))
+
+    def register(text, page, fields):
+        return _register_read(
+            "file_page", text, file_id=file_id, page=page, source_name=file.original_name, **fields,
+        )
+
+    result = {"file_id": file_id, "original_name": file.original_name, **read_page_texts(page_texts, max_chars, register)}
+    if missing:
+        result["missing_pages"] = missing
+    logger.info(
+        "[read_pages] file=%s pages=%s -> %d쪽, missing=%s, truncated=%s",
+        file.original_name, _page_numbers(pages), len(result["pages"]), missing, result["truncated"],
+    )
+    return result
+
+
+@tool
+def list_documents(group_id: str | None = None, keyword: str | None = None, limit: int = 50) -> list[dict]:
+    """등록된 문서 목록을 봅니다. 특정 문서를 읽어야 하는데 file_id를 모를 때 씁니다.
+
+    Args:
+        group_id: 문서 그룹으로 좁힐 때만. None이면 전체.
+        keyword: 파일명·설명에 들어 있는 말로 좁힐 때 (대소문자 무시).
+        limit: 최대 개수 (기본 50).
+
+    Returns:
+        [{file_id, original_name, group_id, description, has_pages, page_count}]
+        has_pages가 false인 문서는 read_pages로 읽을 수 없습니다.
+    """
+    counts = repository.page_repo.page_counts()
+    needle = (keyword or "").strip().lower()
+    result = []
+    for file in repository.file_repo.file_list():
+        if group_id and file.get("group_id") != group_id:
+            continue
+        if needle and needle not in f"{file.get('original_name') or ''} {file.get('description') or ''}".lower():
+            continue
+        page_count = counts.get(file["file_id"], 0)
+        result.append({
+            "file_id": file["file_id"],
+            "original_name": file.get("original_name"),
+            "group_id": file.get("group_id"),
+            "description": file.get("description") or "",
+            "has_pages": page_count > 0,
+            "page_count": page_count,
+        })
+        if len(result) >= min(max(1, limit), MAX_LIST_LIMIT):
+            break
+    logger.info("[list_documents] group_id=%r keyword=%r -> %d건", group_id, keyword, len(result))
+    return result
+
+
+@tool
+def grep_documents(pattern: str, file_id: str | None = None, limit: int = 20) -> list[dict] | dict:
+    """문서 페이지 텍스트에서 글자 그대로(또는 정규식) 찾습니다. 모델명·수치·인증번호처럼 정확한 표기를 찾을 때 씁니다.
+
+    Args:
+        pattern: 찾을 말. Python 정규식, 대소문자 무시. 예: "N5800", "RAM ?32 ?GB", "R-R-TGE-[A-Z0-9]+"
+        file_id: 한 문서 안에서만 찾을 때.
+        limit: 최대 결과 수 (기본 20).
+
+    Returns:
+        [{file_id, original_name, page, snippet}] snippet은 일치 부분 앞뒤 80자입니다.
+        근거로 인용하려면 그 페이지를 read_pages로 읽으세요.
+    """
     try:
-        text = _extract_text(str(path), path.stat().st_mtime_ns)
-    except Exception:
-        logger.exception("[read_source_document] 파싱 실패: %s", path)
-        return f"{path.name} 문서를 읽지 못했습니다."
-
-    start = max(0, start)
-    max_chars = min(max(1, max_chars), MAX_READ_CHARS)
-    if start >= len(text):
-        return f"[{path.name}: 읽을 내용이 없습니다. 전체 {len(text)}자]"
-
-    chunk = text[start:start + max_chars]
-    end = start + len(chunk)
-    logger.info("[read_source_document] %s %d~%d / %d자", path.name, start, end, len(text))
-    return f"{chunk}\n\n[{path.name}: {start}~{end} / 전체 {len(text)}자]"
+        result = repository.page_repo.search_text(pattern, file_id=file_id, limit=min(max(1, limit), MAX_LIST_LIMIT))
+    except re.error as exc:
+        return {"error": f"정규식 오류: {exc}. ( ) [ ] . + * ? 같은 기호는 앞에 \\를 붙이세요."}
+    logger.info("[grep_documents] pattern=%r file_id=%r -> %d건", pattern, file_id, len(result))
+    return result

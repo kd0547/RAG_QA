@@ -17,7 +17,9 @@ from agent.prompt import render_prompt
 from entity.type import Attachment, DocumentType
 from parser.file_parser import parse_file
 from repository import graph_repo, group_repo, prompt_repo
-from tools.tool import graph_search, search_documents, rerank_documents, check_answerability, read_source_document
+from tools.tool import (
+    check_answerability, graph_search, grep_documents, list_documents, read_pages, rerank_documents, search_documents,
+)
 from langchain.agents.middleware import dynamic_prompt, ModelRequest
 import logging
 import yaml
@@ -25,7 +27,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-TOOLS = [graph_search, search_documents, rerank_documents, check_answerability, read_source_document]
+TOOLS = [graph_search, list_documents, grep_documents, read_pages, search_documents, rerank_documents, check_answerability]
 
 
 # ---------- Agent ----------
