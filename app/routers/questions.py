@@ -65,6 +65,7 @@ async def ask_question(payload: QuestionRequest) -> dict:
         "question": question,
         "answer": result["answer"],
         "sources": sources,
+        "validation": result.get("validation"),
     }
 
 
@@ -170,5 +171,6 @@ async def ask_question_with_attachments(
         "question": question,
         "answer": result["answer"],
         "sources": sources,
+        "validation": result.get("validation"),
         "attachments": [{"filename": a.filename, "type": a.type} for a in attachments],
     }

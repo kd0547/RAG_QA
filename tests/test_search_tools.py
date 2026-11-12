@@ -75,25 +75,3 @@ def test_other_owner_ids_are_ignored_with_warning(agent_env, vector_hits, in_run
 
     assert ranked == [mine]
     assert theirs in caplog.text and "무시" in caplog.text
-
-
-def test_check_answerability_reads_text_by_id(agent_env, vector_hits, in_run, monkeypatch):
-    seen = []
-
-    class Judge:
-        def with_structured_output(self, schema):
-            return self
-
-        def invoke(self, input):
-            seen.append(input[1]["content"])
-            return SimpleNamespace(is_answerable=True, reason="있음")
-
-    monkeypatch.setattr(tools, "get_llm_model", lambda mode: Judge())
-    mine = tools.search_documents.invoke({"query": "N5800"})[1]["evidence_id"]
-    theirs = agent_env.evidence_repo.register("task", "t2", "chunk", "남의 비밀", file_id="f9", page=1)
-
-    result = tools.check_answerability.invoke({"question": "KC?", "evidence_ids": [mine, theirs]})
-
-    assert result["is_answerable"] is True
-    assert "KC 인증" in seen[0] and "남의 비밀" not in seen[0]
-    assert tools.check_answerability.invoke({"question": "KC?", "evidence_ids": [theirs]})["is_answerable"] is False

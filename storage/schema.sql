@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     draft_answer TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    validation_json TEXT,              -- 초안의 근거 검증 결과 {ok, errors, warnings, cited_ids} (기존 DB는 마이그레이션이 추가)
     FOREIGN KEY (mail_uid) REFERENCES mails(uid)
 );
 

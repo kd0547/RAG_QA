@@ -568,6 +568,26 @@ export function MailReviewPage({
                                 </div>
                             </section>
 
+                            {detail.validation && (detail.validation.errors.length > 0 || detail.validation.warnings.length > 0) && (
+                                <div
+                                    role="alert"
+                                    className={`mt-6 px-4 py-3 rounded-xl border text-[12.5px] leading-relaxed ${
+                                        detail.validation.errors.length > 0
+                                            ? 'bg-danger-surface border-danger/30 text-danger'
+                                            : 'bg-chip border-divide text-ink/70'
+                                    }`}
+                                >
+                                    <div className="font-bold">
+                                        {detail.validation.errors.length > 0 ? '근거 검증 경고' : '근거 확인 필요'}
+                                    </div>
+                                    <ul className="mt-1 list-disc pl-4">
+                                        {[...detail.validation.errors, ...detail.validation.warnings].map((m, i) => (
+                                            <li key={i}>{m}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
                             {SEND_NOTICE[detail.status] && (
                                 <p
                                     role="alert"

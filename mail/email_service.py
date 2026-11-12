@@ -171,7 +171,10 @@ def email_consumer_loop(stop_event: threading.Event,
                 task_repo.assign_task(task.task_id, dandang)
 
                 # 초안을 먼저 저장한다. 알림 메일의 링크를 누르는 시점에 초안이 DB에 있어야 한다.
-                task_repo.save_draft(task.task_id, answer, sources)
+                validation = result.get("validation")
+                task_repo.save_draft(task.task_id, answer, sources, validation=validation)
+                if validation and not validation.get("ok", True):
+                    logger.warning("초안 근거 검증 경고: task_id=%s, %s", task.task_id, validation.get("errors"))
                 logger.info(
                     "초안 저장 완료: task_id=%s, uid=%s, reviewer=%s, answer_len=%d, sources=%d",
                     task.task_id, mail.uid, dandang, len(answer), len(sources),

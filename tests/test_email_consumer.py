@@ -44,7 +44,7 @@ class FakeTaskRepo:
     def assign_task(self, task_id, assignee):
         self.calls.append(("assign_task", assignee))
 
-    def save_draft(self, task_id, answer, sources=None):
+    def save_draft(self, task_id, answer, sources=None, validation=None):
         self.calls.append(("save_draft", answer))
         if self.fail_save:
             raise RuntimeError("DB 잠김")

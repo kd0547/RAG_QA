@@ -125,12 +125,18 @@ class TaskRepository:
                 (state.value, datetime.now().isoformat(), task_id),
             )
 
-    def save_draft(self, task_id: str, answer: str, sources: list[dict] | None = None) -> None:
-        """초안과 참조 문서를 한 트랜잭션으로 저장한다. sources가 None이면 출처는 건드리지 않는다."""
+    def save_draft(
+        self, task_id: str, answer: str, sources: list[dict] | None = None, validation: dict | None = None,
+    ) -> None:
+        """초안과 참조 문서·근거 검증 결과를 한 트랜잭션으로 저장한다. sources가 None이면 출처는 건드리지 않는다.
+
+        검증 오류가 있어도 상태는 drafted다 (검토 화면이 경고로 보여 준다).
+        """
         with self.db.transaction() as conn:
             conn.execute(
-                "UPDATE tasks SET draft_answer = ?, status = ?, updated_at = ? WHERE task_id = ?",
-                (answer, TaskStatus.DRAFTED.value, datetime.now().isoformat(), task_id),
+                "UPDATE tasks SET draft_answer = ?, status = ?, updated_at = ?, validation_json = ? WHERE task_id = ?",
+                (answer, TaskStatus.DRAFTED.value, datetime.now().isoformat(),
+                 json.dumps(validation, ensure_ascii=False) if validation is not None else None, task_id),
             )
             if sources is not None:
                 self._replace_sources(task_id, sources, conn)
@@ -160,6 +166,14 @@ class TaskRepository:
                 for doc in _dedupe_sources(sources)
             ],
         )
+
+    def get_validation(self, task_id: str) -> dict | None:
+        """초안의 근거 검증 결과. 검증 전에 만든 초안이면 None."""
+        with self.db.get_conn() as conn:
+            row = conn.execute("SELECT validation_json FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+        if row is None or not row["validation_json"]:
+            return None
+        return json.loads(row["validation_json"])
 
     def get_sources(self, task_id: str) -> list[dict]:
         with self.db.lock, self.db.get_conn() as conn:

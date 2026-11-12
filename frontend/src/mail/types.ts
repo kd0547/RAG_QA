@@ -43,6 +43,14 @@ export interface MailAttachment {
     average_score?: number | null;  // 검색된 청크의 평균 유사도. 점수가 없으면 null
 }
 
+/** 초안의 근거 검증 결과 (서버가 답변 마지막 줄 '근거: …'를 검사) */
+export interface DraftValidation {
+    ok: boolean;
+    errors: string[];               // 다른 질문의 근거 인용, 근거를 읽지 않고 답변 등
+    warnings: string[];             // 근거 줄 없음, 읽지 않은 근거 인용 등
+    cited_ids: string[];
+}
+
 /** 상세(GET /mails/{task_id}) */
 export interface MailDetail extends MailSummary {
     assignee: string | null;        // 검토 담당자
@@ -52,6 +60,7 @@ export interface MailDetail extends MailSummary {
     model: string | null;
     retrieval: { query_top_k: number | null; rerank_top_n: number | null } | null;
     sources: MailSource[];
+    validation?: DraftValidation | null; // 검증 전에 만든 초안·이전 버전 서버는 없음
     attachments?: MailAttachment[]; // 첨부 후보. 승인할 때 고른 것만 전송된다 (이전 버전 서버는 보내지 않음)
     created_at: string;
     updated_at: string;

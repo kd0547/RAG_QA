@@ -124,7 +124,7 @@ def test_mail_detail_returns_mail_and_task_fields(mail_client):
     assert set(body) == {
         "task_id", "subject", "sender", "received_at", "status", "assignee",
         "body", "draft", "created_at", "updated_at", "recipient",
-        "model", "retrieval", "sources", "attachments",
+        "model", "retrieval", "sources", "attachments", "validation",
     }
     assert body["task_id"] == ids["drafted"]
     assert body["subject"] == "drafted"
@@ -136,6 +136,7 @@ def test_mail_detail_returns_mail_and_task_fields(mail_client):
     assert body["recipient"] == "sender@example.com"
     assert body["model"] is None
     assert body["retrieval"] is None
+    assert body["validation"] is None  # 근거 검증 전에 만든 초안
     # 출처는 파일명만 내보낸다 (디스크 경로 노출 금지)
     assert body["sources"] == [
         {"source": "가이드.pdf", "page": 3, "text": "근거 문장", "evidence_id": "c1", "cited": False},

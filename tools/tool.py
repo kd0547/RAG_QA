@@ -7,8 +7,6 @@ from langchain_core.tools import tool
 import repository
 from agent.evidence_context import current_owner, current_run, temp_attachments
 
-from agent.llm_provider import get_llm_model
-from agent.type import AnswerabilityCheck
 from retrieval.embedder import get_embedding_model
 from repository.embedding_repository import search
 from agent import reranker
@@ -197,65 +195,6 @@ def rerank_documents(query: str, evidence_ids: list[str], top_n: int = 3) -> lis
     logger.info("[rerank_documents] %d건 -> %d건", len(candidates), len(ranked))
     return [e["evidence_id"] for e in ranked]
 
-
-system_prompt = """당신은 사용자의 질문과 <content></content>의 내용을 비교 후 적합성을 평가하는 AI입니다.
-
-    아래 기준으로 판단하세요:
-    - <content>에 사용자 질문에 대한 답을 구성할 수 있는 정보가 포함되어 있으면 answerable
-    - 질문과 무관하거나, 일부만 겹치고 핵심 답변 정보가 없으면 not answerable
-    - 여러 content 중 하나라도 충분한 정보를 제공하면 answerable로 판단
-
-    반드시 지정된 형식(is_answerable, reason)으로만 응답하세요."""
-
-@tool
-def check_answerability(question: str, evidence_ids: list[str]) -> dict:
-    """읽은 근거만으로 사용자 질문에 답할 수 있는지 확인합니다.
-
-    최종 답변 전에 호출합니다. 답변에 쓸 근거의 evidence_id를 넘깁니다 (본문은 서버가 찾습니다).
-    이 도구는 문서를 새로 검색하지 않습니다.
-
-    Args:
-        question: 답하려는 원래 사용자 질문.
-        evidence_ids: read_pages·search_documents 결과의 evidence_id 목록.
-
-    Returns:
-        is_answerable(bool)과 reason(str)을 담은 딕셔너리.
-        is_answerable이 true일 때만 전달한 문서 내용을 근거로 답합니다.
-        false이면 표현을 바꿔 재검색하고 다시 확인합니다. 재검색 후에도
-        근거가 없으면 문서에서 답을 찾지 못했다고 알립니다.
-    """
-    error = _context_error()
-    if error:
-        return error
-    documents = _owned_evidence(evidence_ids, "check_answerability")
-    if not documents:
-        return {"is_answerable": False, "reason": "확인할 근거가 없습니다. 문서를 먼저 읽으세요."}
-    llm = get_llm_model("local")  # 판단은 안정적인 모델로 고정
-    structured_llm = llm.with_structured_output(AnswerabilityCheck)
-
-    content = "\n\n".join(
-        f'<content index="{i}">\n{doc.get("text")}\n</content>'
-        for i, doc in enumerate(documents, start=1)
-    )
-
-
-
-    user_prompt = f"""질문: {question}
-
-    {content}"""
-
-    result = structured_llm.invoke(
-        input=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-    )
-
-    logger.info("[check_answerability] is_answerable=%s, reason=%s", result.is_answerable, result.reason)
-    return {
-        "is_answerable": result.is_answerable,
-        "reason": result.reason
-    }
 
 @tool
 def graph_search(query: str, group_id: str | None = None) -> dict:

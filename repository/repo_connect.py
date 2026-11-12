@@ -53,6 +53,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE product ADD COLUMN parent_id TEXT REFERENCES product(id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_product_parent ON product(parent_id)")
     _migrate_task_reviews_action(conn)
+    # 초안의 근거 검증 결과 (agent/validation.py)
+    task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+    if task_columns and "validation_json" not in task_columns:
+        conn.execute("ALTER TABLE tasks ADD COLUMN validation_json TEXT")
     # 근거 서비스 이후 출처가 '인용'인지 '읽기만'인지 구분한다
     source_columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_sources)")}
     if source_columns and "cited" not in source_columns:

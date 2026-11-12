@@ -1,10 +1,15 @@
+import json
+import threading
 import time
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 from uuid import uuid4
 
 from langchain.agents import create_agent
+from langchain_core.callbacks import BaseCallbackHandler
+from langgraph.errors import GraphRecursionError
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -13,10 +18,11 @@ import repository
 from agent.evidence_context import Owner, current_owner, owner_scope, run_scope, temp_attachments
 from agent.llm_provider import get_llm_model
 from agent.prompt import render_prompt
+from agent.validation import validate_answer
 from entity.type import Attachment, DocumentType
 from repository import graph_repo, group_repo, prompt_repo
 from tools.tool import (
-    attachment_page_texts, check_answerability, graph_search, grep_documents, list_documents, list_evidence,
+    attachment_page_texts, graph_search, grep_documents, list_documents, list_evidence,
     read_attachment, read_pages, rerank_documents, search_documents,
 )
 from langchain.agents.middleware import dynamic_prompt, ModelRequest
@@ -28,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 TOOLS = [
     graph_search, list_documents, grep_documents, read_pages, read_attachment,
-    search_documents, rerank_documents, check_answerability, list_evidence,
+    search_documents, rerank_documents, list_evidence,
 ]
 
 
@@ -73,16 +79,11 @@ def run_agent(
 ) -> dict:
     agent = get_agent(mode)
 
-    with owner_scope(owner or new_session_owner()):
+    with owner_scope(owner or new_session_owner()) as current:
         result = _invoke_logged(
             agent, [{"role": "user", "content": question}], mode, label="질문",
         )
-
-    return {
-        "answer": result["messages"][-1].content,
-        "sources": evidence_sources(result["run_id"]),
-        "run_id": result["run_id"],
-    }
+        return _finish_answer(result, current)
 
 
 def run_agent_temp_attachments(
@@ -96,7 +97,7 @@ def run_agent_temp_attachments(
     """첨부가 있는 질문. 메일은 owner=Owner("task", task_id), /ask/attachments는 새 세션."""
     agent = get_agent(mode)
 
-    with owner_scope(owner or new_session_owner()):
+    with owner_scope(owner or new_session_owner()) as current:
         # 첨부 본문은 메시지에 넣지 않는다. 안내 한 줄만 넣고 모델이 read_attachment로 필요한 페이지를 읽는다.
         content: list[dict] = [{"type": "text", "text": question}]
         preread: list[str] = []
@@ -112,12 +113,60 @@ def run_agent_temp_attachments(
             label=f"메일(첨부 {len(attachments or [])}건, 반려피드백 {'있음' if review_feedback else '없음'})",
             preread=preread,
         )
+        return _finish_answer(result, current)
 
+
+def _finish_answer(result: dict, owner: Owner) -> dict:
+    """최종 답변의 근거 줄을 검증·기록하고 본문·출처·검증 결과를 돌려준다."""
+    validation = validate_answer(result["run_id"], owner, result["answer"])
+    if not validation.ok:
+        logger.warning("답변 근거 검증 경고: run=%s, errors=%s", result["run_id"], validation.errors)
     return {
-        "answer": result["messages"][-1].content,
+        "answer": validation.answer,
         "sources": evidence_sources(result["run_id"]),
         "run_id": result["run_id"],
+        "validation": validation.to_dict(),
     }
+
+
+class AgentRunError(RuntimeError):
+    """실행은 끝났지만 고객 답변으로 쓸 수 없는 결과 (빈 답변·한도 초과). drafted로 저장하지 않는다."""
+
+
+class _ToolTrace(BaseCallbackHandler):
+    """실행 중 도구 호출을 시각과 함께 모은다 (run.tool_calls_json → 검토 화면 '에이전트가 한 일')."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+        self._lock = threading.Lock()
+
+    def on_tool_start(self, serialized, input_str, *, inputs=None, **kwargs):
+        name = (serialized or {}).get("name") or kwargs.get("name") or "?"
+        args = inputs if inputs is not None else input_str
+        try:
+            summary = json.dumps(args, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            summary = str(args)
+        with self._lock:
+            self.calls.append({"tool": name, "args_summary": summary[:200], "at": datetime.now().isoformat()})
+
+
+def answer_text(message) -> str:
+    """AI 메시지의 본문 문자열. Claude처럼 블록 목록으로 오면 text 블록만 잇는다."""
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in content)
+    return str(content or "")
+
+
+def _token_usage(messages: list) -> tuple[int | None, int | None]:
+    usages = [getattr(m, "usage_metadata", None) for m in messages if getattr(m, "type", None) == "ai"]
+    usages = [u for u in usages if u]
+    if not usages:
+        return None, None
+    return sum(u.get("input_tokens", 0) for u in usages), sum(u.get("output_tokens", 0) for u in usages)
 
 
 def _model_name(mode: str) -> str:
@@ -147,6 +196,7 @@ def _invoke_logged(agent, messages: list[dict], mode: str, label: str, preread: 
     run_id = repository.evidence_repo.start_run(owner.type, owner.id, _model_name(mode), _selected_prompt_id())
     for evidence_id in preread or []:
         repository.evidence_repo.record_use(run_id, evidence_id, "read")
+    trace = _ToolTrace()
     try:
         with run_scope(run_id):
             groups = group_repo.list_all()
@@ -154,26 +204,37 @@ def _invoke_logged(agent, messages: list[dict], mode: str, label: str, preread: 
             result = agent.invoke(
                 {"messages": messages},
                 context=AgentContext(system_prompt=render_prompt(prompt_repo.get_system_prompt(), ALIASES, groups, concepts)),
-                config={"recursion_limit": 40})
+                config={"recursion_limit": 40, "callbacks": [trace]})
     except Exception as exc:
-        repository.evidence_repo.finish_run(run_id, "error", [], None, None, f"{type(exc).__name__}: {exc}")
+        # 재귀 한도 초과는 '한도'로 구분해 남긴다. 어느 쪽이든 답변은 저장되지 않는다 (호출부가 failed 처리)
+        status = "limit" if isinstance(exc, GraphRecursionError) else "error"
+        repository.evidence_repo.finish_run(run_id, status, trace.calls, None, None, f"{type(exc).__name__}: {exc}")
         # 트레이스백은 호출부(소비자 루프, uvicorn)가 남기므로 여기서는 소요시간과 예외 종류만 남긴다
         logger.warning(
-            "에이전트 실행 실패: %s, mode=%s, run=%s, %.1f초, %s: %s",
-            label, mode, run_id, time.perf_counter() - started, type(exc).__name__, exc,
+            "에이전트 실행 실패: %s, mode=%s, run=%s, status=%s, %.1f초, %s: %s",
+            label, mode, run_id, status, time.perf_counter() - started, type(exc).__name__, exc,
         )
         raise
+
+    tokens_in, tokens_out = _token_usage(result["messages"])
+    final = result["messages"][-1] if result["messages"] else None
+    answer = answer_text(final).strip() if getattr(final, "type", None) == "ai" else ""
+    if not answer or getattr(final, "tool_calls", None):
+        # 마지막이 도구 호출이거나 본문이 비면 업무 답변이 아니다
+        repository.evidence_repo.finish_run(run_id, "error", trace.calls, tokens_in, tokens_out, "빈 답변")
+        logger.warning("에이전트 실행 결과가 빈 답변: %s, mode=%s, run=%s", label, mode, run_id)
+        raise AgentRunError("에이전트가 답변을 만들지 못했습니다 (빈 답변)")
 
     tool_calls = Counter(
         msg.name for msg in result["messages"] if getattr(msg, "type", None) == "tool"
     )
-    repository.evidence_repo.finish_run(run_id, "ok", [], None, None)
+    repository.evidence_repo.finish_run(run_id, "ok", trace.calls, tokens_in, tokens_out)
     logger.info(
-        "에이전트 실행 완료: %s, mode=%s, run=%s, owner=%s:%s, %.1f초, messages=%d, tools=%s",
+        "에이전트 실행 완료: %s, mode=%s, run=%s, owner=%s:%s, %.1f초, messages=%d, tools=%s, tokens=%s/%s",
         label, mode, run_id, owner.type, owner.id, time.perf_counter() - started, len(result["messages"]),
-        dict(tool_calls) or "없음",
+        dict(tool_calls) or "없음", tokens_in, tokens_out,
     )
-    return {**result, "run_id": run_id}
+    return {**result, "run_id": run_id, "answer": answer}
 
 def _graph_concepts() -> list[dict] | None:
     """프롬프트 힌트용 상위 개념 목록. 그래프를 못 읽어도 답변은 계속한다."""
