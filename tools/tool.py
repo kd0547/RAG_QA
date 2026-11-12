@@ -1,5 +1,6 @@
 import logging
 import re
+from pathlib import PureWindowsPath
 
 from langchain_core.tools import tool
 
@@ -10,10 +11,13 @@ from agent.llm_provider import get_llm_model
 from agent.type import AnswerabilityCheck
 from retrieval.embedder import get_embedding_model
 from repository.embedding_repository import search
-from agent.reranker import rerank
+from agent import reranker
 from parser.file_parser import parse_file
 
 logger = logging.getLogger(__name__)
+
+# search_documents가 모델에 보여 주는 청크 앞부분 길이 (전문은 근거 저장소에)
+SNIPPET_CHARS = 300
 # ---------- Tools ----------
 
 @tool
@@ -24,7 +28,7 @@ def search_documents(
     file_id: str | None = None,
     score_threshold: float = 0.2,
     group_id: str | None = None,
-) -> list[dict]:
+) -> list[dict] | dict:
     """
 문서 근거가 필요한 질문에 대해 벡터DB에서 관련 청크를 찾습니다.
 
@@ -76,7 +80,7 @@ Args:
         0.15 -> 0.10 -> 0.05 순으로 낮춰 재검색할 수 있습니다.
 
         너무 낮은 threshold의 결과는 관련성이 떨어질 수 있으므로
-        이후 rerank_documents 및 check_answerability를 통해 검증해야 합니다.
+        이후 근거로 쓰려면 해당 페이지를 read_pages로 읽어 확인해야 합니다.
 
     Search strategy:
         1. 처음에는 file_id=None, page=-1로 전체 문서를 대상으로 검색합니다.
@@ -90,21 +94,24 @@ Args:
             관련 파일이나 페이지가 확인된 이후에만 사용합니다.
         7. 검색 결과가 부족하면 먼저 score_threshold를 완화하고,
             그래도 부족한 경우 query를 바꿔 다시 검색합니다.
-        8. 최종 검색 결과는 rerank_documents 및 check_answerability로 검증합니다.
+        8. 후보가 많으면 rerank_documents에 evidence_id 목록을 넘겨 줄입니다.
 
 Returns:
     관련 청크의 목록.
 
     각 항목은 다음 값을 포함합니다.
-    - id: 청크 ID
+    - evidence_id: 이 청크의 근거 ID (rerank_documents에 넘긴다)
     - file_id: 파일 ID
-    - source: 원본 문서 경로 (페이지 전체는 read_pages에 file_id와 page를 넘겨 읽는다)
-    - page: 페이지 번호
+    - source: 문서 파일명
+    - page: 페이지 번호 (페이지 전체는 read_pages에 file_id와 page를 넘겨 읽는다)
     - chunk_index: 청크 번호
-    - text: 본문
+    - snippet: 청크 앞부분 300자 (전문이 아니다)
     - score: 유사도 점수
 """
 
+    error = _context_error()
+    if error:
+        return error
     rag_retriever = get_embedding_model()
 
     # 질문 임베딩
@@ -124,42 +131,71 @@ Returns:
         query, group_id, file_id, page, top_k, score_threshold, len(docs),
     )
 
-    return [
-        {
-            "id": doc["id"],
-            "file_id": doc["file_id"],
-            "group_id": doc["group_id"],
-            "source": doc["source"],
-            "page": doc["page"],
-            "chunk_index": doc["chunk_index"],
-            "text": doc["text"],
-            "score": doc["score"],
-        }
-        for doc in docs
-        if doc
-    ]
-
-@tool
-def rerank_documents(query: str, documents: list[dict], top_n: int = 3) -> list[dict]:
-    """검색된 청크가 많을 때 질문과의 관련성으로 다시 정렬해 후보를 줄입니다.
-
-    search_documents의 결과가 많거나 여러 검색 결과를 합쳤을 때 사용합니다.
-    검색을 대신하지 않으며, 후보가 적다면 생략할 수 있습니다.
-
-    Args:
-        query: 후보 청크와 비교할 원래 사용자 질문.
-        documents: search_documents가 반환한 청크 목록. 각 항목에 최소한
-            text가 있어야 하며 id, source, page도 유지해 전달합니다.
-        top_n: 관련성이 높은 순서로 남길 최대 청크 수. 기본값은 3입니다.
-
-    Returns:
-        관련성 순으로 정렬된 최대 top_n개의 원본 청크. 반환값에 점수는
-        추가되지 않습니다. 재정렬 모델을 사용할 수 없으면 빈 목록입니다.
-    """
-    results = rerank(query, documents, top_n)
-    logger.info("[rerank_documents] %d건 -> %d건", len(documents), len(results))
+    owner = current_owner()
+    results = []
+    for doc in docs:
+        if not doc:
+            continue
+        name = PureWindowsPath(doc.get("source") or "").name
+        # 청크 전문은 근거 저장소에만 두고 모델에는 스니펫과 ID만 준다 (리랭크·검증은 ID로 서버에서 본문을 읽는다)
+        evidence_id = repository.evidence_repo.register(
+            owner.type, owner.id, "chunk", doc["text"] or "",
+            file_id=doc.get("file_id"), page=doc.get("page"), source_name=name,
+        )
+        results.append({
+            "evidence_id": evidence_id,
+            "file_id": doc.get("file_id"),
+            "group_id": doc.get("group_id"),
+            "source": name,
+            "page": doc.get("page"),
+            "chunk_index": doc.get("chunk_index"),
+            "snippet": (doc["text"] or "")[:SNIPPET_CHARS],
+            "score": doc.get("score"),
+        })
     return results
 
+def _owned_evidence(evidence_ids: list[str], tool_name: str) -> list[dict]:
+    """현재 소유자의 근거만 요청 순서대로. 다른 소유자·없는 ID는 빼고 경고를 남긴다."""
+    owner = current_owner()
+    ids = [i for i in evidence_ids or [] if isinstance(i, str)]
+    found = repository.evidence_repo.get_many(ids, owner.type, owner.id)
+    ignored = sorted(set(ids) - {e["evidence_id"] for e in found})
+    if ignored:
+        logger.warning("[%s] 현재 소유자(%s:%s)의 근거가 아니어서 무시: %s", tool_name, owner.type, owner.id, ignored)
+    return found
+
+
+@tool
+def rerank_documents(query: str, evidence_ids: list[str], top_n: int = 3) -> list[str] | dict:
+    """검색된 청크가 많을 때 질문과의 관련성으로 다시 정렬해 후보를 줄입니다.
+
+    search_documents 결과가 많거나 여러 검색 결과를 합쳤을 때 사용합니다.
+    본문은 넘기지 않습니다. 서버가 evidence_id로 본문을 찾아 비교합니다.
+
+    Args:
+        query: 후보와 비교할 원래 사용자 질문.
+        evidence_ids: search_documents 결과의 evidence_id 목록.
+        top_n: 남길 최대 개수. 기본값은 3입니다.
+
+    Returns:
+        관련성이 높은 순서의 evidence_id 목록 (최대 top_n개).
+        재정렬 모델을 쓸 수 없으면 넘긴 순서 그대로 돌려줍니다.
+    """
+    error = _context_error()
+    if error:
+        return error
+    candidates = _owned_evidence(evidence_ids, "rerank_documents")
+    top_n = max(1, int(top_n or 1))
+    if reranker.model is None:
+        logger.warning("[rerank_documents] 리랭커가 없어 입력 순서를 유지: %d건", len(candidates))
+        ranked = candidates[:top_n]
+    else:
+        ranked = reranker.rerank(query, candidates, top_n)
+    run_id = current_run()
+    for evidence in ranked:
+        repository.evidence_repo.record_use(run_id, evidence["evidence_id"], "rerank")
+    logger.info("[rerank_documents] %d건 -> %d건", len(candidates), len(ranked))
+    return [e["evidence_id"] for e in ranked]
 
 
 system_prompt = """당신은 사용자의 질문과 <content></content>의 내용을 비교 후 적합성을 평가하는 AI입니다.
@@ -172,15 +208,15 @@ system_prompt = """당신은 사용자의 질문과 <content></content>의 내�
     반드시 지정된 형식(is_answerable, reason)으로만 응답하세요."""
 
 @tool
-def check_answerability(question: str, documents: list[dict]) -> dict:
-    """검색된 청크만으로 사용자 질문에 답할 수 있는지 확인합니다.
+def check_answerability(question: str, evidence_ids: list[str]) -> dict:
+    """읽은 근거만으로 사용자 질문에 답할 수 있는지 확인합니다.
 
-    최종 답변 전에 호출합니다. 검색 또는 재정렬을 거쳐 실제 답변에 사용할
-    청크를 전달해야 하며, 이 도구는 문서를 새로 검색하지 않습니다.
+    최종 답변 전에 호출합니다. 답변에 쓸 근거의 evidence_id를 넘깁니다 (본문은 서버가 찾습니다).
+    이 도구는 문서를 새로 검색하지 않습니다.
 
     Args:
         question: 답하려는 원래 사용자 질문.
-        documents: 근거 후보 청크 목록. 각 항목의 text가 판단에 사용됩니다.
+        evidence_ids: read_pages·search_documents 결과의 evidence_id 목록.
 
     Returns:
         is_answerable(bool)과 reason(str)을 담은 딕셔너리.
@@ -188,6 +224,12 @@ def check_answerability(question: str, documents: list[dict]) -> dict:
         false이면 표현을 바꿔 재검색하고 다시 확인합니다. 재검색 후에도
         근거가 없으면 문서에서 답을 찾지 못했다고 알립니다.
     """
+    error = _context_error()
+    if error:
+        return error
+    documents = _owned_evidence(evidence_ids, "check_answerability")
+    if not documents:
+        return {"is_answerable": False, "reason": "확인할 근거가 없습니다. 문서를 먼저 읽으세요."}
     llm = get_llm_model("local")  # 판단은 안정적인 모델로 고정
     structured_llm = llm.with_structured_output(AnswerabilityCheck)
 
