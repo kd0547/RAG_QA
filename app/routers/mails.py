@@ -103,7 +103,8 @@ def view_mail_detail(task_id: str):
         # 파일명만 내보낸다 (task_sources.source에는 디스크 경로가 들어 있을 수 있다).
         # 윈도우에서 저장한 경로를 리눅스(Docker)에서 읽어도 잘리도록 \와 / 둘 다 구분자로 본다.
         "sources": [
-            {"source": PureWindowsPath(s["source"] or "").name, "page": s["page"], "text": s["text"]}
+            {"source": PureWindowsPath(s["source"] or "").name, "page": s["page"], "text": s["text"],
+             "evidence_id": s["chunk_id"], "cited": bool(s["cited"])}
             for s in task_repo.get_sources(task_id)
         ],
         # 디스크 경로는 화면에 내보내지 않는다

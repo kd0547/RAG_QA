@@ -53,6 +53,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE product ADD COLUMN parent_id TEXT REFERENCES product(id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_product_parent ON product(parent_id)")
     _migrate_task_reviews_action(conn)
+    # 근거 서비스 이후 출처가 '인용'인지 '읽기만'인지 구분한다
+    source_columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_sources)")}
+    if source_columns and "cited" not in source_columns:
+        conn.execute("ALTER TABLE task_sources ADD COLUMN cited INTEGER NOT NULL DEFAULT 0")
     conn.commit()
 
 

@@ -138,8 +138,8 @@ def test_mail_detail_returns_mail_and_task_fields(mail_client):
     assert body["retrieval"] is None
     # 출처는 파일명만 내보낸다 (디스크 경로 노출 금지)
     assert body["sources"] == [
-        {"source": "가이드.pdf", "page": 3, "text": "근거 문장"},
-        {"source": "가이드.pdf", "page": 4, "text": "다음 근거"},
+        {"source": "가이드.pdf", "page": 3, "text": "근거 문장", "evidence_id": "c1", "cited": False},
+        {"source": "가이드.pdf", "page": 4, "text": "다음 근거", "evidence_id": "c2", "cited": False},
     ]
     # 출처 파일 f1은 file 테이블에 없으므로 첨부 후보도 없다
     assert body["attachments"] == []

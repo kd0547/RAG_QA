@@ -54,10 +54,7 @@ async def ask_question(payload: QuestionRequest) -> dict:
         logger.warning("질문 처리 불가(503): mode=%s, %s", mode, exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    sources = [
-        {"source": doc["source"], "page": doc["page"], "text": doc["text"]}
-        for doc in result["sources"]
-    ]
+    sources = _public_sources(result["sources"])
 
     logger.info(
         "질문 응답 완료: mode=%s, question_len=%d, answer_len=%d, sources=%d, %.1f초",
@@ -69,6 +66,15 @@ async def ask_question(payload: QuestionRequest) -> dict:
         "answer": result["answer"],
         "sources": sources,
     }
+
+
+def _public_sources(sources: list[dict]) -> list[dict]:
+    """화면에 보낼 출처. cited: 답변이 인용한 근거면 true, 읽기만 한 근거면 false."""
+    return [
+        {"source": doc["source"], "page": doc["page"], "text": doc["text"],
+         "evidence_id": doc.get("evidence_id"), "cited": bool(doc.get("cited"))}
+        for doc in sources
+    ]
 
 
 # ---------- 첨부가 있는 질문 (POST /ask/attachments, multipart) ----------
@@ -155,10 +161,7 @@ async def ask_question_with_attachments(
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
-    sources = [
-        {"source": doc["source"], "page": doc["page"], "text": doc["text"]}
-        for doc in result["sources"]
-    ]
+    sources = _public_sources(result["sources"])
     logger.info(
         "첨부 질문 응답 완료: mode=%s, attachments=%d, question_len=%d, answer_len=%d, sources=%d, %.1f초",
         mode, len(attachments), len(question), len(str(result["answer"])), len(sources), time.perf_counter() - started,

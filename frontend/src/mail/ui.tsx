@@ -104,10 +104,15 @@ export function ReplyHeader({
 }
 
 export function SourceList({ sources }: { sources: MailSource[] }) {
+    // 답변이 '근거:' 줄로 인용한 근거가 있으면 그것만 오고(cited), 없으면 에이전트가 읽은 페이지가 온다
+    const cited = sources.some((s) => s.cited);
     return (
         <section>
             <h2 className="text-[12px] font-bold text-muted">
-                근거 문서 <span className="tabular-nums">{sources.length}</span>
+                {cited ? '답변이 인용한 근거' : '근거 문서'} <span className="tabular-nums">{sources.length}</span>
+                {!cited && sources.length > 0 && sources[0].cited === false && (
+                    <span className="ml-1.5 font-normal">· 에이전트가 읽은 페이지 (답변이 인용하지 않음)</span>
+                )}
             </h2>
             {sources.length === 0 ? (
                 <p className="mt-2 text-[12px] text-muted">연결된 근거 문서가 없습니다.</p>

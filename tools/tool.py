@@ -574,3 +574,27 @@ def read_attachment(attachment_id: int, pages: list[int] | None = None, max_char
         entry["filename"], wanted[:20], len(result["pages"]), result["truncated"],
     )
     return result
+
+
+# ---------- 근거 목록 ----------
+
+@tool
+def list_evidence() -> str:
+    """지금까지 이 질문(메일)에서 등록된 근거 ID 목록을 한 줄씩 봅니다.
+
+    오래된 도구 결과가 축약돼 근거 ID가 보이지 않을 때, 또는 답변 마지막 줄의 '근거:'에 쓸 ID를 확인할 때 씁니다.
+    각 줄: evidence_id | 파일명 p페이지 | 원천 | rev 버전 | 본문 앞 60자
+    """
+    owner = current_owner()
+    if owner is None:
+        return "실행 컨텍스트가 없습니다."
+    rows = repository.evidence_repo.list_for_owner(owner.type, owner.id)
+    if not rows:
+        return "등록된 근거가 없습니다."
+    lines = []
+    for row in rows:
+        where = f"{row['source_name'] or row['file_id'] or '첨부'}" + (f" p{row['page']}" if row["page"] is not None else "")
+        head = " ".join((row["text"] or "").split())[:60]
+        lines.append(f"{row['evidence_id']} | {where} | {row['origin_type']} | rev {row['revision'] or '-'} | {head}")
+    logger.info("[list_evidence] owner=%s:%s -> %d건", owner.type, owner.id, len(rows))
+    return "\n".join(lines)

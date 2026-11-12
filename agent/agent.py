@@ -1,4 +1,3 @@
-import json
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -17,8 +16,8 @@ from agent.prompt import render_prompt
 from entity.type import Attachment, DocumentType
 from repository import graph_repo, group_repo, prompt_repo
 from tools.tool import (
-    attachment_page_texts, check_answerability, graph_search, grep_documents, list_documents, read_attachment,
-    read_pages, rerank_documents, search_documents,
+    attachment_page_texts, check_answerability, graph_search, grep_documents, list_documents, list_evidence,
+    read_attachment, read_pages, rerank_documents, search_documents,
 )
 from langchain.agents.middleware import dynamic_prompt, ModelRequest
 import logging
@@ -29,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 TOOLS = [
     graph_search, list_documents, grep_documents, read_pages, read_attachment,
-    search_documents, rerank_documents, check_answerability,
+    search_documents, rerank_documents, check_answerability, list_evidence,
 ]
 
 
@@ -81,7 +80,8 @@ def run_agent(
 
     return {
         "answer": result["messages"][-1].content,
-        "sources": _collect_sources(result["messages"]),
+        "sources": evidence_sources(result["run_id"]),
+        "run_id": result["run_id"],
     }
 
 
@@ -115,7 +115,8 @@ def run_agent_temp_attachments(
 
     return {
         "answer": result["messages"][-1].content,
-        "sources": _collect_sources(result["messages"]),
+        "sources": evidence_sources(result["run_id"]),
+        "run_id": result["run_id"],
     }
 
 
@@ -236,61 +237,29 @@ def _attachment_to_blocks(attachment: Attachment, index: int, preread: list[str]
     )}]
 
 
-def _collect_sources(messages: list) -> list:
-    """검색·리랭크·그래프 도구 결과 메시지에서 출처 목록을 모은다.
+# 출처 목록에 담는 근거 본문 길이
+SOURCE_TEXT_CHARS = 500
 
-    검색 결과를 리랭크하면 같은 청크가 두 번 나오므로 청크 ID 기준으로 한 번만 남긴다.
-    그래프 결과는 문서의 페이지마다 한 건씩 넣는다 (본문 대신 그 페이지에서 찾은 개체 이름).
+
+def evidence_sources(run_id: str) -> list[dict]:
+    """실행의 출처 목록. 답변이 인용한 근거(cite)가 있으면 그것만, 없으면 이번 실행에서 읽은 근거(read).
+
+    검색 결과(청크)는 읽은 것이 아니므로 들어가지 않는다. 그래프 검색 결과도 근거가 아니다.
     """
-    sources: list[dict] = []
-    seen: set = set()
-
-    def _add(doc) -> None:
-        if not isinstance(doc, dict):
-            return
-        key = doc.get("id") or (doc.get("source"), doc.get("page"), doc.get("text"))
-        if key in seen:
-            return
-        seen.add(key)
-        sources.append(doc)
-
-    for msg in messages:
-        name = getattr(msg, "name", None)
-        if name not in ("search_documents", "rerank_documents", "graph_search"):
-            continue
-        content = msg.content
-        if isinstance(content, str):
-            try:
-                content = json.loads(content)
-            except json.JSONDecodeError:
-                continue
-        if name == "graph_search":
-            for doc in _graph_sources(content):
-                _add(doc)
-        elif isinstance(content, list):
-            for doc in content:
-                _add(doc)
-    return sources
-
-
-def _graph_sources(result) -> list[dict]:
-    """graph_search 결과의 documents[*]를 페이지 단위 출처로 바꾼다."""
-    if not isinstance(result, dict):
-        return []
-    sources = []
-    for doc in result.get("documents") or []:
-        file_id = doc.get("file_id")
-        text = "개체: " + ", ".join(doc.get("entities") or [])
-        for page in doc.get("pages") or []:
-            sources.append({
-                "id": f"graph:{file_id}:{page}",
-                "file_id": file_id,
-                "source": doc.get("original_name") or doc.get("source") or "",
-                "page": page,
-                "text": text,
-                "score": None,
-            })
-    return sources
+    cited = repository.evidence_repo.uses_for_run(run_id, "cite")
+    used = cited or repository.evidence_repo.uses_for_run(run_id, "read")
+    return [
+        {
+            "evidence_id": e["evidence_id"],
+            "file_id": e["file_id"],
+            "source": e["source_name"] or "",
+            "page": e["page"],
+            "text": (e["text"] or "")[:SOURCE_TEXT_CHARS],
+            "origin_type": e["origin_type"],
+            "cited": bool(cited),
+        }
+        for e in used
+    ]
 
 _agents: dict[str, object] = {}
 

@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS task_sources (
     text        TEXT NOT NULL,          -- 근거 스니펫
     score       REAL,                   -- 유사도 점수
     created_at  TEXT NOT NULL DEFAULT current_timestamp,
+    cited       INTEGER NOT NULL DEFAULT 0,   -- 1: 답변이 '근거:' 줄로 인용한 근거, 0: 읽기만 한 근거 (기존 DB는 마이그레이션이 추가)
     FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_task_sources_task_id ON task_sources(task_id);

@@ -29,6 +29,8 @@ export interface MailSource {
     source: string;                 // 문서 파일명
     page: number | null;
     text: string;                   // 근거 스니펫
+    evidence_id?: string | null;    // 근거 ID (e…). 이전 버전 서버·예전 메일은 없음
+    cited?: boolean;                // true: 답변이 인용한 근거, false: 읽기만 한 근거
 }
 
 /** 답장에 첨부할 수 있는 참고 문서 원본 (같은 파일은 한 번만) */

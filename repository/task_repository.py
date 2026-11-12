@@ -68,13 +68,13 @@ def _row_to_dashboard_detail(row: sqlite3.Row) -> DashboardDetail:
 
 
 def _dedupe_sources(sources: list[dict]) -> list[dict]:
-    """search/rerank 결과에 같은 청크가 반복되므로 청크 ID(없으면 문서·페이지·본문) 기준으로 한 번만 남긴다."""
+    """같은 근거가 반복되면 한 번만 남긴다 (근거 ID → 청크 ID → 문서·페이지·본문 순으로 비교)."""
     seen = set()
     result = []
     for doc in sources:
         if not isinstance(doc, dict):
             continue
-        key = doc.get("id") or (doc.get("source"), doc.get("page"), doc.get("text"))
+        key = doc.get("evidence_id") or doc.get("id") or (doc.get("source"), doc.get("page"), doc.get("text"))
         if key in seen:
             continue
         seen.add(key)
@@ -141,19 +141,21 @@ class TaskRepository:
         conn.executemany(
             """
             INSERT INTO task_sources
-            (task_id, chunk_id, file_id, source, page, chunk_index, text, score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (task_id, chunk_id, file_id, source, page, chunk_index, text, score, cited)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
                     task_id,
-                    doc.get("id"),
+                    # 근거 서비스 이후로는 evidence_id를 chunk_id 자리에 넣는다
+                    doc.get("evidence_id") or doc.get("id"),
                     doc.get("file_id"),
                     doc.get("source") or "",
                     doc.get("page"),
                     doc.get("chunk_index"),
                     doc.get("text") or "",
                     doc.get("score"),
+                    int(bool(doc.get("cited"))),
                 )
                 for doc in _dedupe_sources(sources)
             ],
@@ -163,7 +165,7 @@ class TaskRepository:
         with self.db.lock, self.db.get_conn() as conn:
             rows = conn.execute(
                 """
-                SELECT chunk_id, file_id, source, page, chunk_index, text, score
+                SELECT chunk_id, file_id, source, page, chunk_index, text, score, cited
                 FROM task_sources
                 WHERE task_id = ?
                 ORDER BY source_id
