@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import threading
 import time
 from collections import Counter
@@ -9,6 +10,7 @@ from uuid import uuid4
 
 from langchain.agents import create_agent
 from langchain_core.callbacks import BaseCallbackHandler
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.errors import GraphRecursionError
 from dotenv import load_dotenv
 from pathlib import Path
@@ -56,14 +58,58 @@ class AgentContext:
 def _system_prompt(request:ModelRequest):
     return request.runtime.context.system_prompt
 
-def build_agent(mode: Literal["claude", "local"]):
-    llm = get_llm_model(mode)
+# 대화 기록(checkpoint) 저장소. main.py lifespan이 열고(set_checkpointer) 닫는다. 없으면 기록 없이 동작한다.
+_checkpointer: SqliteSaver | None = None
+AGENT_THREADS_DB = Path(__file__).resolve().parents[1] / "storage" / "agent_threads.db"
+# 한 번의 실행에서 그래프가 밟을 수 있는 최대 단계 수
+RECURSION_LIMIT = 40
+
+
+def open_checkpointer(path: str | Path = AGENT_THREADS_DB) -> SqliteSaver:
+    """대화 기록 DB를 연다. 메일 처리 스레드와 API 스레드가 같이 쓰므로 check_same_thread=False."""
+    conn = sqlite3.connect(str(path), check_same_thread=False)
+    return SqliteSaver(conn)
+
+
+def set_checkpointer(checkpointer: SqliteSaver | None) -> None:
+    """get_agent가 만드는 에이전트들이 같은 checkpointer를 쓰게 한다. 이미 만든 에이전트는 버리고 다시 만든다."""
+    global _checkpointer
+    _checkpointer = checkpointer
+    _agents.clear()
+
+
+def create_rag_agent(llm, *, checkpointer=None):
+    """도구·미들웨어·대화 기록을 붙인 에이전트. 테스트는 대역 모델로 이 함수를 그대로 쓴다."""
     return create_agent(
         model=llm,
         tools=TOOLS,
         middleware=[_system_prompt],
         context_schema=AgentContext,
+        checkpointer=checkpointer,
     )
+
+
+def build_agent(mode: Literal["claude", "local"], checkpointer: SqliteSaver | None = None):
+    return create_rag_agent(get_llm_model(mode), checkpointer=checkpointer)
+
+
+# 같은 대화(thread)를 두 실행이 동시에 이어 쓰지 않게 한다 (메일 소비자는 하나지만 /ask와 공유 대비)
+_thread_locks: dict[str, threading.Lock] = {}
+_thread_locks_guard = threading.Lock()
+
+
+def _thread_lock(thread_id: str) -> threading.Lock:
+    with _thread_locks_guard:
+        return _thread_locks.setdefault(thread_id, threading.Lock())
+
+
+def new_ask_thread_id() -> str:
+    """/ask는 호출마다 새 대화다 (웹 멀티턴은 이번 범위가 아니다)."""
+    return f"ask:{uuid4().hex}"
+
+
+def task_thread_id(task_id: str) -> str:
+    return f"task:{task_id}"
 
 
 def new_session_owner() -> Owner:
@@ -76,12 +122,14 @@ def run_agent(
         mode: Literal["claude", "local"] = "claude",
         *,
         owner: Owner | None = None,
+        thread_id: str | None = None,
 ) -> dict:
     agent = get_agent(mode)
 
     with owner_scope(owner or new_session_owner()) as current:
         result = _invoke_logged(
             agent, [{"role": "user", "content": question}], mode, label="질문",
+            thread_id=thread_id or new_ask_thread_id(),
         )
         return _finish_answer(result, current)
 
@@ -93,8 +141,9 @@ def run_agent_temp_attachments(
         review_feedback: str | None = None,
         *,
         owner: Owner | None = None,
+        thread_id: str | None = None,
 ) -> dict:
-    """첨부가 있는 질문. 메일은 owner=Owner("task", task_id), /ask/attachments는 새 세션."""
+    """첨부가 있는 질문. 메일은 owner=Owner("task", task_id)·thread_id="task:{task_id}", /ask/attachments는 새 세션·새 대화."""
     agent = get_agent(mode)
 
     with owner_scope(owner or new_session_owner()) as current:
@@ -112,6 +161,7 @@ def run_agent_temp_attachments(
             agent, [{"role": "user", "content": content}], mode,
             label=f"메일(첨부 {len(attachments or [])}건, 반려피드백 {'있음' if review_feedback else '없음'})",
             preread=preread,
+            thread_id=thread_id or new_ask_thread_id(),
         )
         return _finish_answer(result, current)
 
@@ -182,11 +232,16 @@ def _selected_prompt_id() -> int | None:
     return selected.id if selected else None
 
 
-def _invoke_logged(agent, messages: list[dict], mode: str, label: str, preread: list[str] | None = None) -> dict:
+def _invoke_logged(
+        agent, messages: list[dict] | None, mode: str, label: str,
+        preread: list[str] | None = None, thread_id: str | None = None,
+) -> dict:
     """에이전트를 실행하고 실행 기록(run)과 소요시간·도구 호출 수 로그를 남긴다.
 
     현재 근거 소유자(owner_scope) 안에서 불러야 한다. 결과 dict에 run_id를 더해 돌려준다.
     preread: 실행 전에 모델에 이미 보여 준 근거 (이미지 첨부). 이번 실행에서 읽은 것으로 기록한다.
+    thread_id: 대화 기록(checkpoint)의 키. 같은 thread_id면 이전 메시지에 이어서 실행한다.
+    messages가 None이면 새 메시지 없이 마지막 checkpoint에서 이어 간다.
     예외는 실행 기록을 error로 남긴 뒤 호출부가 처리하도록 다시 던진다.
     """
     owner = current_owner()
@@ -197,14 +252,17 @@ def _invoke_logged(agent, messages: list[dict], mode: str, label: str, preread: 
     for evidence_id in preread or []:
         repository.evidence_repo.record_use(run_id, evidence_id, "read")
     trace = _ToolTrace()
+    thread_id = thread_id or new_ask_thread_id()
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": RECURSION_LIMIT, "callbacks": [trace]}
     try:
-        with run_scope(run_id):
+        with run_scope(run_id), _thread_lock(thread_id):
+            prior_ids = _message_ids(agent, config)
             groups = group_repo.list_all()
             concepts = _graph_concepts()
             result = agent.invoke(
-                {"messages": messages},
+                {"messages": messages} if messages is not None else None,
                 context=AgentContext(system_prompt=render_prompt(prompt_repo.get_system_prompt(), ALIASES, groups, concepts)),
-                config={"recursion_limit": 40, "callbacks": [trace]})
+                config=config)
     except Exception as exc:
         # 재귀 한도 초과는 '한도'로 구분해 남긴다. 어느 쪽이든 답변은 저장되지 않는다 (호출부가 failed 처리)
         status = "limit" if isinstance(exc, GraphRecursionError) else "error"
@@ -216,7 +274,9 @@ def _invoke_logged(agent, messages: list[dict], mode: str, label: str, preread: 
         )
         raise
 
-    tokens_in, tokens_out = _token_usage(result["messages"])
+    # 대화 기록이 있으면 결과에 이전 실행의 메시지도 들어 있다. 이번 실행에서 생긴 메시지만 센다
+    new_messages = [m for m in result["messages"] if getattr(m, "id", None) not in prior_ids]
+    tokens_in, tokens_out = _token_usage(new_messages)
     final = result["messages"][-1] if result["messages"] else None
     answer = answer_text(final).strip() if getattr(final, "type", None) == "ai" else ""
     if not answer or getattr(final, "tool_calls", None):
@@ -226,15 +286,32 @@ def _invoke_logged(agent, messages: list[dict], mode: str, label: str, preread: 
         raise AgentRunError("에이전트가 답변을 만들지 못했습니다 (빈 답변)")
 
     tool_calls = Counter(
-        msg.name for msg in result["messages"] if getattr(msg, "type", None) == "tool"
+        msg.name for msg in new_messages if getattr(msg, "type", None) == "tool"
     )
     repository.evidence_repo.finish_run(run_id, "ok", trace.calls, tokens_in, tokens_out)
     logger.info(
-        "에이전트 실행 완료: %s, mode=%s, run=%s, owner=%s:%s, %.1f초, messages=%d, tools=%s, tokens=%s/%s",
-        label, mode, run_id, owner.type, owner.id, time.perf_counter() - started, len(result["messages"]),
+        "에이전트 실행 완료: %s, mode=%s, run=%s, thread=%s, %.1f초, messages=%d(새 %d), tools=%s, tokens=%s/%s",
+        label, mode, run_id, thread_id, time.perf_counter() - started, len(result["messages"]), len(new_messages),
         dict(tool_calls) or "없음", tokens_in, tokens_out,
     )
-    return {**result, "run_id": run_id, "answer": answer}
+    return {**result, "run_id": run_id, "answer": answer, "thread_id": thread_id}
+
+
+def _message_ids(agent, config: dict) -> set:
+    """이 대화에 이미 저장된 메시지 ID들. 대화 기록이 없으면 빈 집합."""
+    if getattr(agent, "checkpointer", None) is None:
+        return set()
+    state = agent.get_state(config)
+    return {getattr(m, "id", None) for m in (state.values or {}).get("messages", [])} - {None}
+
+
+def thread_message_count(thread_id: str, mode: str = "local") -> int:
+    """대화 기록에 저장된 메시지 수 (기록이 없거나 checkpointer가 없으면 0)."""
+    agent = get_agent(mode)
+    if getattr(agent, "checkpointer", None) is None:
+        return 0
+    state = agent.get_state({"configurable": {"thread_id": thread_id}})
+    return len((state.values or {}).get("messages", []))
 
 def _graph_concepts() -> list[dict] | None:
     """프롬프트 힌트용 상위 개념 목록. 그래프를 못 읽어도 답변은 계속한다."""
@@ -328,5 +405,5 @@ _agents: dict[str, object] = {}
 def get_agent(mode: Literal["claude", "local"] = "local"):
     """모드별로 에이전트를 최초 1회 빌드해 재사용한다."""
     if mode not in _agents:
-        _agents[mode] = build_agent(mode)
+        _agents[mode] = build_agent(mode, _checkpointer)
     return _agents[mode]

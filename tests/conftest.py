@@ -38,6 +38,7 @@ for _key, _value in {
 
 _PRODUCTION_DBS = {
     (PROJECT_ROOT / "storage" / "mail.db").resolve(),
+    (PROJECT_ROOT / "storage" / "agent_threads.db").resolve(),
 }
 _SESSION_DIR = Path(tempfile.mkdtemp(prefix="ragqa-test-"))
 _original_connect = sqlite3.connect
@@ -146,17 +147,10 @@ def agent_env(tmp_path, monkeypatch):
         if hasattr(agent_module, name):
             monkeypatch.setattr(agent_module, name, value)
 
-    def install(script: list, mode: str = "local") -> ScriptedModel:
-        """대역 모델로 실제 도구 목록을 가진 에이전트를 만들어 get_agent가 돌려주게 한다."""
-        from langchain.agents import create_agent
-
+    def install(script: list, mode: str = "local", checkpointer=None, **kwargs) -> ScriptedModel:
+        """대역 모델로 실제 도구·미들웨어를 가진 에이전트를 만들어 get_agent가 돌려주게 한다."""
         model = ScriptedModel(script=list(script))
-        agent = create_agent(
-            model=model,
-            tools=agent_module.TOOLS,
-            middleware=[agent_module._system_prompt],
-            context_schema=agent_module.AgentContext,
-        )
+        agent = agent_module.create_rag_agent(model, checkpointer=checkpointer, **kwargs)
         monkeypatch.setattr(agent_module, "get_agent", lambda m="local": agent)
         return model
 

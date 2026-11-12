@@ -31,7 +31,7 @@ from app.routers.specs import router as spec_router
 from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
-from agent.agent import ALIASES, get_agent
+from agent.agent import ALIASES, get_agent, open_checkpointer, set_checkpointer
 from repository import db, email_repo, graph_repo, group_repo, prompt_repo, task_repo
 from logging_config import setup_logging
 
@@ -117,6 +117,10 @@ async def lifespan(app: FastAPI):
 
     reranker_ready = load_rerank()
 
+    # 에이전트 대화 기록(storage/agent_threads.db). 반려 후 같은 메일의 대화로 이어서 쓴다.
+    checkpointer = open_checkpointer()
+    set_checkpointer(checkpointer)
+
     graph = get_agent()
     producer, consumer, stop_event = email_loop_build(email_repo, task_repo,db)
     logger.info("서버 준비 완료: reranker=%s", "사용" if reranker_ready else "미사용(로드 실패)")
@@ -133,6 +137,8 @@ async def lifespan(app: FastAPI):
         logger.warning("종료 대기 시간 안에 끝나지 않은 스레드: %s", still_running)
     system_monitor.stop()
     access_log.stop()  # 큐에 남은 접속 기록을 저장한다
+    set_checkpointer(None)
+    checkpointer.conn.close()
     logger.info("서버 종료")
 
 

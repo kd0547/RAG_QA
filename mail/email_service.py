@@ -1,7 +1,7 @@
 import threading
 
 import config
-from agent.agent import run_agent, run_agent_temp_attachments
+from agent.agent import run_agent, run_agent_temp_attachments, task_thread_id
 from agent.evidence_context import Owner
 from entity.type import MailEntity
 from repository.email_repository import EmailRepository
@@ -162,6 +162,7 @@ def email_consumer_loop(stop_event: threading.Event,
                     attachments=mail.attachments,
                     review_feedback=build_review_feedback(task.draft_answer, reject_reasons),
                     owner=Owner("task", task.task_id),
+                    thread_id=task_thread_id(task.task_id),
                 )
                 answer = result["answer"]
                 sources = result["sources"]
