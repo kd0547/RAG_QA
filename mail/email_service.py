@@ -42,6 +42,26 @@ def build_review_feedback(previous_draft: str, reject_reasons: list[str]) -> str
     return feedback
 
 
+def _notify_reviewer(reviewer: str, mail: MailEntity, answer: str, task_id: str) -> None:
+    """검토 담당자에게 초안 알림 메일을 보낸다. 실패는 로그만 남기고 상태는 바꾸지 않는다."""
+    try:
+        send_email(
+            reviewer,
+            f"[테스트][검토]{mail.subject}",
+            render_mail_review_email(
+                mail=mail,
+                answer=answer,
+                task_id=task_id,
+                base_url=config.PUBLIC_BASE_URL,
+            ),
+            html=True,
+        )
+    except Exception:
+        logger.exception("검토 알림 발송 실패(초안은 저장됨): task_id=%s, reviewer=%s", task_id, mask_email(reviewer))
+        return
+    logger.info("검토 알림 발송: task_id=%s, reviewer=%s", task_id, mask_email(reviewer))
+
+
 def email_receiver_loop(
         stop_event: threading.Event,
         email_repo:EmailRepository,
@@ -138,25 +158,16 @@ def email_consumer_loop(stop_event: threading.Event,
                 dandang = config.REVIEWER_EMAIL
                 #담당자 배정 (지금은 .env의 REVIEWER_EMAIL 한 명)
                 task_repo.assign_task(task.task_id, dandang)
-                send_email(
-                    dandang,
-                f"[테스트][검토]{mail.subject}",
-                    render_mail_review_email(
-                        mail=mail,
-                        answer=answer,
-                        task_id=task.task_id,
-                        base_url=config.PUBLIC_BASE_URL,
-                    ),
-                    html=True,
-                )
 
-
-
+                # 초안을 먼저 저장한다. 알림 메일의 링크를 누르는 시점에 초안이 DB에 있어야 한다.
                 task_repo.save_draft(task.task_id, answer, sources)
                 logger.info(
-                    "초안 저장·검토 요청 완료: task_id=%s, uid=%s, reviewer=%s, answer_len=%d, sources=%d",
+                    "초안 저장 완료: task_id=%s, uid=%s, reviewer=%s, answer_len=%d, sources=%d",
                     task.task_id, mail.uid, dandang, len(answer), len(sources),
                 )
+
+                # 알림이 실패해도 초안은 drafted로 남는다 (담당자는 대시보드에서 볼 수 있다)
+                _notify_reviewer(dandang, mail, answer, task.task_id)
 
             except Exception:
                 logger.exception("메일 처리 실패: task_id=%s, mail_uid=%s", task.task_id, task.mail_uid)

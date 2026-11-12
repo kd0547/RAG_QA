@@ -8,6 +8,7 @@
   (파일 업로드 테스트들은 각자 monkeypatch로 자기 대역을 넣으므로 영향이 없다)
 - tests/parser.py가 parser 패키지를 가리지 않게 프로젝트 루트를 sys.path 앞에 둔다.
 """
+import os
 import shutil
 import sqlite3
 import sys
@@ -23,6 +24,15 @@ if not hasattr(sys.modules.get("parser"), "__path__"):
     sys.modules.pop("parser", None)
 # pytest는 테스트 모듈을 읽을 때 tests/를 sys.path 맨 앞에 넣는다. 그 전에 진짜 패키지를 캐시해 둔다.
 import parser  # noqa: E402,F401
+
+# ---------- 메일 계정 ----------
+# mail/ 모듈은 임포트 시점에 계정 환경변수를 읽는다. 테스트는 실제 계정 대신 더미 값을 쓴다
+# (load_dotenv는 이미 있는 값을 덮어쓰지 않으므로 .env의 실제 값이 들어오지 않는다).
+for _key, _value in {
+    "MAIL_ID": "sender@example.com", "MAIL_PW": "test-only",
+    "CLIENT_ID": "test-client", "TENANT_ID": "test-tenant",
+}.items():
+    os.environ.setdefault(_key, _value)
 
 # ---------- 운영 DB 보호 ----------
 
