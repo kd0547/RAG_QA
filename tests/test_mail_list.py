@@ -54,7 +54,10 @@ def mail_data(tmp_path, monkeypatch):
 
     for status in (TaskStatus.DRAFTED, TaskStatus.IN_REVIEW, TaskStatus.SENT):
         task_repo.update_status(ids[status.value], status)
-    task_repo.save_draft(ids["drafted"], "초안 답변")
+    task_repo.save_draft(ids["drafted"], "초안 답변", sources=[
+        {"id": "c1", "file_id": "f1", "source": "C:\\data\\uploads\\가이드.pdf", "page": 3, "text": "근거 문장", "score": 0.9},
+        {"id": "c2", "file_id": "f1", "source": "/app/data/uploads/가이드.pdf", "page": 4, "text": "다음 근거", "score": 0.5},
+    ])
 
     return ids
 
@@ -125,7 +128,12 @@ def test_mail_detail_returns_mail_and_task_fields(mail_client):
     assert body["recipient"] == "sender@example.com"
     assert body["model"] is None
     assert body["retrieval"] is None
-    assert body["sources"] == []
+    # 출처는 파일명만 내보낸다 (디스크 경로 노출 금지)
+    assert body["sources"] == [
+        {"source": "가이드.pdf", "page": 3, "text": "근거 문장"},
+        {"source": "가이드.pdf", "page": 4, "text": "다음 근거"},
+    ]
+    # 출처 파일 f1은 file 테이블에 없으므로 첨부 후보도 없다
     assert body["attachments"] == []
     for field in ("received_at", "created_at", "updated_at"):
         datetime.fromisoformat(body[field])

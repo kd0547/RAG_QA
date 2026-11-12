@@ -1,7 +1,7 @@
 import logging
 from dataclasses import asdict
 from datetime import datetime, date
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -99,9 +99,11 @@ def view_mail_detail(task_id: str):
         "recipient": SENDER_EMAIL,
         "model": None,
         "retrieval": None,
+        # 파일명만 내보낸다 (task_sources.source에는 디스크 경로가 들어 있을 수 있다).
+        # 윈도우에서 저장한 경로를 리눅스(Docker)에서 읽어도 잘리도록 \와 / 둘 다 구분자로 본다.
         "sources": [
-        #    {"source": s["source"], "page": s["page"], "text": s["text"]}
-        #    for s in task_repo.get_sources(task_id)
+            {"source": PureWindowsPath(s["source"] or "").name, "page": s["page"], "text": s["text"]}
+            for s in task_repo.get_sources(task_id)
         ],
         # 디스크 경로는 화면에 내보내지 않는다
         "attachments": [
