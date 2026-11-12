@@ -3,11 +3,15 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from typing import Literal
+from uuid import uuid4
 
 from langchain.agents import create_agent
 from dotenv import load_dotenv
 from pathlib import Path
 
+import config
+import repository
+from agent.evidence_context import Owner, current_owner, owner_scope, run_scope
 from agent.llm_provider import get_llm_model
 from agent.prompt import render_prompt
 from entity.type import Attachment, DocumentType
@@ -52,16 +56,23 @@ def build_agent(mode: Literal["claude", "local"]):
     )
 
 
+def new_session_owner() -> Owner:
+    """메일이 아닌 질문(/ask)은 호출마다 새 세션을 근거 소유자로 쓴다."""
+    return Owner("session", uuid4().hex)
+
+
 def run_agent(
         question: str,
         mode: Literal["claude", "local"] = "claude",
-
+        *,
+        owner: Owner | None = None,
 ) -> dict:
     agent = get_agent(mode)
 
-    result = _invoke_logged(
-        agent, [{"role": "user", "content": question}], mode, label="질문",
-    )
+    with owner_scope(owner or new_session_owner()):
+        result = _invoke_logged(
+            agent, [{"role": "user", "content": question}], mode, label="질문",
+        )
 
     return {
         "answer": result["messages"][-1].content,
@@ -74,23 +85,27 @@ def run_agent_temp_attachments(
         mode: Literal["claude", "local"] = "claude",
         attachments: list[Attachment] | None = None,
         review_feedback: str | None = None,
+        *,
+        owner: Owner | None = None,
 ) -> dict:
+    """첨부가 있는 질문. 메일은 owner=Owner("task", task_id), /ask/attachments는 새 세션."""
     agent = get_agent(mode)
 
-    content: list[dict] = [{"type": "text", "text": question}]
-    for attachment in attachments or []:
-        block = _attachment_to_block(attachment)
-        if block is not None:
-            content.append(block)
+    with owner_scope(owner or new_session_owner()):
+        content: list[dict] = [{"type": "text", "text": question}]
+        for attachment in attachments or []:
+            block = _attachment_to_block(attachment)
+            if block is not None:
+                content.append(block)
 
-    # 담당자 반려 피드백은 질문과 섞이지 않도록 별도 블록으로 붙인다.
-    if review_feedback:
-        content.append({"type": "text", "text": review_feedback})
+        # 담당자 반려 피드백은 질문과 섞이지 않도록 별도 블록으로 붙인다.
+        if review_feedback:
+            content.append({"type": "text", "text": review_feedback})
 
-    result = _invoke_logged(
-        agent, [{"role": "user", "content": content}], mode,
-        label=f"메일(첨부 {len(attachments or [])}건, 반려피드백 {'있음' if review_feedback else '없음'})",
-    )
+        result = _invoke_logged(
+            agent, [{"role": "user", "content": content}], mode,
+            label=f"메일(첨부 {len(attachments or [])}건, 반려피드백 {'있음' if review_feedback else '없음'})",
+        )
 
     return {
         "answer": result["messages"][-1].content,
@@ -98,33 +113,57 @@ def run_agent_temp_attachments(
     }
 
 
-def _invoke_logged(agent, messages: list[dict], mode: str, label: str) -> dict:
-    """에이전트를 실행하고 소요시간·도구 호출 수를 로그로 남긴다. 예외는 호출부가 처리하도록 다시 던진다."""
-    started = time.perf_counter()
+def _model_name(mode: str) -> str:
+    return config.LLM_MODEL if mode == "local" else config.CLAUDE_MODEL
+
+
+def _selected_prompt_id() -> int | None:
     try:
-        groups = group_repo.list_all()
-        concepts = _graph_concepts()
-        result = agent.invoke(
-            {"messages": messages},
-            context=AgentContext(system_prompt=render_prompt(prompt_repo.get_system_prompt(), ALIASES, groups, concepts)),
-            config={"recursion_limit": 40})
+        selected = repository.prompt_repo.get_selected()
+    except Exception:
+        logger.warning("선택된 프롬프트 조회 실패", exc_info=True)
+        return None
+    return selected.id if selected else None
+
+
+def _invoke_logged(agent, messages: list[dict], mode: str, label: str) -> dict:
+    """에이전트를 실행하고 실행 기록(run)과 소요시간·도구 호출 수 로그를 남긴다.
+
+    현재 근거 소유자(owner_scope) 안에서 불러야 한다. 결과 dict에 run_id를 더해 돌려준다.
+    예외는 실행 기록을 error로 남긴 뒤 호출부가 처리하도록 다시 던진다.
+    """
+    owner = current_owner()
+    if owner is None:
+        raise RuntimeError("근거 소유자 없이 에이전트를 실행할 수 없습니다 (owner_scope 안에서 호출)")
+    started = time.perf_counter()
+    run_id = repository.evidence_repo.start_run(owner.type, owner.id, _model_name(mode), _selected_prompt_id())
+    try:
+        with run_scope(run_id):
+            groups = group_repo.list_all()
+            concepts = _graph_concepts()
+            result = agent.invoke(
+                {"messages": messages},
+                context=AgentContext(system_prompt=render_prompt(prompt_repo.get_system_prompt(), ALIASES, groups, concepts)),
+                config={"recursion_limit": 40})
     except Exception as exc:
+        repository.evidence_repo.finish_run(run_id, "error", [], None, None, f"{type(exc).__name__}: {exc}")
         # 트레이스백은 호출부(소비자 루프, uvicorn)가 남기므로 여기서는 소요시간과 예외 종류만 남긴다
         logger.warning(
-            "에이전트 실행 실패: %s, mode=%s, %.1f초, %s: %s",
-            label, mode, time.perf_counter() - started, type(exc).__name__, exc,
+            "에이전트 실행 실패: %s, mode=%s, run=%s, %.1f초, %s: %s",
+            label, mode, run_id, time.perf_counter() - started, type(exc).__name__, exc,
         )
         raise
 
     tool_calls = Counter(
         msg.name for msg in result["messages"] if getattr(msg, "type", None) == "tool"
     )
+    repository.evidence_repo.finish_run(run_id, "ok", [], None, None)
     logger.info(
-        "에이전트 실행 완료: %s, mode=%s, %.1f초, messages=%d, tools=%s",
-        label, mode, time.perf_counter() - started, len(result["messages"]),
+        "에이전트 실행 완료: %s, mode=%s, run=%s, owner=%s:%s, %.1f초, messages=%d, tools=%s",
+        label, mode, run_id, owner.type, owner.id, time.perf_counter() - started, len(result["messages"]),
         dict(tool_calls) or "없음",
     )
-    return result
+    return {**result, "run_id": run_id}
 
 def _graph_concepts() -> list[dict] | None:
     """프롬프트 힌트용 상위 개념 목록. 그래프를 못 읽어도 답변은 계속한다."""

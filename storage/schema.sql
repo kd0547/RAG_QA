@@ -330,3 +330,40 @@ create table if not exists access_log (
 );
 CREATE INDEX IF NOT EXISTS idx_access_log_ts ON access_log(ts);
 CREATE INDEX IF NOT EXISTS idx_access_log_ip ON access_log(client_ip);
+
+
+-- ===== 근거(evidence)와 에이전트 실행 기록 =====
+-- evidence: 에이전트가 읽은 근거 한 조각. 답변은 evidence_id로 인용하고, 서버가 소유자(task/session)를 검증한다.
+-- 같은 (소유자, 원천, 파일, 페이지 행, revision, 본문 해시)면 새 행을 만들지 않고 기존 ID를 돌려준다.
+-- 그래프 검색 결과는 근거가 아니다 (실행 기록에만 남긴다).
+CREATE TABLE IF NOT EXISTS evidence (
+    evidence_id   TEXT PRIMARY KEY,          -- 'e' + 짧은 uuid
+    owner_type    TEXT NOT NULL,             -- 'task' | 'session'
+    owner_id      TEXT NOT NULL,
+    origin_type   TEXT NOT NULL,             -- 'file_page' | 'chunk' | 'attachment' | 'spec_value'
+    file_id       TEXT, page_id INTEGER, page INTEGER,
+    attachment_id INTEGER, spec_value_id INTEGER,
+    revision      TEXT,                      -- file_page.updated_at 또는 첨부 파서 버전
+    content_hash  TEXT NOT NULL,
+    text          TEXT NOT NULL,
+    source_name   TEXT,                      -- 화면 표시용 파일명 (임시 첨부처럼 file·mail_attachments에 없는 것도 이름을 보이게)
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_owner ON evidence(owner_type, owner_id);
+
+-- run: 에이전트 실행 1회 (모델 호출부터 최종 답변까지)
+CREATE TABLE IF NOT EXISTS run (
+    run_id TEXT PRIMARY KEY, owner_type TEXT NOT NULL, owner_id TEXT NOT NULL,
+    model TEXT, prompt_id INTEGER, started_at TEXT NOT NULL, ended_at TEXT,
+    status TEXT NOT NULL,                    -- 'running' | 'ok' | 'error' | 'limit'
+    tool_calls_json TEXT, tokens_in INTEGER, tokens_out INTEGER, error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_run_owner ON run(owner_type, owner_id);
+
+-- evidence_use: 실행 중 근거를 어떻게 썼는지 (읽음 / 리랭크 / 답변 인용)
+CREATE TABLE IF NOT EXISTS evidence_use (
+    run_id TEXT NOT NULL, evidence_id TEXT NOT NULL,
+    action TEXT NOT NULL,                    -- 'read' | 'rerank' | 'cite'
+    at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_use_run ON evidence_use(run_id, action);

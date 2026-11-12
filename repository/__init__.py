@@ -14,6 +14,7 @@ from repository.group_repository import GroupRepository
 from repository.repo_connect import Database
 from repository.spec_repository import SpecRepository
 from repository.email_repository import EmailRepository
+from repository.evidence_repository import EvidenceRepository
 from repository.prompt_repository import PromptRepository
 from repository.task_repository import TaskRepository
 
@@ -27,3 +28,4 @@ prompt_repo = PromptRepository(db)
 spec_repo = SpecRepository(db)
 graph_repo = GraphRepository(db)
 access_log_repo = AccessLogRepository(db)
+evidence_repo = EvidenceRepository(db)
