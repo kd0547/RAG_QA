@@ -290,6 +290,18 @@ def mail_approve(task_id: str, request: Request, payload:ApproveBody | None = No
     }
 
 
+@router.post("/mails/{task_id}/retry")
+def mail_retry(task_id: str, request: Request):
+    """답변 생성에 실패한(failed) 작업을 다시 생성하도록 pending으로 돌린다. 메일은 보내지 않는다."""
+    task = task_repo.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not task_repo.retry(task_id):
+        raise HTTPException(status_code=409, detail=f"생성 실패(failed) 상태에서만 다시 생성할 수 있습니다: {task.status.value}")
+    logger.info("다시 생성 요청: task_id=%s, failed -> pending, client=%s", task_id, _client_ip(request))
+    return {"task_id": task_id, "status": TaskStatus.PENDING.value}
+
+
 class MarkSentBody(BaseModel):
     reason: str
 

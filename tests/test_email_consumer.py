@@ -50,6 +50,9 @@ class FakeTaskRepo:
     def unapplied_reject_reasons(self, task_id):
         return []
 
+    def latest_retry_id(self, task_id):
+        return None
+
     def assign_task(self, task_id, assignee):
         self.calls.append(("assign_task", assignee))
 

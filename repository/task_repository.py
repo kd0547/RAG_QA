@@ -400,6 +400,36 @@ class TaskRepository:
             )
         return True
 
+    def retry(self, task_id: str) -> bool:
+        """답변 생성에 실패한(failed) 작업을 다시 생성 대기(pending)로. failed가 아니면 아무것도 하지 않고 False.
+
+        task_reviews에 action='retry'로 남긴다 (그 review_id가 재시도 메시지 ID가 된다).
+        """
+        now = datetime.now().isoformat()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ? AND status = ?",
+                (TaskStatus.PENDING.value, now, task_id, TaskStatus.FAILED.value),
+            )
+            if cursor.rowcount != 1:
+                return False
+            conn.execute(
+                """
+                INSERT INTO task_reviews (task_id, action, reason, requeue, reviewed_at)
+                VALUES (?, 'retry', NULL, 1, ?)
+                """,
+                (task_id, now),
+            )
+        return True
+
+    def latest_retry_id(self, task_id: str) -> int | None:
+        """가장 최근 재시도 요청의 review_id. 재시도한 적이 없으면 None."""
+        with self.db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT MAX(review_id) FROM task_reviews WHERE task_id = ? AND action = 'retry'", (task_id,),
+            ).fetchone()
+        return row[0] if row else None
+
     def reset_processing(self) -> int:
         """서버 시작 시 답변 생성 중(processing)이던 작업을 pending으로 되돌린다.
 

@@ -121,7 +121,7 @@ const RESEND_CONFIRM: Partial<Record<MailStatus, string>> = {
 
 /**
  * 메일 검토 페이지: 왼쪽은 검토가 필요한 메일(대기열), 오른쪽은 원문 → AI 답장 → 근거 순서의 검토 캔버스.
- * 승인·반려·재전송·담당 지정 같은 "결정"은 이 페이지에서만 한다.
+ * 승인·반려·재발송·다시 생성·담당 지정 같은 "결정"은 이 페이지에서만 한다.
  */
 export function MailReviewPage({
     queue,
@@ -374,17 +374,17 @@ export function MailReviewPage({
         const taskId = detail.task_id;
         if (offline) {
             dropRow(taskId);
-            notify('ok', '재전송 완료 (예시 데이터)');
+            notify('ok', '다시 생성을 요청했습니다 (예시 데이터)');
             return;
         }
         setBusy('retry');
         try {
-            const res = await mailApi.retry(taskId);
+            await mailApi.retry(taskId);
             dropRow(taskId);
-            notify('ok', `재전송 완료 → ${res.to}`);
+            notify('ok', '다시 생성을 요청했습니다');
             refreshAll();
         } catch (e) {
-            notify('err', e instanceof ApiError ? e.message : '재전송 실패');
+            notify('err', e instanceof ApiError ? e.message : '다시 생성 요청 실패');
         } finally {
             setBusy('');
         }
@@ -780,7 +780,7 @@ export function MailReviewPage({
                                                 disabled={busy !== ''}
                                                 className="h-10 px-6 rounded-xl bg-brand text-white text-[13.5px] font-bold whitespace-nowrap hover:bg-brand-hover disabled:opacity-50"
                                             >
-                                                {busy === 'retry' ? '재전송 중…' : '재전송'}
+                                                {busy === 'retry' ? '요청 중…' : '다시 생성'}
                                             </button>
                                         ) : detail.status === 'sending' ? (
                                             <span className="h-10 px-4 inline-flex items-center text-[13px] font-semibold text-muted whitespace-nowrap">

@@ -78,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_task_sources_task_id ON task_sources(task_id);
 CREATE TABLE IF NOT EXISTS task_reviews (
     review_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id     TEXT NOT NULL,
-    action      TEXT NOT NULL CHECK (action IN ('reject', 'mark_sent')),  -- mark_sent: 수락 여부를 모르던 발송을 담당자가 보낸 것으로 확인
+    action      TEXT NOT NULL CHECK (action IN ('reject', 'mark_sent', 'retry')),  -- mark_sent: 수락 여부를 모르던 발송을 담당자가 보낸 것으로 확인, retry: 생성 실패 작업 다시 생성
     reason      TEXT,
     requeue     INTEGER NOT NULL DEFAULT 1,   -- 반려 후 재작성 대기로 돌렸는지 (0/1)
     reviewed_at TEXT NOT NULL,

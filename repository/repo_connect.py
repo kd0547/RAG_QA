@@ -71,20 +71,24 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+# task_reviews.action에 허용하는 값 (schema.sql의 CHECK와 같아야 한다)
+TASK_REVIEW_ACTIONS = ("reject", "mark_sent", "retry")
+
+
 def _migrate_task_reviews_action(conn: sqlite3.Connection) -> None:
-    """task_reviews.action의 CHECK에 'mark_sent'를 넣는다.
+    """task_reviews.action의 CHECK에 'mark_sent'·'retry'를 넣는다.
 
     SQLite는 CHECK 제약을 ALTER로 바꿀 수 없어서, 예전 제약을 가진 테이블은 새 테이블로 옮겨 만든다.
     기존 반려 이력(review_id 포함)은 그대로 복사한다.
     """
     row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_reviews'").fetchone()
-    if row is None or "mark_sent" in row["sql"]:
+    if row is None or all(f"'{action}'" in row["sql"] for action in TASK_REVIEW_ACTIONS):
         return
     conn.execute("""
         CREATE TABLE task_reviews_new (
             review_id   INTEGER PRIMARY KEY AUTOINCREMENT,
             task_id     TEXT NOT NULL,
-            action      TEXT NOT NULL CHECK (action IN ('reject', 'mark_sent')),
+            action      TEXT NOT NULL CHECK (action IN ('reject', 'mark_sent', 'retry')),
             reason      TEXT,
             requeue     INTEGER NOT NULL DEFAULT 1,
             reviewed_at TEXT NOT NULL,

@@ -93,8 +93,8 @@ export const mailApi = {
         return request<MailDetail>(`/mails/${encodeURIComponent(taskId)}/release`, { method: 'POST' });
     },
 
-    /** 전송 실패 건 재전송 */
-    retry(taskId: string): Promise<ApproveResult> {
-        return request<ApproveResult>(`/mails/${encodeURIComponent(taskId)}/retry`, { method: 'POST' });
+    /** 답변 생성 실패(failed) 건을 다시 생성하도록 요청 (pending으로). 메일은 보내지 않는다 */
+    retry(taskId: string): Promise<{ task_id: string; status: MailStatus }> {
+        return request(`/mails/${encodeURIComponent(taskId)}/retry`, { method: 'POST' });
     },
 };

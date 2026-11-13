@@ -177,6 +177,7 @@ def email_consumer_loop(stop_event: threading.Event,
                     review=review,
                     owner=Owner("task", task.task_id),
                     thread_id=task_thread_id(task.task_id),
+                    retry_id=task_repo.latest_retry_id(task.task_id),
                 )
                 answer = result["answer"]
                 sources = result["sources"]

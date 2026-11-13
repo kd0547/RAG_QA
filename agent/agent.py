@@ -193,14 +193,19 @@ def run_agent_temp_attachments(
         *,
         owner: Owner | None = None,
         thread_id: str | None = None,
+        retry_id: int | None = None,
 ) -> dict:
     """첨부가 있는 질문. 메일은 owner=Owner("task", task_id)·thread_id="task:{task_id}", /ask/attachments는 새 세션·새 대화.
 
     review: 아직 반영하지 않은 담당자 반려 (가장 큰 review_id, 반려 안내문). 메일만 쓴다.
     - 대화 기록이 있으면: 같은 대화에 반려 안내문만 새 user 메시지로 넣는다 (이전 초안·읽은 근거는 대화에 있다)
     - 대화 기록이 없으면(마이그레이션 전 task): 첫 실행처럼 질문·첨부를 넣고 반려 안내문을 두 번째 user 메시지로
-    - 반려 없이 대화 기록만 있으면(생성 중 서버 재시작): 새 메시지 없이 마지막 checkpoint에서 이어 간다
-    메시지 ID를 대화·review_id로 고정해, 같은 반려를 두 번 처리해도 메시지가 한 번만 들어간다.
+    - 반려 없이 대화 기록만 있으면:
+      - 그래프가 중간에 끊겼으면(생성 중 서버 재시작) 새 메시지 없이 마지막 checkpoint에서 이어 간다
+      - 그래프가 답변 없이 끝났으면(모델 호출 한도, 빈 답변) 재시도 안내 user 메시지를 넣는다 (같은 결과 반복 방지)
+      - 정상 답변으로 끝났으면(답변 뒤 저장 전 종료) 그 답변을 그대로 검증·저장한다
+    retry_id: 담당자의 '다시 생성' 요청(task_reviews.review_id). 재시도 메시지 ID에 쓴다.
+    메시지 ID를 대화·review_id로 고정해, 같은 반려·재시도를 두 번 처리해도 메시지가 한 번만 들어간다.
     """
     agent = get_agent(mode)
     thread_id = thread_id or new_ask_thread_id()
@@ -211,6 +216,9 @@ def run_agent_temp_attachments(
         if has_history and review:
             messages = [_review_message(thread_id, review)]
             label = f"메일 반려 반영(review_id={review[0]}, 같은 대화)"
+        elif has_history and _ended_without_answer(agent, thread_id):
+            messages = [_retry_message(agent, thread_id, retry_id)]
+            label = f"메일 재시도(retry_id={retry_id}, 이전 실행이 답변 없이 끝남)"
         elif has_history:
             messages = None
             label = "메일 이어서 실행(대화 기록에서 재개)"
@@ -226,6 +234,34 @@ def run_agent_temp_attachments(
 
         result = _invoke_logged(agent, messages, mode, label=label, preread=preread, thread_id=thread_id)
         return _finish_answer(result, current)
+
+
+RETRY_TEXT = "[재시도] 이전 실행이 답변 없이 끝났습니다. 이미 읽은 근거로 답변을 작성하고, 부족하면 필요한 부분만 더 읽으세요."
+
+
+def _ended_without_answer(agent, thread_id: str) -> bool:
+    """대화가 끝난 상태(다음 단계 없음)인데 마지막 AI 메시지가 업무 답변이 아니면 True.
+
+    모델 호출 한도 메시지로 끝났거나 본문이 비었으면 '답변 없이 끝남'이다. 중간에 끊긴 대화(next 있음)는 False.
+    """
+    state = agent.get_state({"configurable": {"thread_id": thread_id}})
+    if state.next:
+        return False
+    messages = (state.values or {}).get("messages", [])
+    last_ai = next((m for m in reversed(messages) if getattr(m, "type", None) == "ai"), None)
+    if last_ai is None or getattr(last_ai, "tool_calls", None):
+        return True
+    text = answer_text(last_ai).strip()
+    return not text or text.startswith(MODEL_LIMIT_MESSAGE_PREFIX)
+
+
+def _retry_message(agent, thread_id: str, retry_id: int | None) -> HumanMessage:
+    """재시도 안내 user 메시지. 같은 재시도 요청이면 같은 ID라 대화에서 덮어써진다."""
+    if retry_id is None:
+        state = agent.get_state({"configurable": {"thread_id": thread_id}})
+        existing = [m for m in (state.values or {}).get("messages", []) if str(getattr(m, "id", "")).startswith("retry:")]
+        retry_id = len(existing) + 1
+    return HumanMessage(content=RETRY_TEXT, id=f"retry:{thread_id}:{retry_id}")
 
 
 def _review_message(thread_id: str, review: tuple[int, str]) -> HumanMessage:
