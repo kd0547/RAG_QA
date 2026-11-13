@@ -6,7 +6,8 @@
 - 별도 데몬 스레드(request-analyzer)가 주기마다 돈다. 대기·처리 중 메일이 있으면 그 주기는 쉰다.
   분석이 실패해도 메일 처리와 task 상태에는 영향이 없다.
 
-이 모듈은 유형(request_type)과 분석(request_analysis)만 쓴다. 절차(skill_doc)를 승인하는 코드는 없다.
+이 모듈은 유형(request_type)과 분석(request_analysis)만 쓴다. 주기마다 절차 초안 작업 하나를 agent/skill_author.py에
+맡긴다 (draft·error까지만 만든다). 절차(skill_doc)를 승인하는 코드는 없다.
 """
 from __future__ import annotations
 
@@ -225,7 +226,14 @@ def run_cycle(llm=None) -> dict:
         analyzed.append(analyze_task(task_id, llm)["status"])
     if analyzed:
         logger.info("문의 분석 주기: %d건 (%s)", len(analyzed), ", ".join(analyzed))
-    return {"analyzed": analyzed}
+    result: dict = {"analyzed": analyzed}
+    # 분석을 마친 뒤 절차 초안 작업 하나 (화면 요청으로 생긴 생성 대기 행, 없으면 자동 초안 대상 한 건)
+    if not mail_busy():
+        from agent import skill_author  # 순환 임포트 방지 (skill_author가 이 모듈의 invoke_structured를 쓴다)
+        draft = skill_author.process_one(llm)
+        if draft is not None:
+            result["draft"] = draft
+    return result
 
 
 def analyzer_loop(stop_event: threading.Event, llm=None) -> None:

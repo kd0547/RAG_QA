@@ -333,3 +333,163 @@ class SkillRepository:
                  reason, model, (error or None) and error[:2000], _now()),
             )
         return self.get_analysis(task_id)
+
+    # ------------------------------------------------------------ 절차 초안 재료·생성
+
+    def type_task_ids(self, type_id: int) -> list[str]:
+        """이 유형으로 분석된(ok) task들."""
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT task_id FROM request_analysis WHERE status = 'ok' AND type_id = ?", (type_id,),
+            ).fetchall()
+        return [r["task_id"] for r in rows]
+
+    def draft_materials(self, type_id: int, limit: int = 5) -> list[dict]:
+        """초안 재료 사례 (최대 limit건). 우선순위: 승인 발송된 건 → 반려 이력이 있는 건 → 그 밖, 같은 순위는 최근 것부터.
+
+        각 사례: task_id, subject, status, received_at, body, attachments(파일명), answer,
+        answer_kind(sent: 발송 기록 있음 · sent_legacy: 발송 기록 이전에 보냄 · unreviewed: 검토되지 않은 초안),
+        rejects(반려 사유 목록), tool_calls(마지막 ok 실행의 [{tool, args_summary}])
+        """
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT t.task_id, t.status, t.draft_answer, t.created_at, m.uid, m.subject, m.body, m.received_at,
+                       (SELECT body FROM task_send s WHERE s.task_id = t.task_id AND s.outcome = 'sent'
+                        ORDER BY s.send_id DESC LIMIT 1) AS sent_body,
+                       EXISTS (SELECT 1 FROM task_reviews r WHERE r.task_id = t.task_id AND r.action = 'reject') AS rejected
+                FROM request_analysis a
+                JOIN tasks t ON t.task_id = a.task_id
+                JOIN mails m ON m.uid = t.mail_uid
+                WHERE a.status = 'ok' AND a.type_id = ?
+                """,
+                (type_id,),
+            ).fetchall()
+
+            def rank(row) -> int:
+                if row["sent_body"] is not None or row["status"] == "sent":
+                    return 0
+                return 1 if row["rejected"] else 2
+
+            # 최근 순으로 먼저 정렬한 뒤 우선순위로 안정 정렬한다
+            chosen = sorted(rows, key=lambda r: r["created_at"] or "", reverse=True)
+            chosen = sorted(chosen, key=rank)[:limit]
+            cases = []
+            for row in chosen:
+                files = conn.execute(
+                    "SELECT filename FROM mail_attachments WHERE mail_uid = ? ORDER BY attachment_id", (row["uid"],),
+                ).fetchall()
+                rejects = conn.execute(
+                    "SELECT reason FROM task_reviews WHERE task_id = ? AND action = 'reject' ORDER BY review_id",
+                    (row["task_id"],),
+                ).fetchall()
+                run = conn.execute(
+                    """SELECT tool_calls_json FROM run WHERE owner_type = 'task' AND owner_id = ? AND status = 'ok'
+                       ORDER BY started_at DESC, rowid DESC LIMIT 1""",
+                    (row["task_id"],),
+                ).fetchone()
+                if row["sent_body"] is not None:
+                    answer, kind = row["sent_body"], "sent"
+                elif row["status"] == "sent":
+                    # 발송 기록(task_send) 이전에 보낸 작업: 마지막 초안이 발송본에 가장 가깝다
+                    answer, kind = row["draft_answer"], "sent_legacy"
+                else:
+                    answer, kind = row["draft_answer"], "unreviewed"
+                calls = _loads(run["tool_calls_json"] if run else None, [])
+                cases.append({
+                    "task_id": row["task_id"], "subject": row["subject"], "status": row["status"],
+                    "received_at": row["received_at"], "body": row["body"] or "",
+                    "attachments": [f["filename"] for f in files],
+                    "answer": answer or "", "answer_kind": kind,
+                    "rejects": [r["reason"] or "" for r in rejects],
+                    "tool_calls": [{"tool": c.get("tool"), "args_summary": c.get("args_summary")}
+                                   for c in calls if isinstance(c, dict)],
+                })
+        return cases
+
+    def case_summaries(self, task_ids: list[str]) -> list[dict]:
+        """화면용 재료 사례 요약 (task_id, subject, status, received_at, sent). 본문은 넣지 않는다. 요청 순서대로."""
+        unique = list(dict.fromkeys(t for t in task_ids if isinstance(t, str)))
+        if not unique:
+            return []
+        placeholders = ",".join("?" for _ in unique)
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT t.task_id, t.status, m.subject, m.received_at,
+                           EXISTS (SELECT 1 FROM task_send s WHERE s.task_id = t.task_id AND s.outcome = 'sent') AS sent_logged
+                    FROM tasks t JOIN mails m ON m.uid = t.mail_uid WHERE t.task_id IN ({placeholders})""",
+                unique,
+            ).fetchall()
+        by_id = {r["task_id"]: dict(r) for r in rows}
+        result = []
+        for task_id in unique:
+            row = by_id.get(task_id)
+            if row is None:
+                continue
+            row["sent"] = bool(row.pop("sent_logged")) or row["status"] == "sent"
+            result.append(row)
+        return result
+
+    def generating_docs(self) -> list[dict]:
+        """생성 대기 행 (오래된 것부터). 서버가 도중에 꺼졌어도 다음 시작 때 이어서 처리한다."""
+        with self.db.get_conn() as conn:
+            rows = conn.execute("SELECT * FROM skill_doc WHERE status = 'generating' ORDER BY doc_id").fetchall()
+        return [_doc(r) for r in rows]
+
+    def auto_draft_candidates(self, min_cases: int) -> list[dict]:
+        """자동 초안 대상 유형: open이고 skill_name이 없고, 분석 건수가 min_cases 이상이며, 그 유형의 skill_doc이 한 번도 없음.
+
+        건수 많은 순. (반려된 초안도 skill_doc 행이므로 반려 이력이 있는 유형은 자동으로 다시 만들지 않는다)
+        """
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT t.*, COUNT(a.task_id) AS case_count
+                FROM request_type t
+                JOIN request_analysis a ON a.type_id = t.type_id AND a.status = 'ok'
+                WHERE t.state = 'open' AND t.skill_name IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM skill_doc d WHERE d.type_id = t.type_id)
+                GROUP BY t.type_id
+                HAVING COUNT(a.task_id) >= ?
+                ORDER BY case_count DESC, t.type_id
+                """,
+                (min_cases,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def other_types_using_name(self, name: str, type_id: int | None) -> list[int]:
+        """같은 이름의 DB 절차 행을 가진 다른 유형 (생성 중 행 제외)."""
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT type_id FROM skill_doc
+                   WHERE name = ? AND status <> 'generating' AND type_id IS NOT ?""",
+                (name, type_id),
+            ).fetchall()
+        return [r["type_id"] for r in rows]
+
+    def finish_generation(
+        self, doc_id: int, *, status: str, name: str | None = None, description: str | None = None,
+        body: str | None = None, digest: str | None = None, source_tasks: list[str] | None = None,
+        check: dict | None = None, model: str | None = None, error: str | None = None,
+    ) -> bool:
+        """생성 중 행을 draft(이름·버전 확정) 또는 error로 바꾼다. 생성 중이 아니면 False (두 번 처리하지 않는다)."""
+        if status not in ("draft", "error"):
+            raise ValueError(f"생성 결과 상태가 아닙니다: {status}")
+        with self.db.transaction() as conn:
+            row = conn.execute("SELECT name, version FROM skill_doc WHERE doc_id = ? AND status = 'generating'",
+                               (doc_id,)).fetchone()
+            if row is None:
+                return False
+            new_name, version = row["name"], row["version"]
+            if status == "draft":
+                new_name, version = name, self.next_version(name, conn)
+            cursor = conn.execute(
+                """UPDATE skill_doc SET status = ?, name = ?, version = ?, description = ?, body = ?, digest = ?,
+                                        source_tasks_json = ?, check_json = ?, model = ?, error = ?
+                   WHERE doc_id = ? AND status = 'generating'""",
+                (status, new_name, version, description, body, digest,
+                 json.dumps(source_tasks or [], ensure_ascii=False),
+                 json.dumps(check, ensure_ascii=False) if check is not None else None, model,
+                 (error or None) and error[:2000], doc_id),
+            )
+            return cursor.rowcount == 1
