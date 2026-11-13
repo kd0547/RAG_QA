@@ -323,6 +323,7 @@ CREATE TABLE IF NOT EXISTS evidence_use (
 | E | `get_product_specs`·`compare_specs`. `spec_attribute.inheritable` 플래그(기본 false), 자식 명시 값 우선, 기본/옵션 구분, 단위 정규화, `product_component` 연결 없는 부품 값 사용 금지. **제품 양식은 한 시트·공통 속성 유지**(노트북/데스크톱 분리·전용 속성 추가 금지) | total 8-2, 8-7, 11-7 |
 | F | deepagents backend 시제품: `EvidenceService` 위에 읽기 전용 `BackendProtocol` 구현, 같은 10문항으로 비교. 채택 전 설치 버전 고정 | total 11-2 |
 | G | `mails`에 `message_id, in_reply_to, references_` 컬럼, 발신 시 `Message-ID` 생성·`task_send`에 저장, `In-Reply-To`로 conversation 연결, `raw_body/new_body/quoted_body` 분리, 고객 메모리 테이블 | total 11-3, 4장 4단계 |
+| I | 문의 분석(유형·맡는 절차), 절차 초안 생성(로컬 모델), R&D 승인 화면. 승인본만 사용. **실행 순서는 D 다음, E 앞. 상세 지시: [opus_development_instructions_I.md](opus_development_instructions_I.md)** | 사용자 결정 2026-11-13 |
 | H | 그래프를 만들 때 제품·부품 사양 DB를 참조한다. 아래 6-1 참고. **A~C 범위가 아니다. 지금 구현하지 않는다** | 사용자 요청 2026-11-13 |
 
 ### 6-1. 단계 H — 그래프 생성 시 사양 DB 참조 (나중 단계)

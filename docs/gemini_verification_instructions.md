@@ -87,6 +87,11 @@
 - skill 문서(`spec-compare` 등)가 저장소에 있고, 선택된 것만 모델에 읽힌다. skill 본문의 지시가 서버 검증·승인 정책을 바꾸지 못한다.
 - 항목별 통과 조건(D-1 ~ D-14)은 [opus_development_instructions_D.md](opus_development_instructions_D.md) 9절을 따른다.
 
+### B-I. 문의 분석 · 절차 초안 · R&D 승인 (D 다음, E 앞)
+
+- 승인 전 초안은 어떤 답변 실행에도 읽히지 않는다. 자동 승인 경로가 없다. 답변 에이전트에 쓰기 도구가 없다.
+- 항목별 통과 조건(I-1 ~ I-12)은 [opus_development_instructions_I.md](opus_development_instructions_I.md) 10절을 따른다.
+
 ### B-E. 사양 계산·비교
 
 - `get_product_specs`: 자식 명시 값 > 허용 상속 부모 값. `inheritable=false` 속성은 상속 안 됨. 값 부재와 "미지원"을 구분.
