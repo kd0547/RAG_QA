@@ -53,7 +53,9 @@ def call_load_skill(name: str, owner: Owner) -> str:
 # ---------------------------------------------------------------- 로더
 
 def test_repository_skills_all_load_and_pass_checks(repo_skills):
-    assert sorted(repo_skills) == list(REPO_SKILLS)
+    # 작성 절차(author 채널, create-skill)는 답변 절차가 아니라 지시서 I의 초안 생성 작업이 쓴다
+    answer_skills = {n: s for n, s in repo_skills.items() if skills.AUTHOR_CHANNEL not in s.channels}
+    assert sorted(answer_skills) == list(REPO_SKILLS)
     for skill in repo_skills.values():
         assert skill.description and len(skill.body) <= skills.MAX_BODY_CHARS
         assert re.fullmatch(r"[0-9a-f]{8}", skill.digest)
