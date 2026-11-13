@@ -28,3 +28,6 @@ temp/
 
 # 실행 로그
 logs/
+
+# deepagents 비교용 별도 가상환경 (통합 지시서 F, 운영 코드에 넣지 않는다)
+.venv-deepagents/
