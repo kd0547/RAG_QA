@@ -28,6 +28,7 @@
      (`current.json`, `proto.json`, `current.log`, `proto.log`, 끝나면 `done.txt`에 exit 코드)
    - 남은 일: 결과가 다 있으면 `.venv/Scripts/python.exe tests/eval/deepagents_proto/compare.py <위 폴더>`로 표를 만들어 F-compare.md 4절에 붙이고 해석(로컬 문서 2개뿐인 한계, 시제품은 langchain 1.5/langgraph 1.2.21) 적기. 결과가 없거나 중간에 끊겼으면 같은 명령으로 다시 돌린다 (README 참고).
    - 스모크 1문항(#6 TI600s↔C910G): 시제품 28초, 도구 14회(오류 0), 검증 통과.
+   - **비교 실행 완료** (두 구성 exit 0). 표는 [F-compare-table.md](F-compare-table.md)에 생성해 둠: 9문항 모두 검증 통과(두 구성), 현재 엔진 도구 137회·오류 6·입력 1,457,313토큰·784초 / 시제품 도구 156회·오류 5·입력 2,256,057토큰·595초. 남은 일은 이 표를 F-compare.md 4절로 옮기고 문항별 해석(문서 2개 한계 포함)을 쓰는 것. 원본 JSON은 위 폴더.
 2. **T1 기록** — 전체 테스트 453 passed. `npx tsc -b` 통과, `npm run build`는 임시 outDir로 통과(dist 안 건드림). `npx eslint src`는 **기존 `src/App.tsx` 오류 2건**(2026-11-05 이후 안 바뀐 파일, 이번 작업 무관)으로 실패 — 고친 폴더(spec·mail·knowledge)만 보면 통과. 사용자에게 알릴 것.
 3. **Z2 `docs/dev_log/R-summary.md`** — 아직 안 씀. 항목·커밋 표(위 표), 전체 테스트 출력, 멈춘 항목(없음), 다르게 한 것(아래), 9절 확인 위치, **운영 DB 변경 표**(T-migration.md의 표 재사용: `customer_note` 테이블, `spec_attribute.inheritable`, `graph_entity.ref_type/ref_id`, `graph_relation` 재생성+`is_option`, v3 프롬프트 행, spec 관계 2개).
 4. T3(사용자: DB 백업·`npm run build`·재시작), T4(사용자 지시 후 실서버 확인), T5(Gemini), T6(개발 서버) — 구현자가 먼저 하지 않는다.
