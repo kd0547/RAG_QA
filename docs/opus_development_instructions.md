@@ -9,7 +9,7 @@
 
 ## 0. 작업 규칙
 
-1. **범위**: 이 문서의 단계 A → B → C 순서로만 진행한다. D~G는 C가 Gemini 검증을 통과한 뒤 별도 지시로 시작한다. 지시에 없는 리팩터링·이름 변경·파일 이동은 하지 않는다.
+1. **범위**: 이 문서의 단계 A → B → C 순서로만 진행한다. D~H는 C가 Gemini 검증을 통과한 뒤 별도 지시로 시작한다. 지시에 없는 리팩터링·이름 변경·파일 이동은 하지 않는다.
 2. **커밋**: 각 항목(A1, A2, …) 시작 전에 작업 트리가 깨끗한지 확인하고, 항목 하나가 끝날 때마다 커밋 1개. 메시지는 저장소 관례 `feat(scope): 한국어 요약` / `fix(scope): …`. 끝에 `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`가 아니라 **구현 모델의 attribution**을 쓴다.
 3. **금지**
    - 메일을 실제로 보내지 않는다. `send_email`·승인 API는 테스트에서 대역(mock)으로만 호출한다.
@@ -315,7 +315,7 @@ CREATE TABLE IF NOT EXISTS evidence_use (
 
 ---
 
-## 6. 단계 D~G (개요, 별도 지시 예정)
+## 6. 단계 D~H (개요, 별도 지시 예정)
 
 | 단계 | 핵심 | 설계 참조 |
 |------|------|-----------|
@@ -323,6 +323,30 @@ CREATE TABLE IF NOT EXISTS evidence_use (
 | E | `get_product_specs`·`compare_specs`. `spec_attribute.inheritable` 플래그(기본 false), 자식 명시 값 우선, 기본/옵션 구분, 단위 정규화, `product_component` 연결 없는 부품 값 사용 금지. **제품 양식은 한 시트·공통 속성 유지**(노트북/데스크톱 분리·전용 속성 추가 금지) | total 8-2, 8-7, 11-7 |
 | F | deepagents backend 시제품: `EvidenceService` 위에 읽기 전용 `BackendProtocol` 구현, 같은 10문항으로 비교. 채택 전 설치 버전 고정 | total 11-2 |
 | G | `mails`에 `message_id, in_reply_to, references_` 컬럼, 발신 시 `Message-ID` 생성·`task_send`에 저장, `In-Reply-To`로 conversation 연결, `raw_body/new_body/quoted_body` 분리, 고객 메모리 테이블 | total 11-3, 4장 4단계 |
+| H | 그래프를 만들 때 제품·부품 사양 DB를 참조한다. 아래 6-1 참고. **A~C 범위가 아니다. 지금 구현하지 않는다** | 사용자 요청 2026-11-13 |
+
+### 6-1. 단계 H — 그래프 생성 시 사양 DB 참조 (나중 단계)
+
+배경: 지금 그래프의 제품·부품 개체는 문서에서 LLM이 뽑은 표기뿐이다(`graph_rag/extractor.py`는 `concepts`만 입력으로 받는다). 사양 DB(`product`, `component`, `product_component`)에는 정식 모델명과 상위·파생 관계가 있는데 그래프와 이어져 있지 않다. 그래서 같은 제품이 문서마다 다른 표기로 따로 잡히고, 그래프에서 찾은 제품을 사양 조회로 넘길 수 없다.
+
+할 일 (E가 끝난 뒤, 별도 지시가 있을 때)
+
+1. **사양 DB로 개체를 미리 심는다.** `seed_concepts`와 같은 방식으로 `GraphRepository.seed_specs()`를 만든다.
+   - `product.model`·`name` → `product` 개체와 별칭. `component.model`(+`vendor`) → `component` 개체.
+   - `product.parent_id` → 새 관계 `variant_of`(파생 → 상위). `graph_rag/types.py` `RELATION_TYPES`에 추가.
+   - `product_component` → `has_component`. 옵션 여부는 관계의 비고로 남긴다.
+   - 출처는 새 값 `origin='spec'`. 문서를 다시 뽑아도 유지되고, 사양 DB가 바뀌면 `spec` 출처만 지우고 다시 넣는다. 화면에서 지운 관계(`graph_relation_block`)는 되살리지 않는다.
+   - `graph_entity`에 `ref_type`(`product`|`component`), `ref_id` 컬럼을 `_migrate`로 추가해 사양 DB 행과 연결한다.
+2. **추출할 때 정식 이름에 맞춘다.** `extract_page_graph`에 알려진 제품·부품 목록을 `concepts`처럼 넘긴다. 부품이 많으므로(현재 123건) 그 페이지 텍스트에 문자열로 등장하는 후보만 추려서 넘긴다. 문서 표기가 정식 모델과 같은 대상이면 정식 이름의 개체에 붙이고 문서 표기는 별칭으로 남긴다. 사양 DB에 없는 제품(타사 모델 등)은 지금처럼 그대로 뽑는다.
+3. **검색 결과를 사양 조회로 잇는다.** `graph_search`의 `matched`에 `ref_type`·`ref_id`를 포함해 E의 `get_product_specs(product_id)`로 바로 넘길 수 있게 한다. 파생 모델을 물으면 `variant_of`로 상위 모델의 문서도 후보에 넣는다.
+
+지킬 것
+- 상위 모델의 인증을 파생 모델에 자동으로 적용하지 않는다. `variant_of`는 문서 후보를 넓힐 뿐이고, 적용 모델은 문서 근거로 확인한다.
+- `product_component`는 현재 0건이다. 연결 데이터는 도메인 입력이며 임의로 만들지 않는다.
+- A5의 토큰 규칙(`N5800`과 `N5800-GB70-PU02` 구분)이 심은 개체에도 그대로 통과해야 한다.
+- 제품 양식은 한 시트·공통 속성을 유지한다.
+
+완료 조건: 사양 DB에 등록된 제품을 다른 표기로 적은 문서 두 개가 같은 개체에 붙는다. 그래프 재추출 뒤에도 `spec` 출처 개체·관계가 남는다. `graph_search("N5800")` 결과에 `product_id`가 들어 있다.
 
 ---
 
