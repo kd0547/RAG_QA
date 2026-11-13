@@ -10,6 +10,15 @@ from mail.email_send import SendOutcome, SendResult
 SENT = SendResult(SendOutcome.SENT, "DATA 250")
 
 
+def join_notify_threads(timeout: float = 5) -> None:
+    """검토 알림은 별도 스레드(mail-notify)로 나간다. 테스트에서 결과를 보려면 끝날 때까지 기다린다."""
+    import threading
+
+    for thread in threading.enumerate():
+        if thread.name == "mail-notify":
+            thread.join(timeout)
+
+
 class OneShotStop:
     """루프를 한 주기만 돌게 하는 stop_event 대역."""
 
@@ -61,6 +70,7 @@ def consumer(monkeypatch):
     def run(task_repo, send_email):
         monkeypatch.setattr(email_service, "send_email", send_email)
         email_service.email_consumer_loop(OneShotStop(), email_repo, task_repo)
+        join_notify_threads()
 
     return run
 
@@ -114,3 +124,62 @@ def test_notification_rejected_by_server_keeps_drafted(consumer):
     run(repo, lambda *a, **k: SendResult(SendOutcome.FAILED, "RCPT 550"))
 
     assert repo.statuses == [TaskStatus.PROCESSING, TaskStatus.DRAFTED]
+
+
+class TwoTaskRepo(FakeTaskRepo):
+    """대기 작업 2건. 초안 저장 시각을 남긴다."""
+
+    def __init__(self):
+        super().__init__(TaskEntity(task_id="t1", mail_uid="m1"))
+        self.tasks = [TaskEntity(task_id="t1", mail_uid="m1"), TaskEntity(task_id="t2", mail_uid="m1")]
+        self.events: list[str] = []
+
+    def get_pending_tasks(self):
+        return list(self.tasks)
+
+    def save_draft(self, task_id, answer, sources=None, validation=None, applied_review_id=None):
+        self.events.append(f"save:{task_id}")
+        self.statuses.append(TaskStatus.DRAFTED)
+
+
+def test_slow_notification_does_not_delay_next_draft(consumer, monkeypatch):
+    """알림 발송이 멈춰도(대역 5초) 다음 작업의 초안 저장이 먼저 일어난다. 알림이 실패해도 두 작업 모두 drafted."""
+    import threading
+    import time
+
+    from mail import email_service
+
+    release = threading.Event()
+    calls: list[dict] = []
+    repo = TwoTaskRepo()
+
+    def hanging_send(*args, **kwargs):
+        calls.append(kwargs)
+        release.wait(5)
+        repo.events.append("notify-done")
+        return SendResult(SendOutcome.FAILED, "TLS 핸드셰이크 시간 초과")
+
+    monkeypatch.setattr(email_service, "send_email", hanging_send)
+    started = time.monotonic()
+    email_service.email_consumer_loop(OneShotStop(), SimpleNamespace(get_mail_by_id=lambda uid: MailEntity(
+        uid="m1", subject="제목", sender="c@example.com", body="질문")), repo)
+    loop_seconds = time.monotonic() - started
+
+    assert repo.events == ["save:t1", "save:t2"]  # 두 초안 모두 알림이 끝나기 전에 저장됐다
+    assert loop_seconds < 2  # 알림을 기다리지 않는다
+    release.set()
+    join_notify_threads()
+    assert repo.events == ["save:t1", "save:t2", "notify-done", "notify-done"]
+    assert all(kwargs["timeout"] == email_service.config.NOTIFY_SMTP_TIMEOUT_SECONDS for kwargs in calls)
+    assert repo.statuses.count(TaskStatus.DRAFTED) == 2 and TaskStatus.FAILED not in repo.statuses
+
+
+def test_notify_thread_is_daemon_named_mail_notify(monkeypatch):
+    from mail import email_service
+
+    monkeypatch.setattr(email_service, "send_email", lambda *a, **k: SENT)
+    thread = email_service.notify_reviewer_async(
+        "r@example.com", MailEntity(uid="m1", subject="s", sender="c@example.com", body="q"), "답", "t1")
+    thread.join(5)
+
+    assert thread.daemon is True and thread.name == "mail-notify"

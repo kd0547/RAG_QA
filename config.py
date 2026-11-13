@@ -50,6 +50,9 @@ PADDLEOCR_CACHE_DIR = _PROJECT_ROOT / os.getenv("PADDLEOCR_CACHE_DIR", "temp/pad
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://14.38.199.190:9092")
 # 검토 담당자 메일 주소
 REVIEWER_EMAIL = os.getenv("REVIEWER_EMAIL", "dongwook.kim@trigem.co.kr")
+# 검토 알림 메일의 SMTP 시간 제한(초). 알림은 별도 스레드라 처리 루프를 막지 않지만, 장애 때 스레드가 오래 남지 않게 짧게 둔다.
+# 승인 발송은 mail/email_send.py의 SMTP_TIMEOUT_SECONDS(60)를 쓴다.
+NOTIFY_SMTP_TIMEOUT_SECONDS = float(os.getenv("NOTIFY_SMTP_TIMEOUT_SECONDS", "20"))
 
 # ---------- 청킹 ----------
 DEFAULT_CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "2000"))

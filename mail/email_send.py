@@ -41,14 +41,16 @@ class SendResult:
 
 
 # 연결이 멈춰 sending 상태로 무한정 붙잡히지 않게 한다. 본문 전송 중 시간 초과는 UNKNOWN이 된다.
+# 승인 발송의 기본값. 검토 알림은 config.NOTIFY_SMTP_TIMEOUT_SECONDS로 더 짧게 준다.
 SMTP_TIMEOUT_SECONDS = 60
 
 
 def send_email(to_addr: str, subject: str, body: str, html: bool = False,
-               attachments: list[dict] | None = None) -> SendResult:
+               attachments: list[dict] | None = None, timeout: float | None = None) -> SendResult:
     """메일을 보내고 결과를 돌려준다. 예외를 던지지 않는다.
 
     attachments: [{"filename": 표시할 파일명, "path": 디스크 경로, "mime_type": 선택}]
+    timeout: SMTP 연결·응답 대기 시간(초). None이면 SMTP_TIMEOUT_SECONDS(60).
 
     결과는 서버가 메일을 수락했는지(DATA 뒤 250 응답)를 기준으로 나눈다.
     - 연결·로그인·MAIL·RCPT 단계 실패, DATA 거절 응답 → FAILED (서버가 받지 않았다)
@@ -61,7 +63,7 @@ def send_email(to_addr: str, subject: str, body: str, html: bool = False,
     try:
         msg = _build_message(to_addr, subject, body, html, attachments)
         payload = _flatten(msg)
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS)
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=timeout or SMTP_TIMEOUT_SECONDS)
         server.ehlo()
         server.starttls()   # TLS 암호화 시작
         server.ehlo()

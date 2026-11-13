@@ -160,3 +160,19 @@ def test_sent_payload_is_crlf_mime(smtp):
     assert instance.calls == ["ehlo", "starttls", "ehlo", "login", "mail", "rcpt", "data", "quit"]
     assert b"To: customer@example.com\r\n" in instance.payload
     assert b"Content-Type: multipart/mixed" in instance.payload
+
+
+def test_timeout_argument_is_passed_to_smtp(smtp, monkeypatch):
+    seen = []
+
+    class Recording(smtp):
+        def __init__(self, host, port, timeout=None):
+            seen.append(timeout)
+            super().__init__(host, port, timeout)
+
+    monkeypatch.setattr(email_send.smtplib, "SMTP", Recording)
+
+    email_send.send_email("a@example.com", "s", "b", timeout=20)
+    email_send.send_email("a@example.com", "s", "b")
+
+    assert seen == [20, email_send.SMTP_TIMEOUT_SECONDS]

@@ -41,6 +41,19 @@ def build_review_feedback(reject_reasons: list[str]) -> str | None:
     )
 
 
+def notify_reviewer_async(reviewer: str, mail: MailEntity, answer: str, task_id: str) -> threading.Thread:
+    """검토 알림을 별도 데몬 스레드(mail-notify)로 보낸다.
+
+    메일 서버 장애 때 알림 하나가 수십 초 걸려도 처리 루프의 다음 작업이 밀리지 않게 한다.
+    초안은 이미 저장된 뒤라 순서 문제가 없다. 서버 종료 때 기다리지 않는다 (데몬).
+    """
+    thread = threading.Thread(
+        name="mail-notify", target=_notify_reviewer, args=(reviewer, mail, answer, task_id), daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def _notify_reviewer(reviewer: str, mail: MailEntity, answer: str, task_id: str) -> None:
     """검토 담당자에게 초안 알림 메일을 보낸다. 실패는 로그만 남기고 상태는 바꾸지 않는다."""
     try:
@@ -54,6 +67,7 @@ def _notify_reviewer(reviewer: str, mail: MailEntity, answer: str, task_id: str)
                 base_url=config.PUBLIC_BASE_URL,
             ),
             html=True,
+            timeout=config.NOTIFY_SMTP_TIMEOUT_SECONDS,
         )
     except Exception:
         logger.exception("검토 알림 발송 실패(초안은 저장됨): task_id=%s, reviewer=%s", task_id, mask_email(reviewer))
@@ -184,8 +198,8 @@ def email_consumer_loop(stop_event: threading.Event,
                     task.task_id, mail.uid, dandang, len(answer), len(sources),
                 )
 
-                # 알림이 실패해도 초안은 drafted로 남는다 (담당자는 대시보드에서 볼 수 있다)
-                _notify_reviewer(dandang, mail, answer, task.task_id)
+                # 알림은 별도 스레드로 보낸다. 실패해도 초안은 drafted로 남는다 (담당자는 대시보드에서 볼 수 있다)
+                notify_reviewer_async(dandang, mail, answer, task.task_id)
 
             except Exception:
                 logger.exception("메일 처리 실패: task_id=%s, mail_uid=%s", task.task_id, task.mail_uid)
