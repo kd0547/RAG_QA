@@ -6,13 +6,13 @@ import re
 
 import config
 from graph_rag.types import (
-    ENTITY_TYPES, RELATION_ENDPOINT_TYPES, RELATION_TYPES, ExtractedEntity, PageGraph, normalize,
+    ENTITY_TYPES, NON_EXTRACT_RELATIONS, RELATION_ENDPOINT_TYPES, RELATION_TYPES, ExtractedEntity, PageGraph, normalize,
 )
 
 logger = logging.getLogger(__name__)
 
 _ENTITY_GUIDE = "\n".join(f"- {k}: {v}" for k, v in ENTITY_TYPES.items() if k != "concept")
-_RELATION_GUIDE = "\n".join(f"- {k}: {v}" for k, v in RELATION_TYPES.items() if k != "part_of")
+_RELATION_GUIDE = "\n".join(f"- {k}: {v}" for k, v in RELATION_TYPES.items() if k not in NON_EXTRACT_RELATIONS)
 
 EXTRACT_PROMPT = f"""당신은 사내 문서(제품 제안서, 세일즈 가이드, 인증서, 시험성적서)에서 검색용 지식 그래프를 만드는 추출기입니다.
 주어진 페이지에서 아래 종류의 개체와 관계만 뽑으세요.

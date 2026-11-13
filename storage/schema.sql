@@ -279,6 +279,10 @@ create table if not exists graph_entity (
     name       text not null,                  -- 처음 뽑힌 표기 (화면 표시용)
     norm       text not null,                  -- 비교용 정규화 키
     created_at text not null default current_timestamp,
+    -- 사양 DB의 같은 대상 (ref_type: 'product' | 'component', ref_id: product.id 또는 component.id). 없으면 NULL.
+    -- graph_search가 돌려주고 모델이 get_specs에 그대로 넘긴다. 기존 DB에는 repo_connect.py의 마이그레이션이 추가한다
+    ref_type   text,
+    ref_id     text,
     unique (type, norm)
 );
 CREATE INDEX IF NOT EXISTS idx_graph_entity_norm ON graph_entity(norm);
@@ -310,8 +314,11 @@ create table if not exists graph_relation (
     file_id    text references file(file_id) on delete cascade,  -- 근거 문서. seed와 근거 없이 넣은 manual은 NULL
     page       integer,
     -- extract: 문서에서 뽑음 (페이지를 다시 뽑으면 갈아끼운다) / seed: aliases.yaml / manual: 화면에서 사람이 넣음 (다시 뽑아도 유지)
-    -- 기존 DB에는 repo_connect.py의 마이그레이션이 이 컬럼을 추가한다
-    origin     text not null default 'extract' check (origin in ('extract', 'seed', 'manual')),
+    -- spec: 사양 DB에서 심음 (제품 상위·파생 모델, 제품-부품 연결. 서버 시작·사양 변경 때 spec 관계만 다시 넣는다)
+    -- 기존 DB에는 repo_connect.py의 마이그레이션이 이 컬럼을 추가하고, CHECK에 spec이 없으면 테이블을 새로 만들어 옮긴다
+    origin     text not null default 'extract' check (origin in ('extract', 'seed', 'manual', 'spec')),
+    -- spec 관계의 옵션 여부 (product_component.is_option). 다른 출처는 0
+    is_option  integer not null default 0 check (is_option in (0, 1)),
     created_at text not null default current_timestamp
 );
 -- file_id가 NULL인 행도 중복을 막도록 빈 문자열/-1로 바꿔 유일성을 건다

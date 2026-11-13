@@ -27,7 +27,10 @@ RELATION_TYPES: dict[str, str] = {
     "issued_by": "인증 종류 또는 번호 -> 발급·시험 기관",
     "complies_with": "제품 또는 인증 -> 규격·표준",
     "part_of": "인증 종류 -> 상위 개념. aliases.yaml에서만 만든다",
+    "variant_of": "파생 모델 -> 상위 모델. 사양 DB에서만 만든다 (LLM 추출 대상이 아니다)",
 }
+# LLM 추출에 쓰지 않는 관계 (aliases.yaml·사양 DB에서만 만든다)
+NON_EXTRACT_RELATIONS = frozenset({"part_of", "variant_of"})
 RelationType = Literal["has_component", "has_certification", "has_number", "issued_by", "complies_with"]
 
 # 관계 양 끝의 개체 종류. LLM이 관계에는 썼지만 entities에서 빠뜨린 이름을 채울 때 쓴다 (None이면 추론하지 않음)

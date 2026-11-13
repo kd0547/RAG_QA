@@ -20,6 +20,7 @@ export const RELATION_META: Record<RelationType, { label: string; hint: string }
     issued_by: { label: '발급 기관', hint: '인증·번호 → 기관' },
     complies_with: { label: '규격 준수', hint: '제품·인증 → 규격' },
     part_of: { label: '상위 개념', hint: '인증 종류 → 상위 개념' },
+    variant_of: { label: '상위 모델', hint: '파생 모델 → 상위 모델 (사양 DB)' },
 };
 
 export const RELATION_TYPES = Object.keys(RELATION_META) as RelationType[];
@@ -28,6 +29,7 @@ export const ORIGIN_META: Record<RelationOrigin, { label: string; className: str
     extract: { label: '문서 추출', className: 'border-line bg-white text-muted', stroke: '#B8C2CF' },
     seed: { label: '기본 개념', className: 'border-ink/15 bg-chip text-ink/70', stroke: '#8A96A8', dash: '5 4' },
     manual: { label: '담당자', className: 'border-brand/25 bg-brand-tint text-brand-hover', stroke: '#00A4E4' },
+    spec: { label: '사양 DB', className: 'border-[#7C5CFF]/25 bg-[#F3F0FF] text-[#5B3FD9]', stroke: '#7C5CFF', dash: '2 3' },
 };
 
 /** 노드 반지름: 관계가 많을수록 크게. 상위 개념은 항상 크게 */

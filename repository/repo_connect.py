@@ -47,6 +47,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if relation_columns and "origin" not in relation_columns:
         conn.execute("ALTER TABLE graph_relation ADD COLUMN origin TEXT NOT NULL DEFAULT 'extract'")
         conn.execute("UPDATE graph_relation SET origin = 'seed' WHERE file_id IS NULL")
+    _migrate_graph_relation_origin(conn)
+    # 그래프 개체가 가리키는 사양 DB 대상 (지시서 H1)
+    entity_columns = {row["name"] for row in conn.execute("PRAGMA table_info(graph_entity)")}
+    if entity_columns and "ref_type" not in entity_columns:
+        conn.execute("ALTER TABLE graph_entity ADD COLUMN ref_type TEXT")
+    if entity_columns and "ref_id" not in entity_columns:
+        conn.execute("ALTER TABLE graph_entity ADD COLUMN ref_id TEXT")
+    if entity_columns:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_graph_entity_ref ON graph_entity(ref_type, ref_id)")
     # 제품 초기 버전에는 상위 모델(parent_id)이 없었다
     product_columns = {row["name"] for row in conn.execute("PRAGMA table_info(product)")}
     if product_columns and "parent_id" not in product_columns:
@@ -111,6 +120,56 @@ def _migrate_task_reviews_action(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE task_reviews")
     conn.execute("ALTER TABLE task_reviews_new RENAME TO task_reviews")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_task_reviews_task_id ON task_reviews(task_id)")
+
+
+# graph_relation.origin에 허용하는 값 (schema.sql의 CHECK와 같아야 한다)
+GRAPH_RELATION_ORIGINS = ("extract", "seed", "manual", "spec")
+
+
+def _migrate_graph_relation_origin(conn: sqlite3.Connection) -> None:
+    """graph_relation.origin의 CHECK에 'spec'을 넣고 옵션 여부(is_option) 컬럼을 더한다 (지시서 H1).
+
+    SQLite는 CHECK 제약을 ALTER로 바꿀 수 없어서, 예전 제약을 가진 테이블은 새 테이블로 옮겨 만든다.
+    기존 행은 id·created_at까지 그대로 복사하고 인덱스(유일 인덱스 포함)를 다시 만든다.
+    옮기는 동안 외래키 검사를 끈다: 지금 있는 행을 바꾸지 않고 그대로 옮기는 것이 목적이라서다
+    (외래키를 켠 채 옮기면 예전에 남은 행 하나 때문에 서버 시작이 막힐 수 있다).
+    """
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'graph_relation'").fetchone()
+    if row is None or all(f"'{origin}'" in row["sql"] for origin in GRAPH_RELATION_ORIGINS):
+        return
+    conn.commit()  # 앞선 마이그레이션의 열린 트랜잭션을 닫아야 외래키 설정을 바꿀 수 있다
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN")
+        conn.execute("""
+            CREATE TABLE graph_relation_new (
+                id         integer primary key autoincrement,
+                src_id     integer not null references graph_entity(id) on delete cascade,
+                dst_id     integer not null references graph_entity(id) on delete cascade,
+                type       text not null,
+                file_id    text references file(file_id) on delete cascade,
+                page       integer,
+                origin     text not null default 'extract' check (origin in ('extract', 'seed', 'manual', 'spec')),
+                is_option  integer not null default 0 check (is_option in (0, 1)),
+                created_at text not null default current_timestamp
+            )
+        """)
+        conn.execute("""
+            INSERT INTO graph_relation_new (id, src_id, dst_id, type, file_id, page, origin, created_at)
+            SELECT id, src_id, dst_id, type, file_id, page, origin, created_at FROM graph_relation
+        """)
+        conn.execute("DROP TABLE graph_relation")
+        conn.execute("ALTER TABLE graph_relation_new RENAME TO graph_relation")
+        conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_relation_unique
+                        ON graph_relation(src_id, dst_id, type, ifnull(file_id, ''), ifnull(page, -1))""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_graph_relation_dst ON graph_relation(dst_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_graph_relation_file ON graph_relation(file_id, page)")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 class _Transaction:

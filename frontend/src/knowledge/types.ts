@@ -15,10 +15,11 @@ export type RelationType =
     | 'has_number'
     | 'issued_by'
     | 'complies_with'
-    | 'part_of';
+    | 'part_of'
+    | 'variant_of';
 
-/** extract: 문서에서 뽑음 · seed: aliases.yaml · manual: 사람이 넣음 (다시 뽑아도 유지) */
-export type RelationOrigin = 'extract' | 'seed' | 'manual';
+/** extract: 문서에서 뽑음 · seed: aliases.yaml · manual: 사람이 넣음 (다시 뽑아도 유지) · spec: 사양 DB에서 심음 */
+export type RelationOrigin = 'extract' | 'seed' | 'manual' | 'spec';
 
 export interface GraphNode {
     id: number;

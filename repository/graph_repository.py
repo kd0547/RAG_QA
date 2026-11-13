@@ -319,13 +319,20 @@ class GraphRepository:
             )
             # 관계는 끝점을 target으로 바꿔 복사한다. 합친 뒤 자기 자신을 가리키게 되는 관계는 버린다
             conn.execute(
-                """INSERT OR IGNORE INTO graph_relation (src_id, dst_id, type, file_id, page, origin, created_at)
+                """INSERT OR IGNORE INTO graph_relation (src_id, dst_id, type, file_id, page, origin, is_option, created_at)
                    SELECT CASE WHEN src_id = :s THEN :t ELSE src_id END,
                           CASE WHEN dst_id = :s THEN :t ELSE dst_id END,
-                          type, file_id, page, origin, created_at
+                          type, file_id, page, origin, is_option, created_at
                    FROM graph_relation
                    WHERE (src_id = :s OR dst_id = :s)
                      AND (CASE WHEN src_id = :s THEN :t ELSE src_id END) != (CASE WHEN dst_id = :s THEN :t ELSE dst_id END)""",
+                {"s": source_id, "t": target_id},
+            )
+            # 사양 DB 대상 표시는 target에 없을 때만 옮긴다 (target이 이미 다른 대상을 가리키면 그대로 둔다)
+            conn.execute(
+                """UPDATE graph_entity SET ref_type = (SELECT ref_type FROM graph_entity WHERE id = :s),
+                                           ref_id = (SELECT ref_id FROM graph_entity WHERE id = :s)
+                   WHERE id = :t AND ref_id IS NULL""",
                 {"s": source_id, "t": target_id},
             )
             conn.execute("DELETE FROM graph_entity WHERE id = ?", (source_id,))  # 별칭·등장·관계는 외래키로 같이 지워진다
@@ -680,10 +687,11 @@ def _upsert_entity(conn: sqlite3.Connection, entity_type: str, name: str) -> int
 
 
 def _prune_orphans(conn: sqlite3.Connection) -> int:
-    """어느 페이지에도 안 나오고 관계도 없는 개체를 지운다. 상위 개념(concept)은 남긴다."""
+    """어느 페이지에도 안 나오고 관계도 없는 개체를 지운다. 상위 개념(concept)과 사양 DB 대상을 가리키는 개체(ref_id)는 남긴다."""
     cur = conn.execute(
         """DELETE FROM graph_entity
            WHERE type != 'concept'
+             AND ref_id IS NULL
              AND NOT EXISTS (SELECT 1 FROM graph_mention m WHERE m.entity_id = graph_entity.id)
              AND NOT EXISTS (SELECT 1 FROM graph_relation r
                              WHERE r.src_id = graph_entity.id OR r.dst_id = graph_entity.id)"""
