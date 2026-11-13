@@ -81,6 +81,19 @@ AGENT_RECURSION_LIMIT = int(os.getenv("AGENT_RECURSION_LIMIT", "200"))
 # 웹 질문(/ask)의 근거·실행 기록 보관 기간(일). 서버 시작 때 이보다 오래된 것을 지운다 (메일 기록은 지우지 않는다)
 SESSION_EVIDENCE_RETENTION_DAYS = int(os.getenv("SESSION_EVIDENCE_RETENTION_DAYS", "14"))
 
+# ---------- 문의 분석과 절차 초안 (지시서 I, agent/request_analysis.py · agent/skill_author.py) ----------
+# 저장된 메일 문의를 답변 뒤에 따로 분석한다 (유형·맡는 절차). 0이면 분석 스레드가 아무것도 하지 않는다
+REQUEST_ANALYSIS_ENABLED = os.getenv("REQUEST_ANALYSIS_ENABLED", "1") not in ("0", "false", "False", "")
+# 분석 스레드 주기(초)와 한 주기에 분석하는 최대 건수. 대기·처리 중 메일이 있으면 그 주기는 쉰다
+REQUEST_ANALYSIS_INTERVAL_SECONDS = float(os.getenv("REQUEST_ANALYSIS_INTERVAL_SECONDS", "30"))
+REQUEST_ANALYSIS_BATCH = int(os.getenv("REQUEST_ANALYSIS_BATCH", "5"))
+# 분석·초안 생성 모델 호출 1회의 시간 제한(초)
+REQUEST_ANALYSIS_TIMEOUT_SECONDS = float(os.getenv("REQUEST_ANALYSIS_TIMEOUT_SECONDS", "120"))
+SKILL_DRAFT_TIMEOUT_SECONDS = float(os.getenv("SKILL_DRAFT_TIMEOUT_SECONDS", "300"))
+# 절차가 없는 유형의 분석이 이만큼 쌓이면 절차 초안을 자동으로 만든다 (한 유형에 한 번만. 승인은 R&D가 화면에서)
+SKILL_DRAFT_MIN_CASES = int(os.getenv("SKILL_DRAFT_MIN_CASES", "3"))
+SKILL_DRAFT_AUTO = os.getenv("SKILL_DRAFT_AUTO", "1") not in ("0", "false", "False", "")
+
 # ---------- 문서 그래프 (Graph RAG) ----------
 # 업로드·페이지 검수 저장 뒤 백그라운드로 개체·관계를 뽑을지 (0이면 끈다. /graph/rebuild로 따로 뽑을 수 있다)
 GRAPH_EXTRACT_ENABLED = os.getenv("GRAPH_EXTRACT_ENABLED", "1") not in ("0", "false", "False", "")

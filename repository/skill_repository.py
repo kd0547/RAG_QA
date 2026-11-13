@@ -28,6 +28,12 @@ DOC_ORIGINS = ("generated", "edited")
 # 생성 중 행의 임시 이름 머리 (NAME_PATTERN에 맞지 않아 절차 이름과 겹칠 수 없다)
 GENERATING_PREFIX = "_generating-"
 
+# 분석 대상 task 상태 (답변이 만들어진 것. 생성 실패 failed는 대상이 아니다)
+ANALYZABLE_STATUSES = ("drafted", "in_review", "sending", "sent", "send_failed", "send_unknown")
+ANALYSIS_STATUSES = ("ok", "error")
+# error 분석은 attempts가 이보다 작을 때만 다시 시도한다
+MAX_ANALYSIS_ATTEMPTS = 3
+
 LABEL_MAX = 30
 DESCRIPTION_MAX = 200
 
@@ -253,3 +259,77 @@ class SkillRepository:
                 (type_id, *(statuses or ())),
             ).fetchall()
         return [_doc(r) for r in rows]
+
+    # ------------------------------------------------------------ 문의 분석
+
+    def waiting_task_count(self) -> int:
+        """답변을 기다리거나 만드는 중인 메일 작업 수 (있으면 분석·초안 생성은 쉰다: 로컬 모델을 메일 초안이 먼저 쓴다)."""
+        with self.db.get_conn() as conn:
+            return conn.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('pending', 'processing')").fetchone()[0]
+
+    def tasks_to_analyze(self, limit: int, max_attempts: int = MAX_ANALYSIS_ATTEMPTS) -> list[str]:
+        """분석할 task: 답변이 만들어진 상태이고 분석이 없거나, error 분석이 max_attempts번 미만인 것. 최근 것부터."""
+        placeholders = ",".join("?" for _ in ANALYZABLE_STATUSES)
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT t.task_id FROM tasks t
+                LEFT JOIN request_analysis a ON a.task_id = t.task_id
+                WHERE t.status IN ({placeholders})
+                  AND (a.task_id IS NULL OR (a.status = 'error' AND a.attempts < ?))
+                ORDER BY t.created_at DESC, t.rowid DESC
+                LIMIT ?
+                """,
+                (*ANALYZABLE_STATUSES, max_attempts, limit),
+            ).fetchall()
+        return [r["task_id"] for r in rows]
+
+    def analysis_input(self, task_id: str) -> dict | None:
+        """분석 입력: 메일 제목·본문·첨부 파일명 (디스크 경로·이미지 데이터는 넣지 않는다)."""
+        with self.db.get_conn() as conn:
+            row = conn.execute(
+                """SELECT t.task_id, t.status, m.uid, m.subject, m.body, m.received_at
+                   FROM tasks t JOIN mails m ON m.uid = t.mail_uid WHERE t.task_id = ?""",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            files = conn.execute(
+                "SELECT filename FROM mail_attachments WHERE mail_uid = ? ORDER BY attachment_id", (row["uid"],),
+            ).fetchall()
+        data = dict(row)
+        data["attachments"] = [f["filename"] for f in files]
+        return data
+
+    def get_analysis(self, task_id: str) -> dict | None:
+        with self.db.get_conn() as conn:
+            row = conn.execute("SELECT * FROM request_analysis WHERE task_id = ?", (task_id,)).fetchone()
+        if row is None:
+            return None
+        analysis = dict(row)
+        analysis["used_skills"] = _loads(analysis.pop("used_skills_json", None), [])
+        return analysis
+
+    def save_analysis(
+        self, task_id: str, *, status: str, type_id: int | None = None, covered_by: str | None = None,
+        used_skills: list[str] | None = None, reason: str | None = None, model: str | None = None,
+        error: str | None = None,
+    ) -> dict:
+        """분석 결과를 덮어쓴다. 다시 분석할 때마다 attempts가 하나 는다."""
+        if status not in ANALYSIS_STATUSES:
+            raise ValueError(f"알 수 없는 분석 상태: {status}")
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO request_analysis (task_id, status, type_id, covered_by, used_skills_json, reason, model,
+                                              attempts, error, analyzed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                ON CONFLICT (task_id) DO UPDATE SET
+                    status = excluded.status, type_id = excluded.type_id, covered_by = excluded.covered_by,
+                    used_skills_json = excluded.used_skills_json, reason = excluded.reason, model = excluded.model,
+                    attempts = request_analysis.attempts + 1, error = excluded.error, analyzed_at = excluded.analyzed_at
+                """,
+                (task_id, status, type_id, covered_by, json.dumps(used_skills or [], ensure_ascii=False),
+                 reason, model, (error or None) and error[:2000], _now()),
+            )
+        return self.get_analysis(task_id)

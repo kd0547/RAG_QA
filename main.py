@@ -34,6 +34,7 @@ from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
 from agent.agent import ALIASES, get_agent, open_checkpointer, set_checkpointer
 from agent.skills import reload_skills
+from agent.request_analysis import start_analyzer
 from repository import db, email_repo, evidence_repo, graph_repo, group_repo, prompt_repo, skill_repo, task_repo
 from logging_config import setup_logging
 
@@ -149,16 +150,21 @@ async def lifespan(app: FastAPI):
 
     graph = get_agent()
     producer, consumer, stop_event = email_loop_build(email_repo, task_repo,db)
+    # 저장된 메일 문의를 답변 뒤에 따로 분석한다 (지시서 I3). 대기·처리 중 메일이 있으면 그 주기는 쉰다
+    analyzer, analyzer_stop = start_analyzer()
     logger.info("서버 준비 완료: reranker=%s", "사용" if reranker_ready else "미사용(로드 실패)")
     yield
 
     # 서버 종료 시 정리
     logger.info("서버 종료 시작: 메일 스레드 정지 요청")
     stop_event.set()
+    analyzer_stop.set()
     producer.join(timeout=5)
     consumer.join(timeout=5)
+    analyzer.join(timeout=5)
     # 답변 생성 중이던 스레드는 5초 안에 끝나지 않을 수 있다 (프로세스는 끝날 때까지 기다린다)
-    still_running = [t.name for t in (producer, consumer) if t.is_alive()]
+    # 분석 스레드는 데몬이라 모델 호출 중이어도 프로세스 종료를 막지 않는다 (호출에는 시간 제한이 있다)
+    still_running = [t.name for t in (producer, consumer, analyzer) if t.is_alive()]
     if still_running:
         logger.warning("종료 대기 시간 안에 끝나지 않은 스레드: %s", still_running)
     system_monitor.stop()
