@@ -372,7 +372,9 @@ CREATE TABLE IF NOT EXISTS run (
     model TEXT, prompt_id INTEGER, started_at TEXT NOT NULL, ended_at TEXT,
     status TEXT NOT NULL,                    -- 'running' | 'ok' | 'error' | 'limit'
     tool_calls_json TEXT, tokens_in INTEGER, tokens_out INTEGER, error TEXT,
-    label TEXT                               -- 실행 종류 ('메일(첨부 0건, 반려 없음)', '메일 반려 반영(…)' 등). 기존 DB는 마이그레이션이 추가
+    label TEXT,                              -- 실행 종류 ('메일(첨부 0건, 반려 없음)', '메일 반려 반영(…)' 등). 기존 DB는 마이그레이션이 추가
+    answer TEXT,                             -- 그 실행이 만든 답변 본문(근거 줄 제외). 메일(task)의 ok 실행만 저장. 기존 DB는 마이그레이션이 추가
+    skills_json TEXT                         -- 서버가 그 실행에 적용한 업무 절차 [{"name", "digest"}]. 기존 DB는 마이그레이션이 추가
 );
 CREATE INDEX IF NOT EXISTS idx_run_owner ON run(owner_type, owner_id);
 

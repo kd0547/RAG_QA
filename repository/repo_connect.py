@@ -64,6 +64,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     run_columns = {row["name"] for row in conn.execute("PRAGMA table_info(run)")}
     if run_columns and "label" not in run_columns:
         conn.execute("ALTER TABLE run ADD COLUMN label TEXT")
+    # 고객방이 반려 전후 초안을 모두 보여 주도록 실행별 답변 본문, 서버가 적용한 업무 절차
+    if run_columns and "answer" not in run_columns:
+        conn.execute("ALTER TABLE run ADD COLUMN answer TEXT")
+    if run_columns and "skills_json" not in run_columns:
+        conn.execute("ALTER TABLE run ADD COLUMN skills_json TEXT")
     # 근거 서비스 이후 출처가 '인용'인지 '읽기만'인지 구분한다
     source_columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_sources)")}
     if source_columns and "cited" not in source_columns:

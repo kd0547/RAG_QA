@@ -36,6 +36,18 @@ def _new_id(prefix: str, length: int = 8) -> str:
     return prefix + uuid.uuid4().hex[:length]
 
 
+def _skills(raw: str | None, run_id: str) -> list[dict]:
+    """run.skills_json → [{"name", "digest"}]. 비었거나 깨졌으면 빈 목록."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        logger.warning("실행 기록의 적용 절차 목록을 읽지 못함: run=%s", run_id)
+        return []
+    return value if isinstance(value, list) else []
+
+
 class EvidenceRepository:
 
     def __init__(self, db: Database):
@@ -224,8 +236,16 @@ class EvidenceRepository:
             )
         return run_id
 
+    def set_run_answer(self, run_id: str, answer: str) -> None:
+        """실행이 만든 답변 본문(근거 줄 제외)을 남긴다. 반려로 초안이 바뀌어도 이전 초안을 고객방에서 볼 수 있다."""
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE run SET answer = ? WHERE run_id = ?", (answer, run_id))
+
     def runs_for_owner(self, owner_type: str, owner_id: str) -> list[dict]:
-        """소유자의 실행 전체 (시작 시각 오름차순). tool_calls는 JSON을 풀어 목록으로, seconds는 걸린 시간."""
+        """소유자의 실행 전체 (시작 시각 오름차순). tool_calls는 JSON을 풀어 목록으로, seconds는 걸린 시간.
+
+        skills는 skills_json(서버가 적용한 업무 절차)을 푼 목록. answer는 저장된 답변 본문(없으면 None).
+        """
         with self.db.get_conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM run WHERE owner_type = ? AND owner_id = ? ORDER BY started_at, rowid",
@@ -239,6 +259,7 @@ class EvidenceRepository:
             except ValueError:
                 logger.warning("실행 기록의 도구 호출 목록을 읽지 못함: run=%s", run["run_id"])
                 run["tool_calls"] = []
+            run["skills"] = _skills(run.pop("skills_json", None), run["run_id"])
             seconds = None
             if run.get("ended_at"):
                 try:

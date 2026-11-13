@@ -296,6 +296,9 @@ def _finish_answer(result: dict, owner: Owner) -> dict:
     validation = validate_answer(result["run_id"], owner, result["answer"])
     if not validation.ok:
         logger.warning("답변 근거 검증 경고: run=%s, errors=%s", result["run_id"], validation.errors)
+    if owner.type == "task":
+        # 메일 초안만 실행별로 남긴다 (반려로 초안이 바뀌어도 고객방에서 이전 초안을 보인다). 웹 질문은 남기지 않는다
+        repository.evidence_repo.set_run_answer(result["run_id"], validation.answer)
     return {
         "answer": validation.answer,
         "sources": evidence_sources(result["run_id"], owner),
