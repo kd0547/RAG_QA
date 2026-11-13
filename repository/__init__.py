@@ -13,6 +13,7 @@ from repository.file_repository import FileRepository
 from repository.graph_repository import GraphRepository
 from repository.group_repository import GroupRepository
 from repository.repo_connect import Database
+from repository.skill_repository import SkillRepository
 from repository.spec_repository import SpecRepository
 from repository.email_repository import EmailRepository
 from repository.evidence_repository import EvidenceRepository
@@ -31,3 +32,4 @@ graph_repo = GraphRepository(db)
 access_log_repo = AccessLogRepository(db)
 evidence_repo = EvidenceRepository(db)
 customer_repo = CustomerRepository(db)
+skill_repo = SkillRepository(db)

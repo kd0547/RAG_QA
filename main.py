@@ -34,7 +34,7 @@ from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
 from agent.agent import ALIASES, get_agent, open_checkpointer, set_checkpointer
 from agent.skills import reload_skills
-from repository import db, email_repo, evidence_repo, graph_repo, group_repo, prompt_repo, task_repo
+from repository import db, email_repo, evidence_repo, graph_repo, group_repo, prompt_repo, skill_repo, task_repo
 from logging_config import setup_logging
 
 # uvicorn이 앱을 import할 때 한 번 실행된다. 이후 메일 스레드·라우터 로그가 logs/에 남는다.
@@ -97,6 +97,13 @@ async def lifespan(app: FastAPI):
     loaded_skills = reload_skills()
     logger.info("업무 절차 %d개: %s", len(loaded_skills),
                 ", ".join(f"{s.name}·{s.digest}" for s in loaded_skills.values()) or "없음")
+    # 문의 유형의 기본 유형(입찰 사양 대조·인증 자료 요청·단순 사실 조회)을 없을 때만 넣는다 (지시서 I2)
+    try:
+        seeded = skill_repo.ensure_seed_types()
+        if seeded:
+            logger.info("기본 문의 유형 %d개 등록", seeded)
+    except Exception:
+        logger.exception("기본 문의 유형 등록 실패")
 
     # 과거 자동 생성된 빈 그룹만 정리한다. 사용자가 이름·설명을 바꿨거나 파일을 넣은 그룹은 보존한다.
     try:

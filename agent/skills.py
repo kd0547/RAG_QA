@@ -175,20 +175,22 @@ def repo_skills() -> dict[str, Skill]:
 
 # ---------------------------------------------------------------- DB 승인본 (실행마다 조회)
 
-def _no_db_source() -> list[dict]:
-    return []
+def _repository_source() -> list[dict]:
+    """skill_doc의 사용 중 절차. 부를 때마다 repository.skill_repo를 찾는다 (테스트가 임시 DB로 바꿔 끼울 수 있게)."""
+    import repository
+    return repository.skill_repo.active_skill_docs()
 
 
-# 사용 중인 DB 절차 행 [{name, version, description, body}]을 돌려주는 함수. 저장소 계층이 붙는다 (set_db_source)
-_db_source: Callable[[], list[dict]] = _no_db_source
+# 사용 중인 DB 절차 행 [{name, version, description, body}]을 돌려주는 함수
+_db_source: Callable[[], list[dict]] = _repository_source
 # 같은 문제로 빠지는 DB 절차의 ERROR 로그를 실행마다 반복하지 않게 한다
 _reported: set[tuple] = set()
 
 
 def set_db_source(source: Callable[[], list[dict]] | None) -> None:
-    """DB 승인본을 읽는 함수를 바꾼다. None이면 DB 절차를 읽지 않는다 (테스트용)."""
+    """DB 승인본을 읽는 함수를 바꾼다 (테스트용). None이면 기본(skill_doc 조회)으로 돌린다."""
     global _db_source
-    _db_source = source or _no_db_source
+    _db_source = source or _repository_source
     _reported.clear()
 
 

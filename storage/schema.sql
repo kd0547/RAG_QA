@@ -385,3 +385,51 @@ CREATE TABLE IF NOT EXISTS evidence_use (
     at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_use_run ON evidence_use(run_id, action);
+
+
+-- ===== 문의 분석과 생성 절차 (지시서 I) =====
+-- request_type: 문의 유형. 기본 유형(seed, 서버 시작 때 없을 때만 넣는다)과 분석이 만든 유형(model)
+CREATE TABLE IF NOT EXISTS request_type (
+    type_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    label       TEXT NOT NULL,                  -- 짧은 이름 (30자 이하, 한 줄)
+    description TEXT NOT NULL,                  -- 어떤 문의인지 (200자 이하, 한 줄)
+    skill_name  TEXT,                           -- 이 유형을 맡는 절차. 없으면 NULL
+    state       TEXT NOT NULL DEFAULT 'open',   -- open | no_skill_needed | merged
+    merged_into INTEGER,                        -- state가 merged면 옮겨 간 유형
+    origin      TEXT NOT NULL,                  -- seed | model
+    created_at  TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+
+-- request_analysis: 문의(task) 1건의 분석 결과 (task 1 : 1. 다시 분석하면 덮어쓴다)
+CREATE TABLE IF NOT EXISTS request_analysis (
+    task_id          TEXT PRIMARY KEY,
+    status           TEXT NOT NULL,             -- ok | error
+    type_id          INTEGER,
+    covered_by       TEXT,                      -- 분석이 고른 절차 이름. 없으면 NULL
+    used_skills_json TEXT,                      -- 실제 실행이 쓴 절차 (서버 적용 + load_skill)
+    reason           TEXT,
+    model            TEXT, attempts INTEGER NOT NULL DEFAULT 1,
+    error            TEXT, analyzed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_request_analysis_type ON request_analysis(type_id);
+
+-- skill_doc: DB가 관리하는 절차. 버전마다 한 행이고 승인된 행은 바꾸지 않는다.
+-- 사용 중인 절차 = 이름마다 approved·retired 행 중 가장 큰 version이 approved인 것.
+-- 생성 중(generating) 행은 이름이 정해지기 전이라 '_generating-…' 임시 이름과 version 0을 쓴다.
+CREATE TABLE IF NOT EXISTS skill_doc (
+    doc_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name              TEXT NOT NULL,
+    version           INTEGER NOT NULL,
+    status            TEXT NOT NULL,            -- generating | draft | approved | rejected | retired | error
+    description       TEXT, body TEXT, digest TEXT,
+    type_id           INTEGER,
+    source_tasks_json TEXT,                     -- 초안의 재료가 된 task_id 목록
+    origin            TEXT NOT NULL,            -- generated | edited
+    check_json        TEXT,                     -- 서버 검사 결과 {ok, errors, warnings}
+    model             TEXT, error TEXT,
+    created_at        TEXT NOT NULL,
+    reviewed_at       TEXT, reviewed_by TEXT, review_note TEXT,
+    UNIQUE (name, version)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_doc_type ON skill_doc(type_id, status);
+CREATE INDEX IF NOT EXISTS idx_skill_doc_status ON skill_doc(status);
