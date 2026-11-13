@@ -161,6 +161,32 @@ class EvidenceRepository:
             result.append(dict(row))
         return result
 
+    def uses_for_owner(self, owner_type: str, owner_id: str, action: str) -> list[dict]:
+        """소유자의 모든 실행에서 쓴 근거 (처음 쓴 순서, 근거마다 한 번).
+
+        메일은 소유자 = 대화(task:{task_id})라서, 반려 후 재작성 실행이 1차에서 읽은 근거를 다시 읽지 않고 인용할 수 있다.
+        """
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {_EVIDENCE_COLUMNS}, u.action, u.at
+                FROM evidence_use u
+                JOIN run r ON r.run_id = u.run_id
+                JOIN evidence e ON e.evidence_id = u.evidence_id
+                WHERE r.owner_type = ? AND r.owner_id = ? AND u.action = ?
+                ORDER BY u.rowid
+                """,
+                (owner_type, owner_id, action),
+            ).fetchall()
+        seen: set[str] = set()
+        result = []
+        for row in rows:
+            if row["evidence_id"] in seen:
+                continue
+            seen.add(row["evidence_id"])
+            result.append(dict(row))
+        return result
+
     # ------------------------------------------------------------ 실행
 
     def start_run(self, owner_type: str, owner_id: str, model: str | None, prompt_id: int | None) -> str:

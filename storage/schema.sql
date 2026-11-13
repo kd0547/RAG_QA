@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     draft_answer TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    last_review_id INTEGER,            -- 초안에 이미 반영한 마지막 반려(task_reviews.review_id). 기존 DB는 마이그레이션이 추가
     validation_json TEXT,              -- 초안의 근거 검증 결과 {ok, errors, warnings, cited_ids} (기존 DB는 마이그레이션이 추가)
     FOREIGN KEY (mail_uid) REFERENCES mails(uid)
 );

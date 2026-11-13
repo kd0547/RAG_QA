@@ -38,13 +38,13 @@ class FakeTaskRepo:
         self.calls.append(("update_status", status))
         self.statuses.append(status)
 
-    def get_reject_reasons(self, task_id):
+    def unapplied_reject_reasons(self, task_id):
         return []
 
     def assign_task(self, task_id, assignee):
         self.calls.append(("assign_task", assignee))
 
-    def save_draft(self, task_id, answer, sources=None, validation=None):
+    def save_draft(self, task_id, answer, sources=None, validation=None, applied_review_id=None):
         self.calls.append(("save_draft", answer))
         if self.fail_save:
             raise RuntimeError("DB 잠김")

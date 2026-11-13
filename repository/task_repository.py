@@ -127,10 +127,12 @@ class TaskRepository:
 
     def save_draft(
         self, task_id: str, answer: str, sources: list[dict] | None = None, validation: dict | None = None,
+        applied_review_id: int | None = None,
     ) -> None:
         """초안과 참조 문서·근거 검증 결과를 한 트랜잭션으로 저장한다. sources가 None이면 출처는 건드리지 않는다.
 
         검증 오류가 있어도 상태는 drafted다 (검토 화면이 경고로 보여 준다).
+        applied_review_id: 이 초안에 반영한 마지막 반려. 주면 같은 트랜잭션에서 last_review_id로 남긴다.
         """
         with self.db.transaction() as conn:
             conn.execute(
@@ -138,6 +140,8 @@ class TaskRepository:
                 (answer, TaskStatus.DRAFTED.value, datetime.now().isoformat(),
                  json.dumps(validation, ensure_ascii=False) if validation is not None else None, task_id),
             )
+            if applied_review_id is not None:
+                conn.execute("UPDATE tasks SET last_review_id = ? WHERE task_id = ?", (applied_review_id, task_id))
             if sources is not None:
                 self._replace_sources(task_id, sources, conn)
 
@@ -288,6 +292,20 @@ class TaskRepository:
                 (task_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def unapplied_reject_reasons(self, task_id: str) -> list[tuple[int, str]]:
+        """아직 초안에 반영하지 않은 재작성 요청(requeue) 반려 [(review_id, 사유)] (오래된 순)."""
+        with self.db.lock, self.db.get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.review_id, r.reason FROM task_reviews r JOIN tasks t ON t.task_id = r.task_id
+                WHERE r.task_id = ? AND r.action = 'reject' AND r.requeue = 1 AND r.reason IS NOT NULL
+                  AND r.review_id > COALESCE(t.last_review_id, 0)
+                ORDER BY r.review_id
+                """,
+                (task_id,),
+            ).fetchall()
+        return [(row["review_id"], row["reason"]) for row in rows]
 
     def get_reject_reasons(self, task_id: str) -> list[str]:
         """재작성 요청(requeue)으로 반려된 사유를 오래된 순으로 돌려준다."""

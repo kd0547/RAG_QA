@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from langchain.agents import create_agent
 from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.errors import GraphRecursionError
 from dotenv import load_dotenv
@@ -188,32 +189,49 @@ def run_agent_temp_attachments(
         question: str,
         mode: Literal["claude", "local"] = "claude",
         attachments: list[Attachment] | None = None,
-        review_feedback: str | None = None,
+        review: tuple[int, str] | None = None,
         *,
         owner: Owner | None = None,
         thread_id: str | None = None,
 ) -> dict:
-    """첨부가 있는 질문. 메일은 owner=Owner("task", task_id)·thread_id="task:{task_id}", /ask/attachments는 새 세션·새 대화."""
+    """첨부가 있는 질문. 메일은 owner=Owner("task", task_id)·thread_id="task:{task_id}", /ask/attachments는 새 세션·새 대화.
+
+    review: 아직 반영하지 않은 담당자 반려 (가장 큰 review_id, 반려 안내문). 메일만 쓴다.
+    - 대화 기록이 있으면: 같은 대화에 반려 안내문만 새 user 메시지로 넣는다 (이전 초안·읽은 근거는 대화에 있다)
+    - 대화 기록이 없으면(마이그레이션 전 task): 첫 실행처럼 질문·첨부를 넣고 반려 안내문을 두 번째 user 메시지로
+    - 반려 없이 대화 기록만 있으면(생성 중 서버 재시작): 새 메시지 없이 마지막 checkpoint에서 이어 간다
+    메시지 ID를 대화·review_id로 고정해, 같은 반려를 두 번 처리해도 메시지가 한 번만 들어간다.
+    """
     agent = get_agent(mode)
+    thread_id = thread_id or new_ask_thread_id()
+    has_history = bool(_message_ids(agent, {"configurable": {"thread_id": thread_id}}))
 
     with owner_scope(owner or new_session_owner()) as current:
-        # 첨부 본문은 메시지에 넣지 않는다. 안내 한 줄만 넣고 모델이 read_attachment로 필요한 페이지를 읽는다.
-        content: list[dict] = [{"type": "text", "text": question}]
         preread: list[str] = []
-        for index, attachment in enumerate(attachments or [], start=1):
-            content.extend(_attachment_to_blocks(attachment, index, preread))
+        if has_history and review:
+            messages = [_review_message(thread_id, review)]
+            label = f"메일 반려 반영(review_id={review[0]}, 같은 대화)"
+        elif has_history:
+            messages = None
+            label = "메일 이어서 실행(대화 기록에서 재개)"
+        else:
+            # 첨부 본문은 메시지에 넣지 않는다. 안내 한 줄만 넣고 모델이 read_attachment로 필요한 페이지를 읽는다.
+            content: list[dict] = [{"type": "text", "text": question}]
+            for index, attachment in enumerate(attachments or [], start=1):
+                content.extend(_attachment_to_blocks(attachment, index, preread))
+            messages = [HumanMessage(content=content, id=f"question:{thread_id}")]
+            if review:
+                messages.append(_review_message(thread_id, review))
+            label = f"메일(첨부 {len(attachments or [])}건, 반려 {'있음, 대화 기록 없음' if review else '없음'})"
 
-        # 담당자 반려 피드백은 질문과 섞이지 않도록 별도 블록으로 붙인다.
-        if review_feedback:
-            content.append({"type": "text", "text": review_feedback})
-
-        result = _invoke_logged(
-            agent, [{"role": "user", "content": content}], mode,
-            label=f"메일(첨부 {len(attachments or [])}건, 반려피드백 {'있음' if review_feedback else '없음'})",
-            preread=preread,
-            thread_id=thread_id or new_ask_thread_id(),
-        )
+        result = _invoke_logged(agent, messages, mode, label=label, preread=preread, thread_id=thread_id)
         return _finish_answer(result, current)
+
+
+def _review_message(thread_id: str, review: tuple[int, str]) -> HumanMessage:
+    """반려 안내 user 메시지. ID가 같으면 대화 기록에서 덮어써져 두 번 쌓이지 않는다."""
+    review_id, text = review
+    return HumanMessage(content=text, id=f"review:{thread_id}:{review_id}")
 
 
 def _finish_answer(result: dict, owner: Owner) -> dict:
@@ -223,7 +241,7 @@ def _finish_answer(result: dict, owner: Owner) -> dict:
         logger.warning("답변 근거 검증 경고: run=%s, errors=%s", result["run_id"], validation.errors)
     return {
         "answer": validation.answer,
-        "sources": evidence_sources(result["run_id"]),
+        "sources": evidence_sources(result["run_id"], owner),
         "run_id": result["run_id"],
         "validation": validation.to_dict(),
     }
@@ -434,13 +452,17 @@ def _attachment_to_blocks(attachment: Attachment, index: int, preread: list[str]
 SOURCE_TEXT_CHARS = 500
 
 
-def evidence_sources(run_id: str) -> list[dict]:
+def evidence_sources(run_id: str, owner: Owner | None = None) -> list[dict]:
     """실행의 출처 목록. 답변이 인용한 근거(cite)가 있으면 그것만, 없으면 이번 실행에서 읽은 근거(read).
 
+    반려 후 재작성처럼 이번 실행에서 새로 읽은 것이 없으면 같은 소유자(같은 메일의 대화)에서 읽은 근거를 쓴다.
     검색 결과(청크)는 읽은 것이 아니므로 들어가지 않는다. 그래프 검색 결과도 근거가 아니다.
     """
-    cited = repository.evidence_repo.uses_for_run(run_id, "cite")
-    used = cited or repository.evidence_repo.uses_for_run(run_id, "read")
+    evidence_repo = repository.evidence_repo
+    cited = evidence_repo.uses_for_run(run_id, "cite")
+    used = cited or evidence_repo.uses_for_run(run_id, "read")
+    if not used and owner is not None:
+        used = evidence_repo.uses_for_owner(owner.type, owner.id, "read")
     return [
         {
             "evidence_id": e["evidence_id"],

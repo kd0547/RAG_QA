@@ -68,7 +68,7 @@ def test_valid_citation_is_recorded(agent_env, run_with_read):
 
     assert result.ok is True
     assert result.cited_ids == [mine, unread]
-    assert result.warnings == ["근거 ID 형식이 아님: 3페이지", f"이번 실행에서 읽지 않은 근거 인용: {unread}"]
+    assert result.warnings == ["근거 ID 형식이 아님: 3페이지", f"이 질문에서 읽지 않은 근거 인용: {unread}"]
     assert [u["evidence_id"] for u in agent_env.evidence_repo.uses_for_run(run_id, "cite")] == [mine, unread]
 
 

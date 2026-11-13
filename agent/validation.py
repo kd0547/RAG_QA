@@ -5,8 +5,11 @@
 
 - errors: 저장은 하되 검토 화면에 경고로 보인다. (상태는 그대로 drafted. "검증 완료" 같은 표시는 하지 않는다)
   1) 다른 소유자(다른 메일·세션)의 근거이거나 없는 ID를 인용
-  2) '근거: 없음'이 아닌데 이번 실행에서 아무것도 읽지 않음
-- warnings: 근거 줄 없음, 이번 실행에서 읽지 않은 근거 인용, ID 형식이 아닌 항목
+  2) '근거: 없음'이 아닌데 이 질문(같은 대화의 실행들)에서 아무것도 읽지 않음
+- warnings: 근거 줄 없음, 이 질문에서 읽지 않은 근거 인용, ID 형식이 아닌 항목
+
+'읽음'은 같은 소유자(메일 = 같은 대화)의 모든 실행에서 읽은 것을 센다. 반려 후 재작성은 1차에서 읽은 근거를
+다시 읽지 않고 인용하기 때문이다 (단계 C3). /ask는 호출마다 소유자가 새로 생겨 '이번 실행'과 같다.
 """
 from __future__ import annotations
 
@@ -83,9 +86,10 @@ def validate_answer(run_id: str, owner: Owner, answer: str) -> ValidationResult:
             errors.append(f"이 질문의 근거가 아닌 ID 인용: {evidence_id}")
 
     read_ids = {u["evidence_id"] for u in evidence_repo.uses_for_run(run_id, "read")}
+    read_ids |= {u["evidence_id"] for u in evidence_repo.uses_for_owner(owner.type, owner.id, "read")}
     for evidence_id in cited:
         if evidence_id not in read_ids:
-            warnings.append(f"이번 실행에서 읽지 않은 근거 인용: {evidence_id}")
+            warnings.append(f"이 질문에서 읽지 않은 근거 인용: {evidence_id}")
     if not declared_none and not read_ids:
         errors.append("근거를 읽지 않고 답변")
 

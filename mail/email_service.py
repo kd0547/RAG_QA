@@ -25,22 +25,20 @@ def intake_mail(mail: MailEntity, db: Database, email_repo: EmailRepository, tas
         email_repo.save_pending(mail, conn)
         task_repo.create_task(mail.uid, conn)
 
-def build_review_feedback(previous_draft: str, reject_reasons: list[str]) -> str | None:
-    """반려된 이전 초안과 사유를 에이전트에게 줄 안내문으로 만든다. 반려 이력이 없으면 None."""
+def build_review_feedback(reject_reasons: list[str]) -> str | None:
+    """반려 사유를 같은 대화의 다음 user 메시지로 만든다. 반려가 없으면 None.
+
+    이전 초안은 넣지 않는다 (같은 대화에 이미 있다).
+    """
     if not reject_reasons:
         return None
-
     reasons = "\n".join(f"- {reason}" for reason in reject_reasons)
-    feedback = (
-        "[검토 담당자 피드백]\n"
-        "이전에 작성한 답변 초안이 담당자 검토에서 반려되었습니다. "
-        "아래 반려 사유를 반영해 답변을 새로 작성하세요. "
-        "이 피드백은 질문이 아니므로 문서 검색어로 사용하지 말고, 답변 본문에서 언급하지 마세요.\n\n"
-        f"반려 사유 (오래된 순):\n{reasons}"
+    return (
+        "[검토 담당자 반려]\n"
+        f"{reasons}\n\n"
+        "위 사유를 반영해 답변을 다시 작성하세요. 이 메시지는 질문이 아니므로 검색어로 쓰지 말고 답변 본문에서 언급하지 마세요. "
+        "이미 읽은 근거는 evidence_id로 다시 인용할 수 있습니다."
     )
-    if previous_draft and previous_draft.strip():
-        feedback += f"\n\n반려된 이전 초안:\n<previous_draft>\n{previous_draft.strip()}\n</previous_draft>"
-    return feedback
 
 
 def _notify_reviewer(reviewer: str, mail: MailEntity, answer: str, task_id: str) -> None:
@@ -147,12 +145,14 @@ def email_consumer_loop(stop_event: threading.Event,
                     continue
 
 
-                #반려 후 재생성이면 담당자 피드백을 함께 넘김
-                reject_reasons = task_repo.get_reject_reasons(task.task_id)
-                if reject_reasons:
+                #반려 후 재생성이면 아직 반영하지 않은 반려만 같은 대화의 다음 턴으로 넘김
+                unapplied = task_repo.unapplied_reject_reasons(task.task_id)
+                review = None
+                if unapplied:
+                    review = (unapplied[-1][0], build_review_feedback([reason for _, reason in unapplied]))
                     logger.info(
-                        "반려 피드백 반영해 재생성: task_id=%s, uid=%s, 반려 %d회",
-                        task.task_id, mail.uid, len(reject_reasons),
+                        "반려 반영해 재생성: task_id=%s, uid=%s, 미반영 반려 %d건, review_id=%s",
+                        task.task_id, mail.uid, len(unapplied), review[0],
                     )
 
                 #답변 생성하기
@@ -160,7 +160,7 @@ def email_consumer_loop(stop_event: threading.Event,
                     body,
                     mode="local",
                     attachments=mail.attachments,
-                    review_feedback=build_review_feedback(task.draft_answer, reject_reasons),
+                    review=review,
                     owner=Owner("task", task.task_id),
                     thread_id=task_thread_id(task.task_id),
                 )
@@ -173,7 +173,10 @@ def email_consumer_loop(stop_event: threading.Event,
 
                 # 초안을 먼저 저장한다. 알림 메일의 링크를 누르는 시점에 초안이 DB에 있어야 한다.
                 validation = result.get("validation")
-                task_repo.save_draft(task.task_id, answer, sources, validation=validation)
+                task_repo.save_draft(
+                    task.task_id, answer, sources, validation=validation,
+                    applied_review_id=review[0] if review else None,
+                )
                 if validation and not validation.get("ok", True):
                     logger.warning("초안 근거 검증 경고: task_id=%s, %s", task.task_id, validation.get("errors"))
                 logger.info(
