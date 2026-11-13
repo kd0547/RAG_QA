@@ -174,9 +174,13 @@ class GraphRepository:
             "component": [{"name": c["model"], "kind": c["kind"]} for c in components],
         }
 
-    def replace_page(self, file_id: str, page: int, graph: PageGraph) -> dict:
-        """한 페이지에서 뽑은 개체·관계로 그 페이지의 그래프를 갈아끼운다. 사람이 넣은 관계는 그대로 둔다."""
+    def replace_page(self, file_id: str, page: int, graph: PageGraph, link_specs: bool = False) -> dict:
+        """한 페이지에서 뽑은 개체·관계로 그 페이지의 그래프를 갈아끼운다. 사람이 넣은 관계는 그대로 둔다.
+
+        link_specs: 제품·부품 개체의 이름(또는 별칭)이 사양 DB의 모델명과 같으면 ref_type·ref_id를 단다 (지시서 H3).
+        """
         with self.db.transaction() as conn:
+            spec_refs = _spec_ref_map(conn) if link_specs else {}
             conn.execute("DELETE FROM graph_mention WHERE file_id = ? AND page = ?", (file_id, page))
             conn.execute(
                 "DELETE FROM graph_relation WHERE file_id = ? AND page = ? AND origin = 'extract'", (file_id, page)
@@ -191,6 +195,12 @@ class GraphRepository:
                     continue
                 entity_ids.add(entity_id)
                 ids_by_norm.setdefault(normalize(entity.name), entity_id)
+                if spec_refs and entity.type in ("product", "component"):
+                    ref = next((spec_refs[(entity.type, normalize(n))] for n in [entity.name, *entity.aliases]
+                                if (entity.type, normalize(n)) in spec_refs), None)
+                    if ref is not None:
+                        conn.execute("UPDATE graph_entity SET ref_type = ?, ref_id = ? WHERE id = ? AND ref_id IS NULL",
+                                     (entity.type, ref, entity_id))
                 if entity.concept:
                     # 추출기가 고른 상위 개념. 이 페이지에서 나온 연결이라 페이지를 다시 뽑으면 같이 바뀐다
                     concept = conn.execute(
@@ -773,6 +783,18 @@ def _add_alias(conn: sqlite3.Connection, entity_id: int, alias: str) -> None:
         conn.execute(
             "INSERT OR IGNORE INTO graph_alias (entity_id, alias, alias_norm) VALUES (?, ?, ?)", (entity_id, alias, alias_norm)
         )
+
+
+def _spec_ref_map(conn: sqlite3.Connection) -> dict[tuple[str, str], str]:
+    """{(개체 종류, 정규화 모델명): 사양 DB id}. 정규화가 겹치면 먼저 나온 것."""
+    refs: dict[tuple[str, str], str] = {}
+    for row in conn.execute("SELECT id, model FROM product ORDER BY model"):
+        refs.setdefault(("product", normalize(row["model"])), row["id"])
+    for row in conn.execute("SELECT id, model FROM component ORDER BY kind, model"):
+        refs.setdefault(("component", normalize(row["model"])), row["id"])
+    refs.pop(("product", ""), None)
+    refs.pop(("component", ""), None)
+    return refs
 
 
 def _link_spec_entity(conn: sqlite3.Connection, entity_type: str, name: str, ref_type: str, ref_id: str) -> int | None:

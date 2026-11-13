@@ -261,3 +261,102 @@ def test_router_changes_reseed_and_flag_off_skips(g, monkeypatch):
     monkeypatch.setattr(config, "GRAPH_SPEC_SEED_ENABLED", False)
     client.delete(f"/specs/products/{g.n5800['id']}/components/{g.unlinked['id']}")
     assert ("N5800", "has_component", "WD SN770 1TB", "spec", 0) in _relations(g.db)  # 꺼져 있으면 다시 심지 않는다
+
+
+# ---------------------------------------------------------------- H3 추출할 때 정식 이름
+
+class FakeLLM:
+    """페이지 텍스트에 따라 정해 둔 PageGraph를 돌려준다. 받은 메시지를 모은다."""
+
+    def __init__(self, graphs: dict[str, PageGraph]):
+        self.graphs = graphs
+        self.calls = []
+
+    def with_structured_output(self, schema):
+        return self
+
+    def invoke(self, messages):
+        self.calls.append(messages)
+        text = messages[-1]["content"]
+        return next(g for key, g in self.graphs.items() if key in text).model_copy(deep=True)
+
+
+def _use_fake(monkeypatch, llm):
+    def fake(text, concepts=None, **kwargs):
+        return extractor.extract_page_graph(text, llm=llm, concepts=concepts, **kwargs)
+
+    monkeypatch.setattr(service, "extract_page_graph", fake)
+
+
+def _mentions(db, name):
+    with db.get_conn() as conn:
+        return sorted(r[0] for r in conn.execute(
+            """select f.original_name from graph_mention m join graph_entity e on e.id = m.entity_id
+               join file f on f.file_id = m.file_id where e.name = ?""", (name,)))
+
+
+def test_two_documents_with_different_notations_attach_to_one_entity(g, monkeypatch):
+    g.graph.seed_specs()
+    llm = FakeLLM({
+        "A650 Pro": PageGraph(entities=[ExtractedEntity(type="product", name="A650-GA70-PU02", aliases=["A650 Pro"])]),
+        "A650-GA70-PU02 KC": PageGraph(entities=[ExtractedEntity(type="product", name="A650-GA70-PU02")]),
+    })
+    _use_fake(monkeypatch, llm)
+    first = g.add_file("proposal.pdf", ["A650 Pro 모델 사양서"])
+    second = g.add_file("cert.pdf", ["A650-GA70-PU02 KC 안전확인"])
+
+    service.index_file(first)
+    service.index_file(second)
+
+    entities = _entities(g.db)
+    assert "A650 Pro" not in entities
+    assert entities["A650-GA70-PU02"]["ref_id"] == g.child["id"]
+    assert _mentions(g.db, "A650-GA70-PU02") == ["cert.pdf", "proposal.pdf"]
+    system = llm.calls[0][0]["content"]
+    assert "## 사양 DB의 정식 이름" in system and "목록의 이름을 name으로 쓰고 문서 표기는 aliases에 넣는다" in system
+    assert "- product(제품): N5800 (다른 표기: N5800 14세대 노트북)" in system
+    assert "다른 표기: Pro" not in system
+
+
+def test_components_on_page_get_ref_and_others_not_listed(g, monkeypatch):
+    llm = FakeLLM({"SN770": PageGraph(entities=[
+        ExtractedEntity(type="component", name="WD SN770 1TB"),
+        ExtractedEntity(type="product", name="Galaxy Book4"),  # 사양 DB에 없는 타사 모델
+    ])})
+    _use_fake(monkeypatch, llm)
+    file_id = g.add_file("ssd.pdf", ["SSD: WD SN770 1TB, 비교 대상 Galaxy Book4"])
+
+    service.index_file(file_id)
+
+    entities = _entities(g.db)
+    assert entities["WD SN770 1TB"]["ref_type"] == "component" and entities["WD SN770 1TB"]["ref_id"] == g.unlinked["id"]
+    assert entities["Galaxy Book4"]["ref_id"] is None
+    system = llm.calls[0][0]["content"]
+    assert "- component(부품): WD SN770 1TB" in system
+    assert "Samsung 980 500GB" not in system  # 그 페이지에 없는 부품은 넘기지 않는다
+
+
+def test_keep_grounded_needs_name_or_alias_of_known_name():
+    graph = PageGraph(entities=[
+        ExtractedEntity(type="product", name="A650-GA70-PU02", aliases=["A650 Pro"]),   # 정식 이름, 별칭이 페이지에
+        ExtractedEntity(type="product", name="N5800", aliases=["엔5800"]),               # 정식 이름, 별칭도 페이지에 없음
+        ExtractedEntity(type="product", name="Z9999", aliases=["A650 Pro"]),            # 정식 이름이 아님
+    ])
+    kept = extractor._keep_grounded(graph, "A650 Pro 모델", {"a650ga70pu02", "n5800"})
+    assert [(e.name, e.aliases) for e in kept.entities] == [("A650-GA70-PU02", ["A650 Pro"])]
+    # 정식 이름 목록이 없으면 예전처럼 이름이 페이지에 있어야 한다
+    assert extractor._keep_grounded(PageGraph(entities=[
+        ExtractedEntity(type="product", name="A650-GA70-PU02", aliases=["A650 Pro"])]), "A650 Pro 모델").entities == []
+
+
+def test_flag_off_keeps_old_prompt_and_no_refs(g, monkeypatch):
+    monkeypatch.setattr(config, "GRAPH_SPEC_SEED_ENABLED", False)
+    llm = FakeLLM({"N5800": PageGraph(entities=[ExtractedEntity(type="product", name="N5800")])})
+    _use_fake(monkeypatch, llm)
+    file_id = g.add_file("n5800.pdf", ["N5800 무게"])
+
+    service.index_file(file_id)
+
+    assert llm.calls[0][0]["content"] == extractor._system_prompt([])  # 예전 프롬프트 그대로 (상위 개념 없음)
+    assert "사양 DB" not in llm.calls[0][0]["content"]
+    assert _entities(g.db)["N5800"]["ref_id"] is None

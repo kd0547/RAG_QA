@@ -5,7 +5,9 @@ import logging
 import time
 from collections import defaultdict
 
+import config
 from graph_rag.extractor import extract_page_graph
+from graph_rag.types import normalize
 from repository import file_repo, graph_repo, page_repo
 
 logger = logging.getLogger(__name__)
@@ -16,11 +18,50 @@ MAX_RELATIONS = 30
 
 # ------------------------------------------------------------ 만들기
 
+def spec_names() -> dict | None:
+    """사양 DB의 정식 이름 (설정이 꺼져 있으면 None). 파일 하나를 뽑는 동안 한 번만 읽는다."""
+    if not config.GRAPH_SPEC_SEED_ENABLED:
+        return None
+    try:
+        return graph_repo.spec_names()
+    except Exception:
+        logger.warning("사양 DB 이름을 읽지 못해 정식 이름 없이 뽑습니다", exc_info=True)
+        return None
+
+
+def known_names(names: dict | None, text: str) -> list[dict] | None:
+    """추출 프롬프트에 넘길 정식 이름 (지시서 H3). 제품은 전부, 부품은 그 페이지에 정규화 문자열로 나오는 것만.
+
+    제품 이름은 모델명을 담을 때만 다른 표기로 넣는다 (seed_specs의 별칭 규칙과 같다).
+    """
+    if names is None:
+        return None
+    text_norm = normalize(text)
+    known = [
+        {"type": "product", "name": p["name"],
+         "aliases": [a for a in p.get("aliases") or [] if normalize(p["name"]) in normalize(a)]}
+        for p in names.get("product", [])
+    ]
+    known += [
+        {"type": "component", "name": c["name"], "aliases": []}
+        for c in names.get("component", [])
+        if normalize(c["name"]) and normalize(c["name"]) in text_norm
+    ]
+    return known
+
+
+def _known_kwargs(names: dict | None, text: str) -> dict:
+    """설정이 꺼져 있으면 추출 호출이 예전과 똑같도록 known 인자 자체를 넘기지 않는다."""
+    return {} if names is None else {"known": known_names(names, text)}
+
+
 def index_page(file_id: str, page: int) -> dict:
     """검수 저장 뒤 그 페이지만 다시 뽑는다. xlsx처럼 같은 page 번호의 블록이 여럿이면 합쳐서 뽑는다."""
     rows = page_repo.pages_with_number(file_id, page)
     text = "\n\n".join(r["text"] for r in rows if r["text"])
-    result = graph_repo.replace_page(file_id, page, extract_page_graph(text, concepts=graph_repo.list_concepts()))
+    names = spec_names()
+    graph = extract_page_graph(text, concepts=graph_repo.list_concepts(), **_known_kwargs(names, text))
+    result = graph_repo.replace_page(file_id, page, graph, link_specs=names is not None)
     logger.info("그래프 페이지 추출: file_id=%s, page=%s, %s", file_id, page, result)
     return result
 
@@ -35,10 +76,13 @@ def index_file(file_id: str) -> dict:
 
     graph_repo.delete_file(file_id)
     concepts = graph_repo.list_concepts()
+    names = spec_names()
     entities = relations = failed = 0
     for page, parts in sorted(texts.items()):
         try:
-            result = graph_repo.replace_page(file_id, page, extract_page_graph("\n\n".join(parts), concepts=concepts))
+            text = "\n\n".join(parts)
+            graph = extract_page_graph(text, concepts=concepts, **_known_kwargs(names, text))
+            result = graph_repo.replace_page(file_id, page, graph, link_specs=names is not None)
         except Exception:
             failed += 1
             logger.warning("그래프 추출 실패: file_id=%s, page=%s", file_id, page, exc_info=True)

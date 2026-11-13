@@ -37,14 +37,24 @@ certification 개체가 아래 상위 개념에 속하면 concept에 상위 개�
 (예: "KC 안전확인"은 "안전확인 신고"와 같은 인증). 속하지 않거나 확실하지 않으면 null로 두세요.
 {concepts}"""
 
+_KNOWN_GUIDE = """
+
+## 사양 DB의 정식 이름
+아래 목록의 대상과 같은 것이면 목록의 이름을 name으로 쓰고 문서 표기는 aliases에 넣는다.
+목록에 없는 제품(타사 모델 등)은 지금처럼 문서 표기 그대로 뽑는다. 이름이 비슷해도 다른 모델(예: N5800과 N5800-GB70-PU02)은 다른 대상이다.
+{items}"""
+
 # KC 전파 적합성 등록번호 (R-R-TGE-N5800, R-C-..., 옛 형식 MSIP-REM-..., KCC-REM-...)
 _KC_REGISTRATION = re.compile(r"\b(?:R|MSIP|KCC)-[A-Z]{1,3}-[A-Za-z0-9]{2,6}-[A-Za-z0-9][A-Za-z0-9\-]{1,30}\b")
 
 
-def extract_page_graph(text: str, llm=None, concepts: list[dict] | None = None) -> PageGraph:
+def extract_page_graph(text: str, llm=None, concepts: list[dict] | None = None, known: list[dict] | None = None) -> PageGraph:
     """한 페이지 텍스트의 개체·관계. LLM이 실패하면 예외를 그대로 던진다 (호출부가 기록).
 
     concepts는 graph_repo.list_concepts() 결과다. 주면 인증 종류마다 속하는 상위 개념을 같이 고르게 한다.
+    known은 사양 DB의 정식 이름 [{"type": "product"|"component", "name": 모델명, "aliases": [다른 표기]}]이다 (지시서 H3).
+    주면 같은 대상을 정식 이름으로 뽑게 하고, 정식 이름이 페이지에 없어도 별칭 중 하나가 있으면 남긴다.
+    None이면 프롬프트와 걸러내기가 예전과 같다.
     """
     text = (text or "").strip()
     if not text:
@@ -55,22 +65,35 @@ def extract_page_graph(text: str, llm=None, concepts: list[dict] | None = None) 
         llm = get_llm_model("local")
     structured = llm.with_structured_output(PageGraph)
     result = structured.invoke([
-        {"role": "system", "content": _system_prompt(concepts)},
+        {"role": "system", "content": _system_prompt(concepts, known)},
         {"role": "user", "content": text[:config.GRAPH_EXTRACT_MAX_CHARS]},
     ])
     graph = result if isinstance(result, PageGraph) else PageGraph.model_validate(result or {})
     _add_relation_endpoints(graph)
     _add_registration_numbers(graph, text)
-    graph = _keep_grounded(graph, text)
+    graph = _keep_grounded(graph, text, {normalize(k["name"]) for k in known or []} - {""})
     _keep_known_concepts(graph, concepts)
     return graph
 
 
-def _system_prompt(concepts: list[dict] | None) -> str:
-    if not concepts:
-        return EXTRACT_PROMPT
-    lines = "\n".join(f"- {c['name']}: {', '.join(c['members'])}" for c in concepts)
-    return EXTRACT_PROMPT + _CONCEPT_GUIDE.format(concepts=lines)
+_KNOWN_TYPE_LABELS = {"product": "제품", "component": "부품"}
+
+
+def _system_prompt(concepts: list[dict] | None, known: list[dict] | None = None) -> str:
+    prompt = EXTRACT_PROMPT
+    if concepts:
+        lines = "\n".join(f"- {c['name']}: {', '.join(c['members'])}" for c in concepts)
+        prompt += _CONCEPT_GUIDE.format(concepts=lines)
+    if known:
+        items = []
+        for item in known:
+            line = f"- {item['type']}({_KNOWN_TYPE_LABELS.get(item['type'], item['type'])}): {item['name']}"
+            aliases = [a for a in item.get("aliases") or [] if a and a != item["name"]]
+            if aliases:
+                line += f" (다른 표기: {', '.join(aliases)})"
+            items.append(line)
+        prompt += _KNOWN_GUIDE.format(items="\n".join(items))
+    return prompt
 
 
 def _add_relation_endpoints(graph: PageGraph) -> None:
@@ -104,14 +127,21 @@ def _add_registration_numbers(graph: PageGraph, text: str) -> None:
             known.add(normalize(match))
 
 
-def _keep_grounded(graph: PageGraph, text: str) -> PageGraph:
-    """페이지에 실제로 없는 이름(LLM이 지어낸 것)은 버린다. 비교는 공백·기호를 뺀 정규화 키로 한다."""
+def _keep_grounded(graph: PageGraph, text: str, known_norms: set[str] | None = None) -> PageGraph:
+    """페이지에 실제로 없는 이름(LLM이 지어낸 것)은 버린다. 비교는 공백·기호를 뺀 정규화 키로 한다.
+
+    사양 DB의 정식 이름(known_norms)으로 뽑은 개체는 정식 이름이 페이지에 없어도 별칭 중 하나가 페이지에 있으면 남긴다
+    (문서는 "A650 Pro"로 적고 정식 이름은 "A650-GA70-PU02"인 경우). 별칭은 페이지에 있는 것만 남긴다.
+    """
     text_norm = normalize(text)
     entities = []
     dropped = []
     for entity in graph.entities:
-        if normalize(entity.name) and normalize(entity.name) in text_norm:
-            entity.aliases = [a for a in entity.aliases if normalize(a) and normalize(a) in text_norm]
+        name_norm = normalize(entity.name)
+        aliases = [a for a in entity.aliases if normalize(a) and normalize(a) in text_norm]
+        grounded = bool(name_norm) and name_norm in text_norm
+        if grounded or (known_norms and name_norm in known_norms and aliases):
+            entity.aliases = aliases
             entities.append(entity)
         else:
             dropped.append(entity.name)
