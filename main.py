@@ -33,6 +33,7 @@ from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
 from agent.agent import ALIASES, get_agent, open_checkpointer, set_checkpointer
+from agent.skills import reload_skills
 from repository import db, email_repo, evidence_repo, graph_repo, group_repo, prompt_repo, task_repo
 from logging_config import setup_logging
 
@@ -90,6 +91,12 @@ async def lifespan(app: FastAPI):
         prompt_repo.ensure_v2()
     except Exception:
         logger.exception("기본 프롬프트 등록 실패")
+
+    # 업무 절차(skills/*/SKILL.md)를 한 번 읽어 둔다. 문서를 바꾸면 서버를 다시 시작해야 반영된다.
+    # 검사를 어긴 문서는 빼고(ERROR 로그) 서버는 계속 뜬다.
+    loaded_skills = reload_skills()
+    logger.info("업무 절차 %d개: %s", len(loaded_skills),
+                ", ".join(f"{s.name}·{s.digest}" for s in loaded_skills.values()) or "없음")
 
     # 과거 자동 생성된 빈 그룹만 정리한다. 사용자가 이름·설명을 바꿨거나 파일을 넣은 그룹은 보존한다.
     try:

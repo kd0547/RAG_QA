@@ -10,7 +10,7 @@ from agent.evidence_context import current_owner, current_run, temp_attachments
 
 from retrieval.embedder import get_embedding_model
 from repository.embedding_repository import search
-from agent import reranker
+from agent import reranker, skills
 from parser.file_parser import parse_file
 from parser.pdf.type import PageText
 
@@ -574,3 +574,25 @@ def list_evidence() -> str:
         lines.append(f"{row['evidence_id']} | {where} | {row['origin_type']} | rev {row['revision'] or '-'} | {head}")
     logger.info("[list_evidence] owner=%s:%s -> %d건", owner.type, owner.id, len(rows))
     return "\n".join(lines)
+
+
+# ---------- 업무 절차 ----------
+
+@tool
+def load_skill(name: str) -> str:
+    """업무 절차 문서(답을 찾고 쓰는 순서와 판정 기준)를 읽습니다.
+
+    name에는 시스템 프롬프트의 '선택 절차' 목록에 있는 이름만 넣습니다 (예: spec-compare).
+    질문이 그 절차의 설명에 해당할 때만, 답을 찾기 전에 한 번 읽고 따릅니다.
+    절차 문서는 근거가 아니므로 인용하지 않습니다. 근거 규칙과 마지막 줄 형식은 절차보다 우선합니다.
+    """
+    # 이름으로 사전에서만 찾는다. 모델이 준 문자열로 파일 경로를 만들지 않는다. 근거로 등록하지 않는다.
+    channel = skills.channel_for(current_owner())
+    available = skills.selectable_skills(channel)
+    found = next((s for s in available if s.name == name), None)
+    if found is None:
+        names = ", ".join(s.name for s in available) or "없음"
+        logger.info("[load_skill] 없는 절차: %r (channel=%s)", name[:80], channel)
+        return f"오류: '{name[:80]}' 절차는 이 질문에서 쓸 수 없습니다. 사용할 수 있는 절차: {names}"
+    logger.info("[load_skill] %s · %s (channel=%s)", found.name, found.digest, channel)
+    return f"[업무 절차 {found.name} · {found.digest}]\n{found.body}"

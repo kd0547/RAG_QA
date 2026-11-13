@@ -20,13 +20,14 @@ import config
 import repository
 from agent.evidence_context import Owner, current_owner, owner_scope, run_scope, temp_attachments
 from agent.llm_provider import get_llm_model
+from agent import skills
 from agent.prompt import render_prompt
 from agent.validation import validate_answer
 from entity.type import Attachment, DocumentType
 from repository import graph_repo, group_repo, prompt_repo
 from tools.tool import (
     attachment_page_texts, graph_search, grep_documents, list_documents, list_evidence,
-    read_attachment, read_pages, rerank_documents, search_documents,
+    load_skill, read_attachment, read_pages, rerank_documents, search_documents,
 )
 from langchain.agents.middleware import (
     ClearToolUsesEdit, ContextEditingMiddleware, ModelCallLimitMiddleware, ModelRequest, SummarizationMiddleware,
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 TOOLS = [
     graph_search, list_documents, grep_documents, read_pages, read_attachment,
-    search_documents, rerank_documents, list_evidence,
+    search_documents, rerank_documents, list_evidence, load_skill,
 ]
 
 
@@ -71,6 +72,7 @@ RECURSION_LIMIT = config.AGENT_RECURSION_LIMIT
 
 # 실행 한도 (서버 코드로 강제한다. 프롬프트에는 횟수를 쓰지 않는다)
 SEARCH_CALLS_PER_RUN = 6
+SKILL_CALLS_PER_RUN = 4
 TOOL_CALLS_PER_RUN = 25
 MODEL_CALLS_PER_RUN = 20
 # ModelCallLimitMiddleware(exit_behavior="end")가 한도에 걸리면 마지막에 넣는 메시지의 앞부분
@@ -104,16 +106,17 @@ def build_middleware(summary_model) -> list:
 
     - ContextEditing: 입력이 CTX_CLEAR_TRIGGER_TOKENS를 넘으면 최근 3개를 뺀 오래된 도구 결과를 자리표시자로.
       list_evidence 결과는 지우지 않는다 (자리표시자로 바뀐 결과의 근거 ID를 다시 볼 곳).
+      load_skill 결과도 지우지 않는다 (읽은 절차를 실행 중간에 잃지 않게).
     - Summarization: 대화가 CTX_SUMMARY_TRIGGER_TOKENS를 넘으면 앞부분 요약, 최근 12개 메시지는 그대로.
       로컬 모델에 profile이 없어 비율 기준은 쓰지 않는다.
-    - 실행당 한도: search_documents 6회, 도구 25회, 모델 호출 20회(넘으면 종료 → 답변으로 쓰지 않음).
+    - 실행당 한도: search_documents 6회, load_skill 4회, 도구 25회, 모델 호출 20회(넘으면 종료 → 답변으로 쓰지 않음).
     """
     return [
         _system_prompt,
         ContextEditingMiddleware(edits=[ClearToolUsesEdit(
             trigger=config.CTX_CLEAR_TRIGGER_TOKENS,
             keep=3,
-            exclude_tools=("list_evidence",),
+            exclude_tools=("list_evidence", "load_skill"),
             placeholder=CLEARED_TOOL_PLACEHOLDER,
         )]),
         SummarizationMiddleware(
@@ -123,6 +126,7 @@ def build_middleware(summary_model) -> list:
             summary_prompt=SUMMARY_PROMPT,
         ),
         ToolCallLimitMiddleware(tool_name="search_documents", run_limit=SEARCH_CALLS_PER_RUN),
+        ToolCallLimitMiddleware(tool_name="load_skill", run_limit=SKILL_CALLS_PER_RUN),
         ToolCallLimitMiddleware(run_limit=TOOL_CALLS_PER_RUN),
         ModelCallLimitMiddleware(run_limit=MODEL_CALLS_PER_RUN, exit_behavior="end"),
     ]
@@ -182,6 +186,7 @@ def run_agent(
         with owner_scope(owner or new_session_owner()) as current:
             result = _invoke_logged(
                 agent, [{"role": "user", "content": question}], mode, label="질문", thread_id=thread_id,
+                applied_skills=skills.applied_skills(skills.channel_for(current), rejecting=False),
             )
             return _finish_answer(result, current)
     finally:
@@ -236,7 +241,11 @@ def run_agent_temp_attachments(
                     messages.append(_review_message(thread_id, review))
                 label = f"메일(첨부 {len(attachments or [])}건, 반려 {'있음, 대화 기록 없음' if review else '없음'})"
 
-            result = _invoke_logged(agent, messages, mode, label=label, preread=preread, thread_id=thread_id)
+            # 서버가 고르는 절차: 메일이면 답장 문체, 이번 실행이 반려를 반영하면 반려 반영 절차도
+            applied = skills.applied_skills(skills.channel_for(current), rejecting=review is not None)
+            result = _invoke_logged(
+                agent, messages, mode, label=label, preread=preread, thread_id=thread_id, applied_skills=applied,
+            )
             return _finish_answer(result, current)
     finally:
         _cleanup_ask_thread(agent, thread_id)
@@ -363,6 +372,7 @@ def _selected_prompt_id() -> int | None:
 def _invoke_logged(
         agent, messages: list[dict] | None, mode: str, label: str,
         preread: list[str] | None = None, thread_id: str | None = None,
+        applied_skills: list | None = None,
 ) -> dict:
     """에이전트를 실행하고 실행 기록(run)과 소요시간·도구 호출 수 로그를 남긴다.
 
@@ -370,14 +380,20 @@ def _invoke_logged(
     preread: 실행 전에 모델에 이미 보여 준 근거 (이미지 첨부). 이번 실행에서 읽은 것으로 기록한다.
     thread_id: 대화 기록(checkpoint)의 키. 같은 thread_id면 이전 메시지에 이어서 실행한다.
     messages가 None이면 새 메시지 없이 마지막 checkpoint에서 이어 간다.
+    applied_skills: 서버가 이번 실행에 붙이는 업무 절차. 본문을 시스템 프롬프트에 넣고 run.skills_json에 남긴다.
+    모델이 고를 수 있는 절차(이름·설명)는 근거 소유자의 채널로 정해 프롬프트에 목록만 넣는다.
     예외는 실행 기록을 error로 남긴 뒤 호출부가 처리하도록 다시 던진다.
     """
     owner = current_owner()
     if owner is None:
         raise RuntimeError("근거 소유자 없이 에이전트를 실행할 수 없습니다 (owner_scope 안에서 호출)")
     started = time.perf_counter()
+    applied_skills = list(applied_skills or [])
+    applied_names = {s.name for s in applied_skills}
+    optional_skills = [s for s in skills.selectable_skills(skills.channel_for(owner)) if s.name not in applied_names]
     run_id = repository.evidence_repo.start_run(
         owner.type, owner.id, _model_name(mode), _selected_prompt_id(), label=label,
+        skills=[s.ref() for s in applied_skills],
     )
     for evidence_id in preread or []:
         repository.evidence_repo.record_use(run_id, evidence_id, "read")
@@ -391,7 +407,10 @@ def _invoke_logged(
             concepts = _graph_concepts()
             result = agent.invoke(
                 {"messages": messages} if messages is not None else None,
-                context=AgentContext(system_prompt=render_prompt(prompt_repo.get_system_prompt(), ALIASES, groups, concepts)),
+                context=AgentContext(system_prompt=render_prompt(
+                    prompt_repo.get_system_prompt(), ALIASES, groups, concepts,
+                    applied_skills=applied_skills, optional_skills=optional_skills,
+                )),
                 config=config)
     except Exception as exc:
         # 재귀 한도 초과는 '한도'로 구분해 남긴다. 어느 쪽이든 답변은 저장되지 않는다 (호출부가 failed 처리)

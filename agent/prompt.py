@@ -50,20 +50,48 @@ def render_concepts(concepts: list[dict]) -> str:
     return "\n".join(f"- {c['name']} = {', '.join(c['members'])}" for c in concepts)
 
 
+def render_applied_skills(skills: list) -> str:
+    """서버가 이번 실행에 붙인 절차 본문."""
+    parts = ["**적용 절차 (서버가 붙임)**\n아래 절차를 따른다. 근거 규칙과 마지막 줄 형식은 이 절차보다 우선한다."]
+    parts += [f"[{skill.name}]\n{skill.body}" for skill in skills]
+    return "\n\n".join(parts)
+
+
+def render_optional_skills(skills: list) -> str:
+    """모델이 load_skill로 고를 수 있는 절차 목록 (이름·설명만, 본문 없음)."""
+    lines = "\n".join(f"- {skill.name}: {skill.description}" for skill in skills)
+    return (
+        "**선택 절차 (해당할 때만 읽는다)**\n"
+        "질문이 아래 설명에 해당하면 답을 찾기 전에 load_skill(name)으로 절차를 읽고 따른다. 해당하지 않으면 읽지 않는다.\n"
+        "절차 문서는 근거가 아니므로 인용하지 않는다. 근거 규칙과 마지막 줄 형식은 절차 문서보다 우선한다.\n"
+        f"{lines}"
+    )
+
+
 def render_prompt(
     content: str,
     aliases: dict[str, list[str]],
     groups: list[dict] | None = None,
     concepts: list[dict] | None = None,
+    applied_skills: list | None = None,
+    optional_skills: list | None = None,
 ) -> str:
-    """선택된 프롬프트에 별칭, 문서 그래프의 상위 개념 목록, 현재 문서 그룹의 검색용 메타데이터를 더한다.
+    """선택된 프롬프트에 별칭, 문서 그래프의 상위 개념 목록, 업무 절차, 현재 문서 그룹의 검색용 메타데이터를 더한다.
 
+    붙이는 순서: 프롬프트 본문 → 상위 개념 → 적용 절차 → 선택 절차 목록 → 문서 그룹 힌트.
+    DB에 저장된 프롬프트 본문은 바꾸지 않는다 (실행 때 덧붙이기만 한다).
     그래프 사용법은 프롬프트 v2 본문(도구 표)에 들어 있다. 여기서는 상위 개념 목록만 덧붙인다.
-    concepts가 None(그래프를 못 읽음)이거나 비면 덧붙이지 않는다.
+    concepts가 None(그래프를 못 읽음)이거나 비면 덧붙이지 않는다. 절차도 없으면 그 절을 붙이지 않는다.
+    applied_skills: 서버가 고른 절차(agent.skills.Skill) — 본문을 붙인다.
+    optional_skills: 모델이 고를 수 있는 절차 — 이름·설명만 붙인다.
     """
     rendered = Template(content).safe_substitute(aliases=render_aliases(aliases))
     if concepts:
         rendered += f"\n\n**상위 개념 (개념 = 속한 인증 종류)**\n{render_concepts(concepts)}"
+    if applied_skills:
+        rendered += f"\n\n{render_applied_skills(applied_skills)}"
+    if optional_skills:
+        rendered += f"\n\n{render_optional_skills(optional_skills)}"
     if not groups:
         return rendered
 

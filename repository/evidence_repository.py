@@ -226,13 +226,16 @@ class EvidenceRepository:
 
     def start_run(
         self, owner_type: str, owner_id: str, model: str | None, prompt_id: int | None, label: str | None = None,
+        skills: list[dict] | None = None,
     ) -> str:
+        """skills: 서버가 이 실행에 적용한 업무 절차 [{"name", "digest"}]. 없으면 skills_json은 NULL."""
         run_id = _new_id("r", 12)
         with self.db.transaction() as conn:
             conn.execute(
-                """INSERT INTO run (run_id, owner_type, owner_id, model, prompt_id, started_at, status, label)
-                   VALUES (?, ?, ?, ?, ?, ?, 'running', ?)""",
-                (run_id, owner_type, owner_id, model, prompt_id, _now(), label),
+                """INSERT INTO run (run_id, owner_type, owner_id, model, prompt_id, started_at, status, label, skills_json)
+                   VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)""",
+                (run_id, owner_type, owner_id, model, prompt_id, _now(), label,
+                 json.dumps(skills, ensure_ascii=False) if skills else None),
             )
         return run_id
 

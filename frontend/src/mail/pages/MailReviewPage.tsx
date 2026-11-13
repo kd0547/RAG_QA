@@ -86,6 +86,11 @@ function AgentRuns({ runs }: { runs: MailRun[] }) {
                                     {run.tokens_in != null && ` · 입력 ${run.tokens_in.toLocaleString()}토큰`}
                                 </span>
                                 {statusText && <span className="ml-1.5 text-danger">{statusText}</span>}
+                                {(run.skills ?? []).length > 0 && (
+                                    <span className="ml-1.5 font-normal text-muted" title="서버가 이 실행에 붙인 업무 절차">
+                                        {' · '}절차 {(run.skills ?? []).map((s) => s.name).join(', ')}
+                                    </span>
+                                )}
                             </summary>
                             {run.tool_calls.length === 0 ? (
                                 <p className="mt-1.5 text-[11.5px] text-muted">

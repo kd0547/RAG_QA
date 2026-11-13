@@ -104,7 +104,7 @@ def test_detail_runs_keep_first_run_tools_after_rejection(agent_env, tmp_path, m
     assert [t["tool"] for t in runs[0]["tool_calls"]] == ["list_documents", "grep_documents", "read_pages"]
     assert runs[0]["label"].startswith("메일(첨부 0건") and runs[1]["label"].startswith("메일 반려 반영(review_id=")
     assert all(r["status"] == "ok" and r["seconds"] is not None for r in runs)
-    assert set(runs[0]) == {"run_id", "label", "status", "started_at", "seconds", "tokens_in", "tokens_out", "tool_calls"}
+    assert set(runs[0]) == {"run_id", "label", "status", "started_at", "seconds", "tokens_in", "tokens_out", "tool_calls", "skills"}
 
 
 def test_runs_for_owner_handles_legacy_rows(agent_env):

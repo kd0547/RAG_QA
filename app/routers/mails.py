@@ -136,7 +136,7 @@ def _latest_trace(task_id: str) -> list[dict]:
         return []
 
 
-_RUN_FIELDS = ("run_id", "label", "status", "started_at", "seconds", "tokens_in", "tokens_out", "tool_calls")
+_RUN_FIELDS = ("run_id", "label", "status", "started_at", "seconds", "tokens_in", "tokens_out", "tool_calls", "skills")
 
 
 def _runs(task_id: str) -> list[dict]:
