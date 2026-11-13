@@ -136,7 +136,7 @@ def test_next_inquiry_gets_count_line_only(agent_env, monkeypatch):
 
     first_input = "\n".join(str(m.content) for m in model.calls[0])
     second_input = "\n".join(str(m.content) for m in model.calls[1])  # 시스템 프롬프트 포함
-    assert "이전 문의" not in first_input  # 첫 문의에는 이력이 없어 안내 줄도 없다
+    assert "[이 발신자의 이전 문의" not in first_input  # 첫 문의에는 이력이 없어 안내 줄도 없다
     assert "[이 발신자의 이전 문의 1건, 담당자 메모 1건이 있다. 필요하면 get_customer_history로 본다]" in second_input
     for leaked in ("A본문-N5800무게", "A초안-1.5kg", "A 문의 제목", "메모-NOTE-TEXT"):
         assert leaked not in second_input
@@ -175,7 +175,7 @@ def test_flag_off_removes_tool_and_hint(agent_env, monkeypatch):
     assert agent_module.customer_history_hint(Owner("task", current)) is None
     model = env.install([AIMessage(content="답\n근거: 없음")])
     agent_module.run_agent_temp_attachments("지금 문의", mode="local", owner=Owner("task", current), thread_id=f"task:{current}")
-    assert "이전 문의" not in "\n".join(str(m.content) for m in model.calls[0])
+    assert "[이 발신자의 이전 문의" not in "\n".join(str(m.content) for m in model.calls[0])
 
 
 def test_history_tool_not_excluded_from_clearing():

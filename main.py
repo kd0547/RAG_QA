@@ -91,6 +91,8 @@ async def lifespan(app: FastAPI):
         prompt_repo.ensure_default()
         # 근거 ID 방식의 프롬프트 v2를 처음 한 번 넣고 선택한다 (기존 프롬프트는 그대로 둔다)
         prompt_repo.ensure_v2()
+        # 사양 도구·고객 이력이 들어간 프롬프트 v3를 처음 한 번 넣고 선택한다 (v2 행은 그대로 둔다. 통합 지시서 Z1)
+        prompt_repo.ensure_v3()
     except Exception:
         logger.exception("기본 프롬프트 등록 실패")
 

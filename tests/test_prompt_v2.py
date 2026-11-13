@@ -1,11 +1,11 @@
 """B7: 프롬프트 v2(근거 ID)와 설정값."""
 import inspect
 
-from agent.prompt import PROMPT_V2_NAME, SYSTEM_PROMPT_TEMPLATE, render_prompt
+from agent.prompt import PROMPT_V2_NAME, PROMPT_V2_TEMPLATE, render_prompt
 
 
 def test_v2_template_content():
-    text = SYSTEM_PROMPT_TEMPLATE.template
+    text = PROMPT_V2_TEMPLATE.template
     for tool_name in ("graph_search", "list_documents", "grep_documents", "search_documents",
                       "rerank_documents", "read_pages", "read_attachment", "list_evidence"):
         assert tool_name in text
@@ -26,7 +26,7 @@ def test_ensure_v2_inserts_once_and_keeps_existing(agent_env):
 
     assert created is not None and created.name == PROMPT_V2_NAME and created.is_selected
     assert repo.get(default.id).content == old_content  # 기본 프롬프트는 덮어쓰지 않는다
-    assert repo.get_system_prompt() == SYSTEM_PROMPT_TEMPLATE.template
+    assert repo.get_system_prompt() == PROMPT_V2_TEMPLATE.template
 
     # 담당자가 다른 프롬프트를 고르면 서버를 다시 켜도(ensure_* 재호출) 그 선택이 유지된다
     repo.select(default.id)
