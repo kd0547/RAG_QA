@@ -52,6 +52,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if product_columns and "parent_id" not in product_columns:
         conn.execute("ALTER TABLE product ADD COLUMN parent_id TEXT REFERENCES product(id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_product_parent ON product(parent_id)")
+    # 파생 모델이 상위 모델 값을 물려받아도 되는 속성 표시 (지시서 E1). 기존 속성은 전부 0(허용 안 함)
+    attribute_columns = {row["name"] for row in conn.execute("PRAGMA table_info(spec_attribute)")}
+    if attribute_columns and "inheritable" not in attribute_columns:
+        conn.execute("ALTER TABLE spec_attribute ADD COLUMN inheritable INTEGER NOT NULL DEFAULT 0")
     _migrate_task_reviews_action(conn)
     # 초안의 근거 검증 결과 (agent/validation.py)
     task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}

@@ -184,6 +184,9 @@ CREATE TABLE IF NOT EXISTS spec_attribute (
     unit        TEXT NOT NULL DEFAULT '',        -- number일 때 단위 (GB, GHz, kg ...)
     description TEXT NOT NULL DEFAULT '',
     sort_order  INTEGER NOT NULL DEFAULT 0,
+    -- 1이면 파생 모델에 자기 값이 없을 때 가장 가까운 상위 모델의 값을 물려받는다. 인증(cert) 속성은 1이 될 수 없다.
+    -- 기존 DB에는 repo_connect.py의 마이그레이션이 추가한다
+    inheritable INTEGER NOT NULL DEFAULT 0 CHECK (inheritable IN (0, 1)),
     created_at  TEXT NOT NULL DEFAULT current_timestamp,
     updated_at  TEXT NOT NULL DEFAULT current_timestamp
 );

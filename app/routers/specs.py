@@ -65,6 +65,8 @@ class AttributeUpdate(BaseModel):
     unit: str | None = None
     description: str | None = None
     sort_order: int | None = None
+    # 파생 모델이 상위 모델 값을 물려받아도 되는지. 인증(cert) 분류는 켤 수 없다 (400)
+    inheritable: bool | None = None
 
 
 @router.get("/attributes")

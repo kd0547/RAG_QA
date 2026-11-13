@@ -166,7 +166,11 @@ class SpecRepository:
         return {**self.get_attribute(values[0]), "usage_count": 0}
 
     def update_attribute(self, key: str, **fields) -> dict:
-        """키는 바꾸지 못한다 (저장된 사양 값이 키를 참조한다). 자료형을 바꾸면 기존 값의 value_num을 다시 계산한다."""
+        """키는 바꾸지 못한다 (저장된 사양 값이 키를 참조한다). 자료형을 바꾸면 기존 값의 value_num을 다시 계산한다.
+
+        inheritable: 파생 모델이 상위 모델 값을 물려받아도 되는지. 분류가 인증(cert)이면 켤 수 없다 (ValueError → 400).
+        인증은 상위 모델에서 물려받지 않는다. 물려받기가 켜진 속성을 인증 분류로 옮기는 것도 같은 이유로 막는다.
+        """
         current = self.get_attribute(key)
         if current is None:
             raise SpecNotFoundError(f"속성을 찾을 수 없습니다: {key}")
@@ -177,6 +181,9 @@ class SpecRepository:
         unit = _clean(merged["unit"], field="단위", max_length=20)
         description = _clean(merged["description"], field="설명", max_length=300)
         sort_order = int(merged["sort_order"] or 0)
+        inheritable = int(bool(merged.get("inheritable") or 0))
+        if inheritable and category == "cert":
+            raise ValueError("인증·규격(cert) 속성은 상위 모델 값을 물려받을 수 없습니다. 인증은 모델마다 따로 받습니다.")
 
         with self.db.transaction() as conn:
             if data_type != current["data_type"]:
@@ -190,10 +197,11 @@ class SpecRepository:
             conn.execute(
                 """
                 UPDATE spec_attribute
-                SET name = ?, category = ?, data_type = ?, unit = ?, description = ?, sort_order = ?, updated_at = ?
+                SET name = ?, category = ?, data_type = ?, unit = ?, description = ?, sort_order = ?, inheritable = ?,
+                    updated_at = ?
                 WHERE key = ?
                 """,
-                (name, category, data_type, unit, description, sort_order, _now(), key),
+                (name, category, data_type, unit, description, sort_order, inheritable, _now(), key),
             )
             usage = conn.execute("SELECT COUNT(*) FROM spec_value WHERE attribute_key = ?", (key,)).fetchone()[0]
         return {**self.get_attribute(key), "usage_count": usage}
