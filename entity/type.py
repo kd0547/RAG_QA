@@ -18,7 +18,7 @@ class TaskStatus(Enum):
     IN_REVIEW = "in_review"    # 담당자가 검토 중
     REJECTED = "rejected"        # 반려 → 재추론 필요
     APPROVED = "approved"
-    SENDING = "sending"        # 승인 후 SMTP 발송 중 (재시작해도 되돌리지 않는다: 이미 나갔을 수 있다)
+    SENDING = "sending"        # 승인 후 SMTP 발송 중 (재시작 시 send_unknown으로: 이미 나갔을 수 있다)
     SENT = "sent"              # 담당자 승인 후 최종 전송 완료
     SEND_FAILED = "send_failed"    # 서버가 수락하지 않음이 확실한 발송 실패 → 재승인 가능
     SEND_UNKNOWN = "send_unknown"  # 본문 전송 중 끊겨 수락 여부를 모름 → 담당자가 확인

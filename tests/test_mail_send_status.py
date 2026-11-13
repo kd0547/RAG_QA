@@ -212,3 +212,57 @@ def test_migration_allows_mark_sent_on_old_task_reviews(tmp_path):
     assert [tuple(r) for r in rows] == [(7, "reject", "문체"), (8, "mark_sent", "확인")]
     assert index is not None
     Database(str(path))  # 두 번째 적용은 아무것도 하지 않는다
+
+
+# ---------------------------------------------------------------- C2-P1 발송 중 서버가 꺼진 작업
+
+def test_mark_stale_sending_moves_to_send_unknown(mail_client, monkeypatch):  # noqa: F811
+    client, ids = mail_client
+    from app.routers import mails
+    from entity.type import TaskStatus
+
+    repo = mails.task_repo
+    send_id = repo.claim_for_send(ids["drafted"], "초안 답변", "sender@example.com", [])  # 발송 중에 서버가 꺼졌다
+    assert repo.get_task(ids["drafted"]).status == TaskStatus.SENDING
+
+    assert repo.mark_stale_sending() == 1
+
+    assert repo.get_task(ids["drafted"]).status == TaskStatus.SEND_UNKNOWN
+    sends = repo.get_sends(ids["drafted"])
+    assert [(s["send_id"], s["outcome"], s["detail"]) for s in sends] == [
+        (send_id, "send_unknown", "서버 재시작으로 발송 결과를 확인할 수 없음"),
+    ]
+    # 다른 상태는 그대로
+    assert repo.get_task(ids["sent"]).status == TaskStatus.SENT
+    assert repo.get_task(ids["in_review"]).status == TaskStatus.IN_REVIEW
+    assert repo.mark_stale_sending() == 0
+
+    # 담당자가 확인 후 다시 승인할 수 있다 (자동 재발송은 없다)
+    sent = []
+    monkeypatch.setattr(mails, "send_email", lambda **kwargs: _sent_ok(sent, kwargs))
+    assert client.post(f"/mails/{ids['drafted']}/approve").status_code == 200
+    assert len(sent) == 1
+
+
+def test_mark_stale_sending_keeps_finished_attempts(mail_data):  # noqa: F811
+    """이전 시도의 결과는 덮어쓰지 않고, 결과 없는 가장 최근 시도만 채운다."""
+    from app.routers import mails
+    from entity.type import TaskStatus
+
+    repo = mails.task_repo
+    first = repo.claim_for_send(mail_data["drafted"], "1차", "a@b.c", [])
+    repo.finish_send(first, mail_data["drafted"], TaskStatus.SEND_FAILED, "RCPT 550")
+    second = repo.claim_for_send(mail_data["drafted"], "2차", "a@b.c", [])
+
+    repo.mark_stale_sending()
+
+    outcomes = {s["send_id"]: (s["outcome"], s["detail"]) for s in repo.get_sends(mail_data["drafted"])}
+    assert outcomes[first] == ("send_failed", "RCPT 550")
+    assert outcomes[second][0] == "send_unknown"
+
+
+def test_lifespan_marks_stale_sending_after_reset_processing():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
+    assert source.index("task_repo.reset_processing()") < source.index("task_repo.mark_stale_sending()")

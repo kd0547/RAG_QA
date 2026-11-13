@@ -403,7 +403,7 @@ class TaskRepository:
     def reset_processing(self) -> int:
         """서버 시작 시 답변 생성 중(processing)이던 작업을 pending으로 되돌린다.
 
-        sending은 되돌리지 않는다 (메일이 이미 나갔을 수 있어 담당자가 확인해야 한다).
+        sending은 여기서 다루지 않는다. pending/drafted로 되돌리지 않고 mark_stale_sending()이 send_unknown으로 넘긴다.
         """
         with self.db.transaction() as conn:
             cursor = conn.execute(
@@ -411,6 +411,33 @@ class TaskRepository:
                 (TaskStatus.PENDING.value, datetime.now().isoformat(), TaskStatus.PROCESSING.value),
             )
             return cursor.rowcount
+
+    STALE_SENDING_DETAIL = "서버 재시작으로 발송 결과를 확인할 수 없음"
+
+    def mark_stale_sending(self) -> int:
+        """서버 시작 시 발송 중(sending)이던 작업을 send_unknown으로 넘긴다. 바꾼 작업 수를 돌려준다.
+
+        단일 프로세스라 시작 시점에 진행 중인 발송은 없다. 메일이 나갔을 수도 있으므로 자동으로 다시 보내지 않고
+        담당자 확인(발송 확인됨 / 재발송)으로 넘긴다. 작업마다 가장 최근의 결과 없는 발송 시도에 같은 결과를 남긴다.
+        """
+        now = datetime.now().isoformat()
+        with self.db.transaction() as conn:
+            stale = [row["task_id"] for row in conn.execute(
+                "SELECT task_id FROM tasks WHERE status = ?", (TaskStatus.SENDING.value,),
+            )]
+            for task_id in stale:
+                conn.execute(
+                    """
+                    UPDATE task_send SET outcome = ?, detail = ?
+                    WHERE send_id = (SELECT MAX(send_id) FROM task_send WHERE task_id = ?) AND outcome IS NULL
+                    """,
+                    (TaskStatus.SEND_UNKNOWN.value, self.STALE_SENDING_DETAIL, task_id),
+                )
+            conn.execute(
+                "UPDATE tasks SET status = ?, updated_at = ? WHERE status = ?",
+                (TaskStatus.SEND_UNKNOWN.value, now, TaskStatus.SENDING.value),
+            )
+        return len(stale)
 
     def approve(self, task_id):
         select_sql = """

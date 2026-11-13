@@ -62,13 +62,17 @@ async def lifespan(app: FastAPI):
     system_monitor.start()
 
     # 답변 생성 중(processing)에 서버가 꺼졌던 작업은 pending으로 되돌려 다시 처리한다.
-    # 발송 중(sending)은 메일이 이미 나갔을 수 있어 되돌리지 않는다 (담당자가 확인).
+    # 발송 중(sending)이던 작업은 메일이 이미 나갔을 수 있어 pending/drafted로 되돌리지 않고 send_unknown으로 넘긴다
+    # (자동 재발송 없음. 담당자가 '발송 확인됨' 또는 '재발송'을 고른다).
     try:
         restored = task_repo.reset_processing()
         if restored:
             logger.warning("생성 중이던 작업 %d건을 pending으로 되돌림", restored)
+        stale = task_repo.mark_stale_sending()
+        if stale:
+            logger.warning("발송 중이던 작업 %d건을 send_unknown으로 넘김 (담당자 확인 필요)", stale)
     except Exception:
-        logger.exception("생성 중 작업 복구 실패")
+        logger.exception("생성·발송 중 작업 복구 실패")
 
     # 기본 프롬프트가 DB에 없으면 agent/prompt.py 내용으로 넣는다.
     # 실패해도 에이전트는 agent/prompt.py 원문으로 동작하므로 서버 시작은 막지 않는다.
