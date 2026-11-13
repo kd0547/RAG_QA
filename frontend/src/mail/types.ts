@@ -58,6 +58,18 @@ export interface MailTraceItem {
     at: string;                     // ISO 8601
 }
 
+/** 에이전트 실행 1회 (1차 초안, 반려 반영 …) */
+export interface MailRun {
+    run_id: string;
+    label: string | null;           // 예: '메일(첨부 0건, 반려 없음)', '메일 반려 반영(review_id=1, 같은 대화)'. 예전 실행은 null
+    status: 'running' | 'ok' | 'error' | 'limit';
+    started_at: string;
+    seconds: number | null;
+    tokens_in: number | null;
+    tokens_out: number | null;
+    tool_calls: MailTraceItem[];
+}
+
 /** 상세(GET /mails/{task_id}) */
 export interface MailDetail extends MailSummary {
     assignee: string | null;        // 검토 담당자
@@ -69,7 +81,8 @@ export interface MailDetail extends MailSummary {
     sources: MailSource[];
     validation?: DraftValidation | null; // 검증 전에 만든 초안·이전 버전 서버는 없음
     read_sources?: MailSource[];    // 에이전트가 읽었지만 sources에 없는 근거 (인용하지 않음)
-    trace?: MailTraceItem[];        // 가장 최근 실행의 도구 호출 (이전 버전 서버는 없음)
+    trace?: MailTraceItem[];        // 가장 최근 실행의 도구 호출 (호환용)
+    runs?: MailRun[];               // 이 메일의 실행 전체, 시작 순서 (이전 버전 서버는 없음)
     attachments?: MailAttachment[]; // 첨부 후보. 승인할 때 고른 것만 전송된다 (이전 버전 서버는 보내지 않음)
     created_at: string;
     updated_at: string;

@@ -114,8 +114,10 @@ def view_mail_detail(task_id: str):
         "sources": sources,
         # 에이전트가 읽었지만 sources에 없는 근거 (인용하지 않은 페이지). 화면이 따로 보여 준다
         "read_sources": _read_sources(task_id, {s["evidence_id"] for s in sources}),
-        # 가장 최근 실행에서 에이전트가 부른 도구 [{tool, args_summary, at}] (검토 화면 '에이전트가 한 일')
+        # 가장 최근 실행에서 에이전트가 부른 도구 [{tool, args_summary, at}] (호환용. 화면은 runs를 쓴다)
         "trace": _latest_trace(task_id),
+        # 이 메일의 실행 전체 (1차 초안, 반려 반영 …) 시작 순서. 검토 화면 '에이전트가 한 일'
+        "runs": _runs(task_id),
         # 디스크 경로는 화면에 내보내지 않는다
         "attachments": [
             {k: v for k, v in c.items() if k != "path"}
@@ -132,6 +134,13 @@ def _latest_trace(task_id: str) -> list[dict]:
     except ValueError:
         logger.warning("실행 기록의 도구 호출 목록을 읽지 못함: task_id=%s, run=%s", task_id, run["run_id"])
         return []
+
+
+_RUN_FIELDS = ("run_id", "label", "status", "started_at", "seconds", "tokens_in", "tokens_out", "tool_calls")
+
+
+def _runs(task_id: str) -> list[dict]:
+    return [{key: run.get(key) for key in _RUN_FIELDS} for run in evidence_repo.runs_for_owner("task", task_id)]
 
 
 def _read_sources(task_id: str, shown: set) -> list[dict]:

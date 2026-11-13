@@ -5,7 +5,7 @@ import { LazyMarkdownEditor } from '../../components/LazyMarkdownEditor';
 import { ApiError, mailApi } from '../api';
 import { fmtReceived, reviewPath, SEND_ISSUE_STATUSES } from '../format';
 import { mockDetail } from '../mockData';
-import type { MailDetail, MailStatus, MailSummary } from '../types';
+import type { MailDetail, MailRun, MailStatus, MailSummary } from '../types';
 import {
     AttachmentPicker,
     CenterNote,
@@ -45,6 +45,72 @@ const SEND_NOTICE: Partial<Record<MailStatus, string>> = {
     send_unknown:
         '발송 중 연결이 끊겨 답장이 전달됐는지 알 수 없습니다. 보낸편지함이나 수신자에게 확인한 뒤 "발송 확인됨" 또는 "재발송"을 고르세요.',
 };
+
+/** 실행 머리줄 이름. label은 agent/agent.py의 _invoke_logged label이다 */
+const runTitle = (run: MailRun, index: number) => {
+    const label = run.label ?? '';
+    if (label.startsWith('메일 반려 반영')) return '반려 반영';
+    if (label.startsWith('메일 재시도')) return '다시 생성';
+    if (label.startsWith('메일 이어서 실행')) return '이어서 실행 (재시작 복구)';
+    return index === 0 ? '1차 초안' : `${index + 1}차 실행`;
+};
+
+const RUN_STATUS_TEXT: Record<MailRun['status'], string | null> = {
+    ok: null,
+    running: '실행 중',
+    error: '실패',
+    limit: '한도 초과',
+};
+
+/**
+ * 에이전트가 한 일: 실행(1차 초안, 반려 반영 …)별로 도구 호출을 묶어 보여 준다. 최신 실행만 펼친다.
+ * 반려 반영처럼 도구를 부르지 않은 실행은 이전에 읽은 근거로 다시 쓴 것이다.
+ */
+function AgentRuns({ runs }: { runs: MailRun[] }) {
+    if (runs.length === 0) return null;
+    return (
+        <section className="mt-6">
+            <h2 className="text-[12px] font-bold text-muted">
+                에이전트가 한 일 <span className="tabular-nums">{runs.length}회 실행</span>
+            </h2>
+            <div className="mt-1 flex flex-col">
+                {runs.map((run, i) => {
+                    const statusText = RUN_STATUS_TEXT[run.status];
+                    return (
+                        <details key={run.run_id} open={i === runs.length - 1} className="py-1.5 border-b border-divide last:border-b-0">
+                            <summary className="cursor-pointer text-[12px] font-semibold">
+                                {runTitle(run, i)}
+                                <span className="font-normal text-muted">
+                                    {' · '}도구 {run.tool_calls.length}회
+                                    {run.seconds != null && ` · ${run.seconds}초`}
+                                    {run.tokens_in != null && ` · 입력 ${run.tokens_in.toLocaleString()}토큰`}
+                                </span>
+                                {statusText && <span className="ml-1.5 text-danger">{statusText}</span>}
+                            </summary>
+                            {run.tool_calls.length === 0 ? (
+                                <p className="mt-1.5 text-[11.5px] text-muted">
+                                    {run.status === 'ok' ? '이전에 읽은 근거로 재작성' : '도구를 부르기 전에 끝남'}
+                                </p>
+                            ) : (
+                                <ol className="mt-1.5 flex flex-col gap-1.5">
+                                    {run.tool_calls.map((t, k) => (
+                                        <li key={k} className="flex gap-2 min-w-0 text-[11.5px]">
+                                            <span className="shrink-0 tabular-nums text-muted">{fmtClock(t.at)}</span>
+                                            <span className="shrink-0 font-semibold">{t.tool}</span>
+                                            <span className="min-w-0 truncate font-mono text-muted" title={t.args_summary}>
+                                                {t.args_summary}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ol>
+                            )}
+                        </details>
+                    );
+                })}
+            </div>
+        </section>
+    );
+}
 
 /** 재발송 확인 문구 */
 const RESEND_CONFIRM: Partial<Record<MailStatus, string>> = {
@@ -618,24 +684,7 @@ export function MailReviewPage({
 
                             <div className="mt-8">
                                 <SourceList sources={detail.sources} readSources={detail.read_sources ?? []} />
-                                {(detail.trace?.length ?? 0) > 0 && (
-                                    <details className="mt-6">
-                                        <summary className="cursor-pointer text-[12px] font-bold text-muted">
-                                            에이전트가 한 일 <span className="tabular-nums">{detail.trace!.length}</span>
-                                        </summary>
-                                        <ol className="mt-2 flex flex-col gap-1.5">
-                                            {detail.trace!.map((t, i) => (
-                                                <li key={i} className="flex gap-2 min-w-0 text-[11.5px]">
-                                                    <span className="shrink-0 tabular-nums text-muted">{fmtClock(t.at)}</span>
-                                                    <span className="shrink-0 font-semibold">{t.tool}</span>
-                                                    <span className="min-w-0 truncate font-mono text-muted" title={t.args_summary}>
-                                                        {t.args_summary}
-                                                    </span>
-                                                </li>
-                                            ))}
-                                        </ol>
-                                    </details>
-                                )}
+                                <AgentRuns runs={detail.runs ?? []} />
                             </div>
                         </div>
 

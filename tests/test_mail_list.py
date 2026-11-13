@@ -124,7 +124,7 @@ def test_mail_detail_returns_mail_and_task_fields(mail_client):
     assert set(body) == {
         "task_id", "subject", "sender", "received_at", "status", "assignee",
         "body", "draft", "created_at", "updated_at", "recipient",
-        "model", "retrieval", "sources", "attachments", "validation", "read_sources", "trace",
+        "model", "retrieval", "sources", "attachments", "validation", "read_sources", "trace", "runs",
     }
     assert body["task_id"] == ids["drafted"]
     assert body["subject"] == "drafted"

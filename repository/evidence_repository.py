@@ -189,15 +189,43 @@ class EvidenceRepository:
 
     # ------------------------------------------------------------ 실행
 
-    def start_run(self, owner_type: str, owner_id: str, model: str | None, prompt_id: int | None) -> str:
+    def start_run(
+        self, owner_type: str, owner_id: str, model: str | None, prompt_id: int | None, label: str | None = None,
+    ) -> str:
         run_id = _new_id("r", 12)
         with self.db.transaction() as conn:
             conn.execute(
-                """INSERT INTO run (run_id, owner_type, owner_id, model, prompt_id, started_at, status)
-                   VALUES (?, ?, ?, ?, ?, ?, 'running')""",
-                (run_id, owner_type, owner_id, model, prompt_id, _now()),
+                """INSERT INTO run (run_id, owner_type, owner_id, model, prompt_id, started_at, status, label)
+                   VALUES (?, ?, ?, ?, ?, ?, 'running', ?)""",
+                (run_id, owner_type, owner_id, model, prompt_id, _now(), label),
             )
         return run_id
+
+    def runs_for_owner(self, owner_type: str, owner_id: str) -> list[dict]:
+        """소유자의 실행 전체 (시작 시각 오름차순). tool_calls는 JSON을 풀어 목록으로, seconds는 걸린 시간."""
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM run WHERE owner_type = ? AND owner_id = ? ORDER BY started_at, rowid",
+                (owner_type, owner_id),
+            ).fetchall()
+        runs = []
+        for row in rows:
+            run = dict(row)
+            try:
+                run["tool_calls"] = json.loads(run.pop("tool_calls_json") or "[]")
+            except ValueError:
+                logger.warning("실행 기록의 도구 호출 목록을 읽지 못함: run=%s", run["run_id"])
+                run["tool_calls"] = []
+            seconds = None
+            if run.get("ended_at"):
+                try:
+                    started = datetime.fromisoformat(run["started_at"])
+                    seconds = round((datetime.fromisoformat(run["ended_at"]) - started).total_seconds(), 1)
+                except ValueError:
+                    seconds = None
+            run["seconds"] = seconds
+            runs.append(run)
+        return runs
 
     def finish_run(
         self,

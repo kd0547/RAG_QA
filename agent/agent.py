@@ -316,7 +316,9 @@ def _invoke_logged(
     if owner is None:
         raise RuntimeError("근거 소유자 없이 에이전트를 실행할 수 없습니다 (owner_scope 안에서 호출)")
     started = time.perf_counter()
-    run_id = repository.evidence_repo.start_run(owner.type, owner.id, _model_name(mode), _selected_prompt_id())
+    run_id = repository.evidence_repo.start_run(
+        owner.type, owner.id, _model_name(mode), _selected_prompt_id(), label=label,
+    )
     for evidence_id in preread or []:
         repository.evidence_repo.record_use(run_id, evidence_id, "read")
     trace = _ToolTrace()

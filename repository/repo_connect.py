@@ -60,6 +60,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # 반려를 같은 대화의 다음 턴으로 넣을 때, 이미 반영한 반려를 다시 넣지 않기 위한 표시
     if task_columns and "last_review_id" not in task_columns:
         conn.execute("ALTER TABLE tasks ADD COLUMN last_review_id INTEGER")
+    # 검토 화면의 실행별 이력에 실행 종류를 보여 준다
+    run_columns = {row["name"] for row in conn.execute("PRAGMA table_info(run)")}
+    if run_columns and "label" not in run_columns:
+        conn.execute("ALTER TABLE run ADD COLUMN label TEXT")
     # 근거 서비스 이후 출처가 '인용'인지 '읽기만'인지 구분한다
     source_columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_sources)")}
     if source_columns and "cited" not in source_columns:
