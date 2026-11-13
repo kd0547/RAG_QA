@@ -7,15 +7,17 @@ import { MOCK_STATS } from './mockData';
 import type { MailStats } from './types';
 import { MockBadge } from './ui';
 import { useMailList } from './useMailList';
+import { MailCustomersPage } from './pages/MailCustomersPage';
 import { MailDashboardPage } from './pages/MailDashboardPage';
 import { MailInboxPage } from './pages/MailInboxPage';
 import { MailReviewPage } from './pages/MailReviewPage';
 
-type Page = 'dashboard' | 'inbox' | 'review';
+type Page = 'dashboard' | 'inbox' | 'customers' | 'review';
 
 const PAGE_OF_ROUTE: Record<string, Page> = {
     mail: 'dashboard',
     'mail/inbox': 'inbox',
+    'mail/customers': 'customers',
     'mail/review': 'review',
 };
 
@@ -23,7 +25,7 @@ const POLL_MS = 20_000;
 
 /**
  * 메일 섹션 공통 틀.
- * - 상단 탭: 대시보드 / 메일 / 메일 검토
+ * - 상단 탭: 대시보드 / 전체 메일 / 고객방 / 메일 검토
  * - 검토 대기열과 통계는 여기서 한 번만 불러와 각 페이지가 나눠 쓴다(탭 배지·대시보드·검토 페이지).
  */
 export function MailSection({ route }: { route: string }) {
@@ -70,6 +72,7 @@ export function MailSection({ route }: { route: string }) {
     const tabs: { key: Page; label: string; path: string; count?: number }[] = [
         { key: 'dashboard', label: '대시보드', path: MAIL_PATHS.dashboard },
         { key: 'inbox', label: '전체 메일', path: MAIL_PATHS.inbox },
+        { key: 'customers', label: '고객방', path: MAIL_PATHS.customers },
         { key: 'review', label: '메일 검토', path: MAIL_PATHS.review, count: reviewCount },
     ];
 
@@ -103,6 +106,7 @@ export function MailSection({ route }: { route: string }) {
             <div className="flex-1 min-h-0 flex flex-col">
                 {page === 'dashboard' && <MailDashboardPage queue={queue} stats={shownStats} statsError={statsError && !shownStats} />}
                 {page === 'inbox' && <MailInboxPage />}
+                {page === 'customers' && <MailCustomersPage />}
                 {page === 'review' && (
                     <MailReviewPage
                         queue={queue}

@@ -5,6 +5,8 @@
 import { request } from '../lib/http';
 import type {
     ApproveResult,
+    CustomerListResponse,
+    CustomerTimeline,
     MailDetail,
     MailListResponse,
     MailStats,
@@ -96,5 +98,26 @@ export const mailApi = {
     /** 답변 생성 실패(failed) 건을 다시 생성하도록 요청 (pending으로). 메일은 보내지 않는다 */
     retry(taskId: string): Promise<{ task_id: string; status: MailStatus }> {
         return request(`/mails/${encodeURIComponent(taskId)}/retry`, { method: 'POST' });
+    },
+};
+
+/** 고객방 API (조회 전용). 처리(승인·반려·편집)는 메일 검토 API(mailApi)로만 한다. */
+export const customerApi = {
+    list(p: { q?: string; limit?: number; offset?: number } = {}): Promise<CustomerListResponse> {
+        const qs = new URLSearchParams();
+        if (p.q) qs.set('q', p.q);
+        if (p.limit != null) qs.set('limit', String(p.limit));
+        if (p.offset != null) qs.set('offset', String(p.offset));
+        const s = qs.toString();
+        return request<CustomerListResponse>(`/customers${s ? `?${s}` : ''}`);
+    },
+
+    /** before: 이 수신 시각보다 이전 문의 (응답의 next_before를 그대로 넘긴다) */
+    timeline(sender: string, p: { before?: string | null; limit?: number } = {}): Promise<CustomerTimeline> {
+        const qs = new URLSearchParams();
+        if (p.before) qs.set('before', p.before);
+        if (p.limit != null) qs.set('limit', String(p.limit));
+        const s = qs.toString();
+        return request<CustomerTimeline>(`/customers/${encodeURIComponent(sender)}/timeline${s ? `?${s}` : ''}`);
     },
 };

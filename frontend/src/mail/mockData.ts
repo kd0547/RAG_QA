@@ -2,7 +2,7 @@
  * 백엔드가 아직 없거나 연결이 안 될 때 화면을 채우는 예시 데이터.
  * 대시보드는 API 호출이 실패하면 자동으로 이 데이터로 폴백하고 상단에 배지를 띄운다.
  */
-import type { MailDetail, MailStats, MailStatus, MailSummary } from './types';
+import type { Customer, CustomerTimeline, MailDetail, MailStats, MailStatus, MailSummary } from './types';
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const at = (hhmm: string) => `${TODAY}T${hhmm}:00+09:00`;
@@ -251,4 +251,119 @@ export function mockDetail(row: MailSummary): MailDetail {
         created_at: base.received_at,
         updated_at: base.received_at,
     };
+}
+
+// ---------- 고객방 예시 (GET /customers 실패 시) ----------
+
+export const MOCK_CUSTOMERS: Customer[] = [
+    {
+        sender: 'kim.jh@trigem.co.kr',
+        mail_count: 3,
+        first_received_at: daysAgo(6, '09:12'),
+        last_received_at: at('14:23'),
+        last_subject: 'A650 16인치 모델 RAM 최대 용량과 슬롯 구성 문의',
+        last_task_id: 'TASK-1a2b3c',
+        status_counts: { drafted: 1, sent: 2 },
+        needs_review: 1,
+    },
+    {
+        sender: 'park.sy@partner.co.kr',
+        mail_count: 1,
+        first_received_at: daysAgo(2, '10:40'),
+        last_received_at: daysAgo(2, '10:40'),
+        last_subject: 'N5800 KC 인증서 사본 요청',
+        last_task_id: 'TASK-mock-kc',
+        status_counts: { failed: 1 },
+        needs_review: 1,
+    },
+];
+
+const MOCK_TIMELINES: Record<string, CustomerTimeline> = {
+    'kim.jh@trigem.co.kr': {
+        sender: 'kim.jh@trigem.co.kr',
+        total: 3,
+        next_before: null,
+        items: [
+            {
+                task_id: 'TASK-mock-old', subject: 'N5800 무게 문의', status: 'sent', received_at: daysAgo(6, '09:12'),
+                events: [
+                    { type: 'received', at: daysAgo(6, '09:12'), body: 'N5800 무게가 얼마인가요?', truncated: false, attachments: [] },
+                    {
+                        type: 'draft', at: null, run_id: null, label: null, answer: 'N5800의 무게는 약 1.65kg입니다.',
+                        truncated: false, text_source: 'task', current: true, inferred: true, skills: [],
+                    },
+                    {
+                        type: 'send', at: daysAgo(6, '11:02'), outcome: 'sent', recipient: null, body: null, truncated: false,
+                        attachments: [], detail: null, inferred: true,
+                    },
+                ],
+            },
+            {
+                task_id: 'TASK-mock-kc2', subject: 'N5800 KC 인증번호', status: 'sent', received_at: daysAgo(3, '15:30'),
+                events: [
+                    {
+                        type: 'received', at: daysAgo(3, '15:30'), body: 'N5800 KC 인증번호 알려주세요.', truncated: false,
+                        attachments: [{ filename: '요청서.pdf', type: 'pdf' }],
+                    },
+                    {
+                        type: 'draft', at: daysAgo(3, '15:31'), run_id: 'rmock1', label: '메일(첨부 1건, 반려 없음)',
+                        answer: '| 인증 | 번호 |\n|---|---|\n| KC 안전 | HU07xxxx-xxxx |', truncated: false, text_source: 'run',
+                        current: false, inferred: false, skills: [{ name: 'mail-reply-style', digest: 'mock0001' }],
+                    },
+                    { type: 'reject', at: daysAgo(3, '16:05'), review_id: 1, reason: '표 말고 문장으로 써 주세요.', truncated: false, requeue: true },
+                    {
+                        type: 'draft', at: daysAgo(3, '16:06'), run_id: 'rmock2', label: '메일 반려 반영(review_id=1, 같은 대화)',
+                        answer: 'N5800의 KC 안전 인증번호는 HU07xxxx-xxxx입니다.', truncated: false, text_source: 'run',
+                        current: true, inferred: false,
+                        skills: [{ name: 'mail-reply-style', digest: 'mock0001' }, { name: 'revise-after-reject', digest: 'mock0002' }],
+                    },
+                    {
+                        type: 'send', at: daysAgo(3, '16:20'), outcome: 'sent', recipient: 'kim.jh@trigem.co.kr',
+                        body: 'N5800의 KC 안전 인증번호는 HU07xxxx-xxxx입니다.', truncated: false, attachments: ['KC인증서.pdf'],
+                        detail: '250 OK', inferred: false,
+                    },
+                ],
+            },
+            {
+                task_id: 'TASK-1a2b3c', subject: 'A650 16인치 모델 RAM 최대 용량과 슬롯 구성 문의', status: 'drafted',
+                received_at: at('14:23'),
+                events: [
+                    { type: 'received', at: at('14:23'), body: 'A650 16인치 RAM 최대 용량과 슬롯 구성이 궁금합니다.', truncated: false, attachments: [] },
+                    {
+                        type: 'draft', at: at('14:24'), run_id: 'rmock3', label: '메일(첨부 0건, 반려 없음)',
+                        answer: 'A650 16인치는 SO-DIMM 슬롯 2개, 최대 64GB까지 지원합니다.', truncated: false, text_source: 'run',
+                        current: true, inferred: false, skills: [{ name: 'mail-reply-style', digest: 'mock0001' }],
+                    },
+                ],
+            },
+        ],
+    },
+    'park.sy@partner.co.kr': {
+        sender: 'park.sy@partner.co.kr',
+        total: 1,
+        next_before: null,
+        items: [
+            {
+                task_id: 'TASK-mock-kc', subject: 'N5800 KC 인증서 사본 요청', status: 'failed', received_at: daysAgo(2, '10:40'),
+                events: [
+                    { type: 'received', at: daysAgo(2, '10:40'), body: 'KC 인증서 사본을 받을 수 있을까요?', truncated: false, attachments: [] },
+                    {
+                        type: 'run_failed', at: daysAgo(2, '10:42'), run_id: 'rmock4', label: '메일(첨부 0건, 반려 없음)',
+                        status: 'limit', error: '모델 호출 한도(20회)를 넘어 답변을 만들지 못했습니다',
+                    },
+                ],
+            },
+        ],
+    },
+};
+
+export function mockCustomers(q?: string): Customer[] {
+    const needle = (q ?? '').trim().toLowerCase();
+    return needle
+        ? MOCK_CUSTOMERS.filter((c) => c.sender.includes(needle) || c.last_subject.toLowerCase().includes(needle))
+        : MOCK_CUSTOMERS;
+}
+
+export function mockTimeline(sender: string): CustomerTimeline {
+    return MOCK_TIMELINES[sender] ?? { sender, total: 0, next_before: null, items: [] };
 }

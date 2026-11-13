@@ -1,7 +1,8 @@
 /** 메일 화면 공통 UI 조각 (대시보드 · 메일 · 메일 검토 페이지가 함께 쓴다) */
 import { useState, type ReactNode } from 'react';
 import { DocumentIcon } from '../components/icons';
-import { fmtBytes, fmtDateTime, fmtTime, isLongBody, STATUS_META } from './format';
+import { linkProps } from '../lib/router';
+import { customerPath, fmtBytes, fmtDateTime, fmtTime, isLongBody, STATUS_META } from './format';
 import type { MailAttachment, MailDetail, MailSource, MailStatus } from './types';
 
 export function StatusChip({ status }: { status: MailStatus }) {
@@ -52,7 +53,17 @@ export function ReceivedMessage({ detail }: { detail: MailDetail }) {
             <div className="flex items-center gap-3 min-w-0">
                 <Avatar label={detail.sender} />
                 <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-semibold truncate">{detail.sender}</div>
+                    <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-[13px] font-semibold truncate">{detail.sender}</span>
+                        {detail.sender && (
+                            <a
+                                {...linkProps(customerPath(detail.sender.trim().toLowerCase()))}
+                                className="shrink-0 text-[11px] font-semibold text-brand-hover hover:underline"
+                            >
+                                고객방
+                            </a>
+                        )}
+                    </div>
                     <div className="text-[11px] text-muted truncate">받는 사람 {detail.recipient}</div>
                 </div>
                 <time className="shrink-0 text-[11px] text-muted tabular-nums">{fmtTime(detail.received_at)}</time>

@@ -85,8 +85,13 @@ export const isReviewable = (s: MailStatus) => REVIEW_STATUSES.includes(s);
 export const MAIL_PATHS = {
     dashboard: '/mail',
     inbox: '/mail/inbox',
+    customers: '/mail/customers',
     review: '/mail/review',
 } as const;
 
 export const reviewPath = (taskId?: string) =>
     taskId ? `${MAIL_PATHS.review}?task_id=${encodeURIComponent(taskId)}` : MAIL_PATHS.review;
+
+/** 고객방 경로. 발신자 없이 열면 목록만 */
+export const customerPath = (sender?: string | null) =>
+    sender ? `${MAIL_PATHS.customers}?sender=${encodeURIComponent(sender)}` : MAIL_PATHS.customers;

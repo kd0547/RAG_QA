@@ -119,3 +119,62 @@ export interface ApproveResult {
     sent_at: string;
     to: string;
 }
+
+// ---------- 고객방 (GET /customers, /customers/{sender}/timeline) — 조회 전용 ----------
+
+/** 고객(발신자) 목록 한 줄. sender는 소문자·공백 제거 주소 */
+export interface Customer {
+    sender: string;
+    mail_count: number;
+    first_received_at: string;
+    last_received_at: string;
+    last_subject: string;
+    last_task_id: string | null;
+    status_counts: Partial<Record<MailStatus, number>>;
+    needs_review: number;           // 검토 필요 상태(REVIEW_STATUSES) 건수
+}
+
+export interface CustomerListResponse {
+    items: Customer[];
+    total: number;
+    limit: number;
+    offset: number;
+}
+
+export interface AppliedSkill {
+    name: string;
+    digest: string;
+}
+
+/** inferred=true: 기록 이전 작업이라 서버가 추정한 사건 (시각·본문이 정확하지 않을 수 있음) */
+export type TimelineEvent =
+    | { type: 'received'; at: string; body: string; truncated: boolean; attachments: { filename: string; type: string }[] }
+    | {
+          type: 'draft'; at: string | null; run_id: string | null; label: string | null; answer: string | null;
+          truncated: boolean; text_source: 'run' | 'task' | null; current: boolean; inferred: boolean; skills: AppliedSkill[];
+      }
+    | { type: 'run_failed'; at: string | null; run_id: string; label: string | null; status: 'error' | 'limit'; error: string | null }
+    | { type: 'reject'; at: string; review_id: number; reason: string | null; truncated: boolean; requeue: boolean }
+    | { type: 'retry'; at: string; review_id: number }
+    | { type: 'mark_sent'; at: string; review_id: number; reason: string | null; truncated: boolean }
+    | {
+          type: 'send'; at: string | null; outcome: 'sent' | 'send_failed' | 'send_unknown' | 'sending';
+          recipient: string | null; body: string | null; truncated: boolean; attachments: string[];
+          detail: string | null; inferred: boolean;
+      };
+
+/** 문의(task) 한 건의 묶음. events는 received가 처음, 나머지는 시간순 */
+export interface TimelineInquiry {
+    task_id: string | null;
+    subject: string;
+    status: MailStatus | null;
+    received_at: string;
+    events: TimelineEvent[];
+}
+
+export interface CustomerTimeline {
+    sender: string;
+    total: number;
+    next_before: string | null;     // 있으면 이 시각보다 이전 문의가 더 있다
+    items: TimelineInquiry[];       // 수신 시각 오름차순 (오래된 것이 위)
+}

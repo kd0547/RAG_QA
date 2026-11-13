@@ -28,6 +28,8 @@ export default defineConfig({
       '/ask': API_TARGET,
       '/search': API_TARGET,
       '/mails': API_TARGET,
+      // 고객방 API. 화면 경로는 '/mail/customers'라 겹치지 않는다
+      '/customers': API_TARGET,
       // '/prompt'(화면 경로)와 겹치지 않도록 복수형만 프록시한다
       '/prompts': API_TARGET,
       // '/spec'(화면 경로)와 겹치지 않도록 복수형만 프록시한다
