@@ -267,12 +267,20 @@ def _page_numbers(pages) -> list[int]:
     return list(dict.fromkeys(numbers))
 
 
-def read_page_texts(page_texts, max_chars: int, register) -> dict:
+OFFSET_ONE_PAGE_ERROR = {"error": "offset은 페이지 하나를 읽을 때만 쓸 수 있습니다"}
+
+
+def read_page_texts(page_texts, max_chars: int, register, offset: int = 0) -> dict:
     """[(page, text, register_kwargs)]를 max_chars 안에서 잘라 근거로 등록한다. read_pages·read_attachment 공통.
 
-    한 페이지가 남은 분량보다 길면 그 페이지는 앞부분만 보여 주고 truncated=True. 등록하는 근거는 페이지 전체다.
+    - 한 페이지가 남은 분량보다 길면 그 페이지는 일부만 보여 주고 truncated=True,
+      page_chars(그 페이지 전체 글자 수)와 next_offset(이어 읽을 위치)을 붙인다.
+    - offset: 페이지 하나를 읽을 때만 쓴다 (호출부가 확인). 그 페이지의 offset번째 글자부터 보여 준다.
+    - 등록하는 근거는 offset과 관계없이 페이지 전체다 (같은 페이지면 같은 evidence_id).
     """
-    budget = min(max(1, int(max_chars or 1)), MAX_READ_CHARS)
+    limit = min(max(1, int(max_chars or 1)), MAX_READ_CHARS)
+    offset = max(0, int(offset or 0))
+    budget = limit
     items: list[dict] = []
     truncated = False
     next_pages: list[int] = []
@@ -282,12 +290,20 @@ def read_page_texts(page_texts, max_chars: int, register) -> dict:
             next_pages = [p for p, _, _ in page_texts[index:]]
             break
         evidence_id = register(text, page, fields)
-        shown = text[:budget]
+        start = offset if index == 0 else 0
+        shown = text[start:start + budget]
         item = {"evidence_id": evidence_id, "page": page, "text": shown}
-        if len(shown) < len(text):
+        if start:
+            item["offset"] = start
+        end = start + len(shown)
+        if end < len(text):
             item["truncated"] = True
             item["page_chars"] = len(text)
+            item["next_offset"] = end
             truncated = True
+        elif start and start >= len(text):
+            item["page_chars"] = len(text)
+            item["message"] = f"offset({start})이 페이지 길이({len(text)}자) 이상이라 읽을 내용이 없습니다."
         items.append(item)
         budget -= len(shown)
     result: dict = {"pages": items, "truncated": truncated}
@@ -295,15 +311,15 @@ def read_page_texts(page_texts, max_chars: int, register) -> dict:
         result["next_pages"] = next_pages
     if truncated:
         result["message"] = (
-            f"max_chars({min(max(1, int(max_chars or 1)), MAX_READ_CHARS)}자)를 넘어 일부만 돌려줬습니다. "
+            f"max_chars({limit}자)를 넘어 일부만 돌려줬습니다. "
             + (f"남은 페이지 {next_pages}는 다시 호출해 읽으세요. " if next_pages else "")
-            + "한 페이지가 길어 잘렸다면 max_chars를 늘리거나(최대 20000) grep_documents로 필요한 부분을 찾으세요."
+            + "잘린 페이지(next_offset 있음)는 그 페이지 하나만 offset=next_offset으로 다시 읽으면 이어집니다."
         )
     return result
 
 
 @tool
-def read_pages(file_id: str, pages: list[int], max_chars: int = 6000) -> dict:
+def read_pages(file_id: str, pages: list[int], max_chars: int = 6000, offset: int = 0) -> dict:
     """문서의 페이지 텍스트를 읽습니다. 답변 근거를 얻는 주 도구입니다.
 
     검수로 고친 최신 텍스트(file_page)를 읽으며 원본 파일을 다시 파싱하지 않습니다.
@@ -313,11 +329,15 @@ def read_pages(file_id: str, pages: list[int], max_chars: int = 6000) -> dict:
         file_id: 문서 ID. list_documents, grep_documents, search_documents, graph_search 결과의 file_id.
         pages: 읽을 페이지 번호 목록 (1부터). 예: [3] 또는 [3, 4]. xlsx는 시트 번호입니다.
         max_chars: 이번 호출에서 돌려받을 최대 글자 수. 기본 6000, 최대 20000.
+        offset: 한 페이지 안에서 읽기 시작할 글자 위치. pages가 정확히 1개일 때만 씁니다 (기본 0).
 
     Returns:
         - pages: [{evidence_id, page, text}] 요청 순서대로
         - missing_pages: 문서에 없는 페이지 번호
         - truncated: 분량 초과로 일부만 돌려줬으면 true. next_pages에 남은 페이지가 있습니다
+        - 잘린 페이지 항목에는 page_chars(페이지 전체 글자 수)와 next_offset이 붙습니다.
+          truncated이고 next_offset이 있으면 같은 페이지를 offset=next_offset으로 다시 읽어 이어 갑니다.
+          같은 페이지는 offset이 달라도 evidence_id가 같습니다
         - error: 문서가 없거나 페이지 텍스트가 저장돼 있지 않은 경우
     """
     error = _context_error()
@@ -330,6 +350,8 @@ def read_pages(file_id: str, pages: list[int], max_chars: int = 6000) -> dict:
         # 질의 시점에 원본을 다시 파싱하지 않는다 (페이지 텍스트는 업로드 때 저장된다)
         return {"error": f"페이지 텍스트 없음: {file.original_name}은 페이지별 텍스트가 저장돼 있지 않습니다. search_documents로 찾으세요."}
 
+    if offset and len(_page_numbers(pages)) != 1:
+        return OFFSET_ONE_PAGE_ERROR
     page_texts, missing = [], []
     for number in _page_numbers(pages):
         rows = repository.page_repo.pages_with_number(file_id, number)
@@ -345,7 +367,7 @@ def read_pages(file_id: str, pages: list[int], max_chars: int = 6000) -> dict:
             "file_page", text, file_id=file_id, page=page, source_name=file.original_name, **fields,
         )
 
-    result = {"file_id": file_id, "original_name": file.original_name, **read_page_texts(page_texts, max_chars, register)}
+    result = {"file_id": file_id, "original_name": file.original_name, **read_page_texts(page_texts, max_chars, register, offset)}
     if missing:
         result["missing_pages"] = missing
     logger.info(
@@ -464,7 +486,9 @@ def attachment_page_texts(entry: dict) -> list[tuple[int, str]]:
 
 
 @tool
-def read_attachment(attachment_id: int, pages: list[int] | None = None, max_chars: int = 6000) -> dict:
+def read_attachment(
+    attachment_id: int, pages: list[int] | None = None, max_chars: int = 6000, offset: int = 0,
+) -> dict:
     """이 질문(메일)에 붙은 첨부 문서를 페이지 단위로 읽습니다.
 
     메시지에는 첨부 본문이 들어 있지 않고 "[첨부 1] 파일명 (attachment_id=…, N페이지)" 안내만 있습니다.
@@ -474,13 +498,17 @@ def read_attachment(attachment_id: int, pages: list[int] | None = None, max_char
         attachment_id: 메시지 안내에 적힌 attachment_id.
         pages: 읽을 페이지 번호 목록 (1부터). 비우면 처음부터 max_chars만큼 읽습니다.
         max_chars: 이번 호출에서 돌려받을 최대 글자 수. 기본 6000, 최대 20000.
+        offset: 한 페이지 안에서 읽기 시작할 글자 위치. pages가 정확히 1개일 때만 씁니다 (기본 0).
 
     Returns:
         read_pages와 같은 형식: pages[{evidence_id, page, text}], truncated, next_pages, missing_pages, page_count.
+        truncated이고 잘린 페이지에 next_offset이 있으면 같은 페이지를 offset=next_offset으로 다시 읽어 이어 갑니다.
     """
     error = _context_error()
     if error:
         return error
+    if offset and (not pages or len(_page_numbers(pages)) != 1):
+        return OFFSET_ONE_PAGE_ERROR
     entry = resolve_attachment(int(attachment_id))
     if entry is None:
         logger.warning("[read_attachment] 현재 질문의 첨부가 아니어서 거부: attachment_id=%s", attachment_id)
@@ -505,7 +533,7 @@ def read_attachment(attachment_id: int, pages: list[int] | None = None, max_char
 
     result = {
         "attachment_id": entry["attachment_id"], "filename": entry["filename"], "page_count": len(page_texts),
-        **read_page_texts(selected, max_chars, register),
+        **read_page_texts(selected, max_chars, register, offset),
     }
     if missing:
         result["missing_pages"] = missing
