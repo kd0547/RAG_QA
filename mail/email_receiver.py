@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Generator, Any
 
 import msal
+
+import config
 from dotenv import load_dotenv
 from email.utils import parsedate_to_datetime, parseaddr
 
@@ -92,8 +94,9 @@ def get_access_token():
     else:
         logger.warning("토큰 캐시 파일 없음: %s", TOKEN_CACHE_FILE)
 
+    # timeout: 토큰 갱신 HTTP 요청이 메일 서버 장애 때 무기한 기다리지 않게 한다 (requests timeout으로 전달된다)
     app = msal.PublicClientApplication(
-        CLIENT_ID, authority=AUTHORITY, token_cache=cache
+        CLIENT_ID, authority=AUTHORITY, token_cache=cache, timeout=config.MSAL_TIMEOUT_SECONDS,
     )
 
     result = None
@@ -308,7 +311,8 @@ def fetch_new_emails(processed_uids: set[str]) -> list[MailEntity]:
         token = get_access_token()
         auth_string = build_xoauth2_string(USER_EMAIL, token)
 
-        conn = poplib.POP3_SSL(POP3_SERVER, POP3_PORT)
+        # timeout이 없으면 장애 중 연결·응답을 무기한 기다려 수신 스레드가 서버 종료를 막는다
+        conn = poplib.POP3_SSL(POP3_SERVER, POP3_PORT, timeout=config.POP3_TIMEOUT_SECONDS)
         conn._shortcmd("AUTH XOAUTH2")
         conn._shortcmd(base64.b64encode(auth_string.encode()).decode())
 

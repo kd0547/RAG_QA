@@ -53,6 +53,10 @@ REVIEWER_EMAIL = os.getenv("REVIEWER_EMAIL", "dongwook.kim@trigem.co.kr")
 # 검토 알림 메일의 SMTP 시간 제한(초). 알림은 별도 스레드라 처리 루프를 막지 않지만, 장애 때 스레드가 오래 남지 않게 짧게 둔다.
 # 승인 발송은 mail/email_send.py의 SMTP_TIMEOUT_SECONDS(60)를 쓴다.
 NOTIFY_SMTP_TIMEOUT_SECONDS = float(os.getenv("NOTIFY_SMTP_TIMEOUT_SECONDS", "20"))
+# 메일 수신(POP3) 연결·응답 대기 시간(초). 없으면 메일 서버 장애 때 수신 스레드가 무기한 멈춰 서버 종료를 막는다
+POP3_TIMEOUT_SECONDS = float(os.getenv("POP3_TIMEOUT_SECONDS", "30"))
+# MS 토큰 요청(msal) HTTP 대기 시간(초). 대화형 로그인(브라우저)에는 적용되지 않는다
+MSAL_TIMEOUT_SECONDS = float(os.getenv("MSAL_TIMEOUT_SECONDS", "30"))
 
 # ---------- 청킹 ----------
 DEFAULT_CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "2000"))
