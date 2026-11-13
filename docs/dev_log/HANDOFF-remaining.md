@@ -1,48 +1,42 @@
-# 인계: 통합 지시서(remaining) 진행 상황 — 2026-11-13
+# 인계: 통합 지시서(remaining) 마무리 상태 — 2026-11-13
 
 지시서: [opus_development_instructions_remaining.md](../opus_development_instructions_remaining.md)
+전체 항목·커밋·DB 변경·검증 위치: **[R-summary](R-summary.md)**
 
-## 끝난 것 (커밋됨, 전체 테스트 453 passed)
+## 이번 인계에서 끝낸 일
 
-| 항목 | 커밋 | 기록 |
-|------|------|------|
-| R0 D 요약 | `24dc2dd` | [D-summary](D-summary.md) |
-| E1 상속 허용·점검 스크립트 | `f9aa7c0` | [E-E1](E-E1.md), [E-spec-audit](E-spec-audit.md) |
-| E2 사양 서비스 | `0c19740` | [E-E2](E-E2.md) |
-| E3 사양 도구 4개·근거 | `d400196` | [E-E3](E-E3.md) |
-| E4 물려받기 체크박스 | `d22ae7f` | [E-E4](E-E4.md) |
-| H1 저장 구조·CHECK 마이그레이션 | `9bc911e` | [H-H1](H-H1.md) |
-| H2 seed_specs | `36420d8` | [H-H2](H-H2.md) |
-| H3 추출 정식 이름 | `77b3bea` | [H-H3](H-H3.md) |
-| H4 검색 ref·via | `d9f2d8b` | [H-H4](H-H4.md) |
-| G1 고객 이력·메모 API | `7bbe1d6` | [G-G1](G-G1.md) |
-| G2 메모 화면 | `06a277d` | [G-G2](G-G2.md) |
-| Z1 프롬프트 v3·절차 교체 | `166317e` | [Z-Z1](Z-Z1.md) |
-| T2 마이그레이션 예행 | (이 인계 커밋) | [T-migration](T-migration.md) — 추가만 있음, graph_relation id·해시 동일, 2회 동일 |
+| 항목 | 결과 | 커밋·기록 |
+|------|------|-----------|
+| F1 비교 해석 | 원본 JSON으로 표 재생성·기존 표 일치 확인. F-compare 4절에 표와 9문항별 해석, 5~6절에 한계·재현 자료 작성 | `42c9b2a`, [F-compare](F-compare.md) |
+| T1 재확인·기록 | pytest **453 passed**, 타입 검사·변경 폴더 린트·임시 outDir 빌드 통과. 전체 린트는 기존 App.tsx 오류 2건·경고 1건 | `8d59da5`, [T-T1](T-T1.md) |
+| Z2 요약 | 전체 항목·커밋, 실제 테스트 출력, 미완료 범위, 설계와 다른 점, 운영 DB 변경 표, T1~T6·T5 세부 확인 위치 작성 | 본 인계 갱신과 같은 커밋, [R-summary](R-summary.md) |
+| 확인 환경 정리 | 8010·5174 서버는 이미 종료. Temp의 `ragqa-stub-ebpja3pn`, `ragqa-stub-hbtt__fw` 사본 폴더 삭제 | [T-T1](T-T1.md) |
 
-## 진행 중 / 남은 것
+R0·E1~E4·H1~H4·G1~G2·Z1 구현과 T2 마이그레이션 예행은 이전에 완료됐다. 커밋표와 기록 링크는 R-summary에 모았다. 이번 마무리는 문서만 변경했다.
 
-1. **F1 deepagents 비교** — 시제품 코드 `tests/eval/deepagents_proto/`(이 커밋), API 정리는 [F-compare](F-compare.md) 1~3절에 씀.
-   - 비교 실행이 백그라운드로 돌고 있었다 (현재 엔진 → 시제품 순, 9문항씩). 결과 폴더:
-     `C:\Users\김동욱\AppData\Local\Temp\claude\17b9a6af8eebcf5c\dfe462b8-3696-4fbb-be30-5a54662aefa0\scratchpad\f_run\`
-     (`current.json`, `proto.json`, `current.log`, `proto.log`, 끝나면 `done.txt`에 exit 코드)
-   - 남은 일: 결과가 다 있으면 `.venv/Scripts/python.exe tests/eval/deepagents_proto/compare.py <위 폴더>`로 표를 만들어 F-compare.md 4절에 붙이고 해석(로컬 문서 2개뿐인 한계, 시제품은 langchain 1.5/langgraph 1.2.21) 적기. 결과가 없거나 중간에 끊겼으면 같은 명령으로 다시 돌린다 (README 참고).
-   - 스모크 1문항(#6 TI600s↔C910G): 시제품 28초, 도구 14회(오류 0), 검증 통과.
-   - **비교 실행 완료** (두 구성 exit 0). 표는 [F-compare-table.md](F-compare-table.md)에 생성해 둠: 9문항 모두 검증 통과(두 구성), 현재 엔진 도구 137회·오류 6·입력 1,457,313토큰·784초 / 시제품 도구 156회·오류 5·입력 2,256,057토큰·595초. 남은 일은 이 표를 F-compare.md 4절로 옮기고 문항별 해석(문서 2개 한계 포함)을 쓰는 것. 원본 JSON은 위 폴더.
-2. **T1 기록** — 전체 테스트 453 passed. `npx tsc -b` 통과, `npm run build`는 임시 outDir로 통과(dist 안 건드림). `npx eslint src`는 **기존 `src/App.tsx` 오류 2건**(2026-11-05 이후 안 바뀐 파일, 이번 작업 무관)으로 실패 — 고친 폴더(spec·mail·knowledge)만 보면 통과. 사용자에게 알릴 것.
-3. **Z2 `docs/dev_log/R-summary.md`** — 아직 안 씀. 항목·커밋 표(위 표), 전체 테스트 출력, 멈춘 항목(없음), 다르게 한 것(아래), 9절 확인 위치, **운영 DB 변경 표**(T-migration.md의 표 재사용: `customer_note` 테이블, `spec_attribute.inheritable`, `graph_entity.ref_type/ref_id`, `graph_relation` 재생성+`is_option`, v3 프롬프트 행, spec 관계 2개).
-4. T3(사용자: DB 백업·`npm run build`·재시작), T4(사용자 지시 후 실서버 확인), T5(Gemini), T6(개발 서버) — 구현자가 먼저 하지 않는다.
+## 남은 것
 
-## 지시서와 다르게 한 것 (R-summary에 옮길 것)
-- 제품 이름은 모델명을 담을 때만 그래프 별칭·추출 "다른 표기"로 씀 (`Pro`/`Home`이 아무 질문에나 걸리는 문제) — H2·H3
-- `graph_relation.is_option` 컬럼 추가 (옵션 여부 보관 위치가 지시서에 없음) — H1
-- CHECK 마이그레이션은 외래키 검사를 끄고 옮김 — H1
-- 별칭으로 통과는 정식 이름 목록에 있을 때만 — H3
-- `find_entities`: 더 긴 모델명 안에만 있는 상위 모델은 직접 찾지 않음 (H-2 지키려고) — H4
-- 고객 이력은 별도 저장소 `customer_history_repository.py` (D의 모델 입력 분리 경계 유지) — G1
-- 사양 도구 `owner_id`에 정확한 모델명도 받음 — E3
-- 인증 분류로 옮기는 것도 400 — E1
+1. **T1 기존 린트 오류**: `frontend/src/App.tsx` 315행 `react-hooks/immutability`, 319행 `react-hooks/preserve-manual-memoization`, 316행 의존성 경고. 마지막 변경은 2026-11-05 `52963dd`이며 이번 구현과 무관하다. 인계 지시대로 수정하지 않고 보고했다. T1 전체 통과로 표시하지 않는다.
+2. **평가셋 빈 문항·정답**: 10번 주간판매 질문은 질문·mail_uid·task_id가 비어 있어 F1은 양쪽 9문항만 실행했다. 전 문항 `expected_evidence`·`expected_keywords`도 비어 있다. 담당자가 채워야 한다.
+3. **T3 사용자 운영 반영**: 운영 `mail.db`·`agent_threads.db` 백업, frontend `npm run build`, 서버 재시작. 재시작 전 [R-summary의 DB 변경 표](R-summary.md#재시작-시-운영-db-변경-표)를 확인한다.
+4. **T4 실환경 확인**: 사용자의 「통합 확인 진행」 지시 후 시행한다. 메일 흐름은 작업과 검토 알림을 발생시키며, S1 실제 승인 발송은 별도 지시가 필요하다. 결과는 `T-live-check.md`에 적을 예정이고 아직 파일을 만들지 않았다.
+5. **T5 Gemini**: 읽기 전용 검증. [R-summary](R-summary.md)의 항목별 확인표와 D·I 요약을 사용한다.
+6. **T6 개발 서버 기준선**: 사용자가 서버 주소를 제공한 뒤 문서 17개 환경에서 실행한다. 빈 문항·정답 칸 상태를 함께 기록한다.
 
-## 정리할 것
-- 확인용 백엔드·프론트 dev 서버(포트 8010·5174, `.claude/launch.json`의 `rag-qa-stub8010-backend`)는 끄기. 임시 사본 폴더 `%TEMP%\ragqa-stub-*` 지우기.
-- 사용자가 고친 `skills/skill-creator/SKILL.md`는 커밋하지 않는다.
+## F 결과를 읽을 때
+
+- 양쪽 9/9 서버 검증 통과는 정답률이 아니다. 시제품 3번은 `근거 줄 없음` 경고와 인용 0건이다.
+- 현재 엔진: 도구 137회·오류 6·입력 1,457,313토큰·784.0초. 시제품: 도구 156회·오류 5·입력 2,256,057토큰·595.3초.
+- 로컬 등록 문서는 2개다. 시제품은 langchain 1.5.0/langgraph 1.2.21과 자체 요약을 사용했고, 실제 문항에서 가상 `/docs/` 경로는 읽지 않았다. 상세 한계는 F-compare에 있다. 채택 여부는 결정하지 않았다.
+- 원본 결과·평가 사본은 아래 폴더에 보존했다. 모델 실행을 다시 돌릴 필요 없이 `compare.py <폴더>`로 표를 재생성할 수 있다.
+
+```text
+C:\Users\김동욱\AppData\Local\Temp\claude\17b9a6af8eebcf5c\dfe462b8-3696-4fbb-be30-5a54662aefa0\scratchpad\f_run\
+```
+
+## 다음 작업에서도 유지할 경계
+
+- 사용자의 `skills/skill-creator/SKILL.md` 수정과 기존 미추적 파일은 건드리거나 커밋하지 않는다.
+- 운영 DB 점검은 저장소 모듈을 임포트하지 않고 `sqlite3`의 `mode=ro`로만 한다.
+- 운영 반영·실메일 확인은 위 T3·T4 조건을 따른다. 인수인계 마무리만으로 진행하지 않는다.
+- 구현과 설계의 차이 8건 및 F/T1 검증 차이는 [R-summary](R-summary.md)에 옮겼다.
