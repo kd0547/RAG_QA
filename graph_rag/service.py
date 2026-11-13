@@ -109,7 +109,9 @@ def index_all() -> list[dict]:
 # ------------------------------------------------------------ 검색
 
 def _evidence(relation: dict) -> str:
-    """관계의 근거. 사람이 근거 문서 없이 넣은 관계는 '담당자 확인'으로 적는다."""
+    """관계의 근거. 사람이 근거 문서 없이 넣은 관계는 '담당자 확인', 사양 DB에서 심은 관계는 '사양 DB'로 적는다."""
+    if relation.get("origin") == "spec":
+        return "사양 DB, 옵션" if relation.get("is_option") else "사양 DB"
     if relation.get("file_id") and relation.get("original_name"):
         page = f' p{relation["page"]}' if relation.get("page") is not None else ""
         suffix = ", 담당자 확인" if relation.get("origin") == "manual" else ""
@@ -122,6 +124,10 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
 
     문서는 질문의 개체를 더 많이 담은 순서로 정렬한다. "N5800 KC인증"이면 N5800과 KC 인증 종류가
     함께 나온 문서가 앞에 온다.
+
+    matched에는 사양 DB 대상(ref_type, ref_id)을 싣는다. 모델은 이 값을 get_specs에 그대로 넘길 수 있다.
+    파생 모델을 물으면 variant_of로 상위 모델이 나온 문서를 documents 뒤에 **후보로** 더하고 via("상위 모델 ○○")를 표시한다.
+    상위 모델의 관계(인증 등)는 relations에 넣지 않는다 — 상위 모델의 인증을 파생 모델에 적용된 것으로 보이지 않게 한다.
     """
     matched = graph_repo.find_entities(query)
     if not matched:
@@ -165,12 +171,30 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
                     doc["terms"].add(term_of[relation[end]])
 
     ranked = sorted(documents.values(), key=lambda d: (-len(d["terms"]), -len(d["entities"]), d["original_name"]))
+
+    # 파생 모델이면 상위 모델이 나온 문서를 후보로 (이미 나온 문서는 그대로 두고, via를 붙여 뒤에 둔다)
+    matched_ids = {e["id"] for e in matched}
+    parents = [p for p in graph_repo.parents_of([e["id"] for e in matched if e["type"] == "product"])
+               if p["parent_id"] not in matched_ids]
+    via_documents: dict[str, dict] = {}
+    for parent in parents:
+        for mention in graph_repo.mentions_of([parent["parent_id"]], group_id=group_id):
+            if mention["file_id"] in documents:
+                continue
+            doc = via_documents.setdefault(mention["file_id"], {
+                "file_id": mention["file_id"], "source": mention["stored_path"], "original_name": mention["original_name"],
+                "pages": set(), "entities": set(), "terms": set(), "via": f"상위 모델 {parent['parent_name']}",
+            })
+            doc["pages"].add(mention["page"])
+            doc["entities"].add(mention["entity_name"])
+    ranked += sorted(via_documents.values(), key=lambda d: d["original_name"])
     missing_paths = {d["file_id"] for d in ranked if not d["source"]}
     if missing_paths:
         logger.warning("그래프 문서의 저장 경로 없음: %s", missing_paths)
 
     return {
-        "matched": [{"name": e["name"], "type": e["type"]} for e in matched],
+        "matched": [{"name": e["name"], "type": e["type"], "ref_type": e.get("ref_type"), "ref_id": e.get("ref_id")}
+                    for e in matched],
         "expanded": [
             {"concept": c["name"], "members": [m["name"] for m in members if m["concept_id"] == c["id"]]}
             for c in concepts
@@ -187,6 +211,7 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
                 "pages": sorted(d["pages"]),
                 "entities": sorted(d["entities"]),
                 "matched_terms": len(d["terms"]),
+                **({"via": d["via"]} if d.get("via") else {}),
             }
             for d in ranked[:max_documents]
         ],

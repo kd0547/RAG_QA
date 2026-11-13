@@ -360,3 +360,56 @@ def test_flag_off_keeps_old_prompt_and_no_refs(g, monkeypatch):
     assert llm.calls[0][0]["content"] == extractor._system_prompt([])  # 예전 프롬프트 그대로 (상위 개념 없음)
     assert "사양 DB" not in llm.calls[0][0]["content"]
     assert _entities(g.db)["N5800"]["ref_id"] is None
+
+
+# ---------------------------------------------------------------- H4 검색 결과를 사양으로 잇기
+
+@pytest.fixture
+def docs(g):
+    """N5800 인증서(N5800 -[has_certification]-> 안전확인 신고)와 파생 모델 문서. 파생 모델 N5800-GB70-PU02를 등록하고 심는다."""
+    g.variant = g.spec.create_product("N5800-GB70-PU02", parent_id=g.n5800["id"])
+    cert = g.add_file("n5800_kc.pdf", ["N5800 안전확인 신고 인증서"])
+    g.graph.replace_page(cert, 1, PageGraph(
+        entities=[ExtractedEntity(type="product", name="N5800"),
+                  ExtractedEntity(type="certification", name="안전확인 신고")],
+        relations=[ExtractedRelation(source="N5800", type="has_certification", target="안전확인 신고")],
+    ), link_specs=True)
+    variant_doc = g.add_file("pu02_quote.pdf", ["N5800-GB70-PU02 견적"])
+    g.graph.replace_page(variant_doc, 1, PageGraph(entities=[ExtractedEntity(type="product", name="N5800-GB70-PU02")]),
+                         link_specs=True)
+    g.graph.seed_specs()
+    return g
+
+
+def test_graph_search_matched_has_spec_ref(docs):
+    result = service.search_graph("N5800 무게")
+    assert result["matched"] == [{"name": "N5800", "type": "product", "ref_type": "product", "ref_id": docs.n5800["id"]}]
+
+
+def test_n5800_and_variant_are_different_entities(docs):
+    entities = _entities(docs.db)
+    assert entities["N5800"]["id"] != entities["N5800-GB70-PU02"]["id"]
+    assert entities["N5800-GB70-PU02"]["ref_id"] == docs.variant["id"]
+    # 파생 모델만 물으면 상위 모델은 질문에 따로 나오지 않았으므로 matched에 넣지 않는다
+    assert [m["name"] for m in service.search_graph("N5800-GB70-PU02 KC 인증")["matched"]] == ["N5800-GB70-PU02"]
+    # 둘 다 적으면 둘 다
+    assert {m["name"] for m in service.search_graph("N5800과 N5800-GB70-PU02 비교")["matched"]} == {"N5800", "N5800-GB70-PU02"}
+
+
+def test_variant_question_gets_parent_documents_as_candidates_only(docs):
+    result = service.search_graph("N5800-GB70-PU02 인증 자료")
+
+    by_name = {d["original_name"]: d for d in result["documents"]}
+    assert "via" not in by_name["pu02_quote.pdf"]
+    assert by_name["n5800_kc.pdf"]["via"] == "상위 모델 N5800"
+    assert result["documents"][-1]["original_name"] == "n5800_kc.pdf"  # 후보는 뒤에
+    # 상위 모델의 인증 관계는 파생 모델 결과에 넣지 않는다
+    assert all("안전확인 신고" not in r for r in result["relations"])
+    assert "N5800-GB70-PU02 -[variant_of]-> N5800 (사양 DB)" in result["relations"]
+
+
+def test_graph_search_tool_doc_mentions_ref_and_via():
+    from tools.tool import graph_search
+
+    assert "get_specs(owner_type=ref_type, owner_id=ref_id)" in graph_search.description
+    assert "via" in graph_search.description and "그대로 적용된다고 쓰지 않습니다" in graph_search.description

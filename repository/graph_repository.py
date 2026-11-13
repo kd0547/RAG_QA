@@ -45,7 +45,7 @@ def _query_tokens(query: str) -> list[str]:
     return sorted(t for t in tokens if len(t) >= MIN_PARTIAL_LEN)
 
 
-_RELATION_COLUMNS = """r.id, r.type, r.origin, r.page, r.file_id, f.original_name,
+_RELATION_COLUMNS = """r.id, r.type, r.origin, r.is_option, r.page, r.file_id, f.original_name,
                        s.id AS source_id, s.type AS source_type, s.name AS source_name,
                        d.id AS target_id, d.type AS target_type, d.name AS target_name"""
 _RELATION_JOINS = """FROM graph_relation r
@@ -439,6 +439,9 @@ class GraphRepository:
           "N5800" -> "N5800 14세대" (어절 "N5800"), "N5800-GB70-PU02"는 한 어절이라 제외.
           (중간 일치는 "R-R-TGE-N5800"처럼 다른 개체까지 잡아서 쓰지 않는다)
         - 어절 끝 조사 하나를 뗀 것도 검색어 단어로 쓴다: "N5800의 사양" -> "N5800"
+        - 다른 개체의 더 긴 표기 안에만 들어 있는 개체는 뺀다 (상위 개념 제외):
+          "N5800-GB70-PU02 인증"에서 N5800은 질문에 따로 나오지 않았다. "N5800과 N5800-GB70-PU02"면 둘 다 찾는다.
+        반환 항목: {id, type, name, ref_type, ref_id} (ref는 사양 DB 대상. 없으면 None)
         """
         query_norm = normalize(query)
         if len(query_norm) < MIN_NORM_LEN:
@@ -452,7 +455,7 @@ class GraphRepository:
             params.append(f"{token}%")
         # SQL은 후보를 넉넉히 뽑고(별칭 원문 포함), 접두 일치는 아래에서 어절 단위로 다시 거른다
         sql = f"""
-            SELECT e.id, e.type, e.name, a.alias, a.alias_norm
+            SELECT e.id, e.type, e.name, e.ref_type, e.ref_id, a.alias, a.alias_norm
             FROM graph_alias a JOIN graph_entity e ON e.id = a.entity_id
             WHERE {' OR '.join(conditions)}
         """
@@ -471,8 +474,37 @@ class GraphRepository:
             match_len = len(alias_norm)
             if row["id"] not in best or match_len > best[row["id"]][0]:
                 best[row["id"]] = (match_len, row)
+        contained = {
+            entity_id: row["alias_norm"] for entity_id, (_, row) in best.items()
+            if row["type"] != "concept" and row["alias_norm"] in query_norm
+        }
+        for entity_id, alias in contained.items():
+            longer = [a for other, a in contained.items() if other != entity_id and len(a) > len(alias) and alias in a]
+            if not longer:
+                continue
+            rest = query_norm
+            for other_alias in sorted(longer, key=len, reverse=True):
+                rest = rest.replace(other_alias, "\x00")
+            if alias not in rest:
+                best.pop(entity_id, None)
         ranked = sorted(best.values(), key=lambda item: (-item[0], item[1]["id"]))
-        return [{"id": r["id"], "type": r["type"], "name": r["name"]} for _, r in ranked[:limit]]
+        return [{"id": r["id"], "type": r["type"], "name": r["name"], "ref_type": r["ref_type"], "ref_id": r["ref_id"]}
+                for _, r in ranked[:limit]]
+
+    def parents_of(self, entity_ids: list[int]) -> list[dict]:
+        """파생 모델 → 상위 모델 (variant_of). [{child_id, parent_id, parent_name, ref_type, ref_id}]"""
+        if not entity_ids:
+            return []
+        marks = ",".join("?" * len(entity_ids))
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT DISTINCT r.src_id AS child_id, p.id AS parent_id, p.name AS parent_name, p.ref_type, p.ref_id
+                    FROM graph_relation r JOIN graph_entity p ON p.id = r.dst_id
+                    WHERE r.type = 'variant_of' AND r.src_id IN ({marks})
+                    ORDER BY p.name""",
+                entity_ids,
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def concept_members(self, concept_ids: list[int]) -> list[dict]:
         """상위 개념에 속한 인증 종류 (part_of의 src)."""

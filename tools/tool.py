@@ -215,11 +215,14 @@ def graph_search(query: str, group_id: str | None = None) -> dict:
         group_id: 문서 그룹으로 범위를 좁힐 때만 지정합니다. None이면 전체 문서를 봅니다.
 
     Returns:
-        - matched: 질문에서 찾은 개체
+        - matched: 질문에서 찾은 개체. ref_type·ref_id가 있으면 사양 DB의 같은 대상이다
+          (get_specs(owner_type=ref_type, owner_id=ref_id)로 사양 값을 읽을 수 있다)
         - expanded: 펼친 상위 개념과 그에 속한 인증 종류. 답변에는 각 인증 종류의 문서를 모두 포함합니다.
         - relations: "출발 -[관계]-> 도착 (파일 p페이지)" 형식의 관계
         - documents: 관련 문서. matched_terms가 클수록 질문의 대상을 더 많이 담은 문서입니다.
           각 항목의 source, original_name, pages(개체가 나온 페이지), entities
+          via("상위 모델 ○○")가 붙은 문서는 파생 모델을 물었을 때 상위 모델의 문서를 후보로 더한 것입니다.
+          상위 모델의 인증·사양이 파생 모델에 그대로 적용된다고 쓰지 않습니다 (읽고 모델명을 확인합니다)
     """
     from graph_rag.service import search_graph  # DB 저장소는 사용 시점에 연다
 
