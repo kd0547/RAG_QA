@@ -319,7 +319,7 @@ CREATE TABLE IF NOT EXISTS evidence_use (
 
 | 단계 | 핵심 | 설계 참조 |
 |------|------|-----------|
-| D | 발신자별 고객방 조회 UI(`GET /customers`, `/customers/{sender}/timeline`), skill 문서 4종(`skills/spec-compare.md` 등)과 선택 로딩 도구 | total 10-2, 11-2, 11-3 |
+| D | 발신자별 고객방 조회 UI(`GET /customers`, `/customers/{sender}/timeline`), skill 문서 4종(`skills/<name>/SKILL.md`)과 선택 로딩 도구. **상세 지시: [opus_development_instructions_D.md](opus_development_instructions_D.md)** | total 10-2, 11-2, 11-3 |
 | E | `get_product_specs`·`compare_specs`. `spec_attribute.inheritable` 플래그(기본 false), 자식 명시 값 우선, 기본/옵션 구분, 단위 정규화, `product_component` 연결 없는 부품 값 사용 금지. **제품 양식은 한 시트·공통 속성 유지**(노트북/데스크톱 분리·전용 속성 추가 금지) | total 8-2, 8-7, 11-7 |
 | F | deepagents backend 시제품: `EvidenceService` 위에 읽기 전용 `BackendProtocol` 구현, 같은 10문항으로 비교. 채택 전 설치 버전 고정 | total 11-2 |
 | G | `mails`에 `message_id, in_reply_to, references_` 컬럼, 발신 시 `Message-ID` 생성·`task_send`에 저장, `In-Reply-To`로 conversation 연결, `raw_body/new_body/quoted_body` 분리, 고객 메모리 테이블 | total 11-3, 4장 4단계 |

@@ -85,6 +85,7 @@
 
 - 발신자별 타임라인에 질문·초안·반려·발송이 시간순으로 보인다. 전체 타임라인이 모델 입력에 자동 주입되지 않는다.
 - skill 문서(`spec-compare` 등)가 저장소에 있고, 선택된 것만 모델에 읽힌다. skill 본문의 지시가 서버 검증·승인 정책을 바꾸지 못한다.
+- 항목별 통과 조건(D-1 ~ D-14)은 [opus_development_instructions_D.md](opus_development_instructions_D.md) 9절을 따른다.
 
 ### B-E. 사양 계산·비교
 
