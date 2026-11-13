@@ -69,6 +69,15 @@ export function AttributesTab({
         if (ok) setEditingKey(null);
     };
 
+    const toggleInherit = async (a: SpecAttribute, inheritable: boolean) => {
+        await run(async () => {
+            await specApi.updateAttribute(a.key, { inheritable });
+            return inheritable
+                ? `'${a.name}': 파생 모델에 값이 없으면 상위 모델 값을 물려받습니다.`
+                : `'${a.name}': 상위 모델 값을 물려받지 않습니다.`;
+        }, '물려받기 설정을 저장하지 못했습니다.');
+    };
+
     const remove = async (a: SpecAttribute) => {
         if (!window.confirm(`'${a.name}' (${a.key}) 속성을 삭제할까요?`)) return;
         await run(async () => { await specApi.deleteAttribute(a.key); return `'${a.name}' 속성을 삭제했습니다.`; }, '속성을 삭제하지 못했습니다.');
@@ -96,6 +105,10 @@ export function AttributesTab({
                         <p className="mt-1.5 text-[12.5px] leading-6 text-muted max-w-[640px]">
                             제품과 부품의 사양 값은 여기 있는 속성 키로만 저장합니다. 숫자 속성은 단위를 적어 두면 입찰 조건의 "이상·이하" 비교에 그대로 쓰입니다.
                             사용 중인 속성은 지울 수 없고, 자료형을 바꾸면 기존 값이 새 자료형으로 읽히는지 서버가 확인합니다.
+                        </p>
+                        <p className="mt-1 text-[12.5px] leading-6 text-muted max-w-[640px]">
+                            "상위 모델 값 물려받기"를 허용한 속성만, 파생 모델(예: A650-GA70-PU02)에 자기 값이 없을 때 상위 모델(A650)의 값을 씁니다.
+                            허용하지 않은 속성은 파생 모델에 값이 없으면 "확인 필요"로 답합니다. 인증·규격 속성은 모델마다 따로 받으므로 물려받지 않습니다.
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -143,7 +156,7 @@ export function AttributesTab({
                         </div>
                     ) : (
                         <div className="overflow-x-auto">
-                            <table className="w-full min-w-[860px] text-[12.5px]">
+                            <table className="w-full min-w-[960px] text-[12.5px]">
                                 <thead className="bg-surface text-left text-[11px] text-muted">
                                     <tr>
                                         <th className="px-4 py-2.5 font-semibold">키</th>
@@ -151,6 +164,7 @@ export function AttributesTab({
                                         <th className="px-3 py-2.5 font-semibold">자료형</th>
                                         <th className="px-3 py-2.5 font-semibold">단위</th>
                                         <th className="px-3 py-2.5 font-semibold">설명</th>
+                                        <th className="px-3 py-2.5 font-semibold whitespace-nowrap">상위 모델 값 물려받기</th>
                                         <th className="px-3 py-2.5 font-semibold text-right">사용</th>
                                         <th className="px-3 py-2.5 w-[96px]" />
                                     </tr>
@@ -170,6 +184,7 @@ export function AttributesTab({
                                             onSave={() => void saveEdit()}
                                             onCancel={() => setEditingKey(null)}
                                             onRemove={(a) => void remove(a)}
+                                            onToggleInherit={(a, value) => void toggleInherit(a, value)}
                                         />
                                     ))}
                                 </tbody>
@@ -194,6 +209,7 @@ function AttributeGroup({
     onSave,
     onCancel,
     onRemove,
+    onToggleInherit,
 }: {
     title: string;
     rows: SpecAttribute[];
@@ -206,16 +222,18 @@ function AttributeGroup({
     onSave: () => void;
     onCancel: () => void;
     onRemove: (a: SpecAttribute) => void;
+    onToggleInherit: (a: SpecAttribute, inheritable: boolean) => void;
 }) {
     const categories = Object.entries(meta?.attribute_categories ?? {});
     const dataTypes = Object.entries(meta?.data_types ?? {}) as [DataType, string][];
     return (
         <>
             <tr className="border-t border-divide">
-                <td colSpan={7} className="px-4 pt-3 pb-1 text-[11px] font-bold text-muted">{title}</td>
+                <td colSpan={8} className="px-4 pt-3 pb-1 text-[11px] font-bold text-muted">{title}</td>
             </tr>
             {rows.map((a) => {
                 const editing = editingKey === a.key;
+                const inheritCell = <InheritCell attribute={a} busy={busy || editing} onToggle={onToggleInherit} />;
                 return (
                     <tr key={a.key} className="border-t border-divide align-top">
                         <td className="px-4 py-2 font-mono text-[11.5px] text-muted whitespace-nowrap">{a.key}</td>
@@ -239,6 +257,7 @@ function AttributeGroup({
                                         <input type="number" value={editDraft.sort_order} onChange={(e) => onEditChange({ sort_order: Number(e.target.value) })} disabled={busy} aria-label="정렬 순서" className={`${smallInputCls} w-[64px]`} />
                                     </label>
                                 </td>
+                                {inheritCell}
                                 <td className="px-3 py-2 text-right tabular-nums text-muted">{a.usage_count}</td>
                                 <td className="px-3 py-1.5 text-right whitespace-nowrap">
                                     <button type="button" onClick={onSave} disabled={busy || !editDraft.name.trim()} className={`${btnTiny} text-brand hover:text-brand-hover`}>저장</button>
@@ -251,6 +270,7 @@ function AttributeGroup({
                                 <td className="px-3 py-2 text-muted">{labelOf(meta?.data_types, a.data_type)}</td>
                                 <td className="px-3 py-2 text-muted">{a.unit || '—'}</td>
                                 <td className="px-3 py-2 text-muted break-words">{a.description || '—'}</td>
+                                {inheritCell}
                                 <td className="px-3 py-2 text-right tabular-nums text-muted">{a.usage_count}</td>
                                 <td className="px-3 py-1.5 text-right whitespace-nowrap">
                                     <button type="button" onClick={() => onStartEdit(a)} disabled={busy} className={btnTiny}>수정</button>
@@ -271,5 +291,28 @@ function AttributeGroup({
                 );
             })}
         </>
+    );
+}
+
+/** "상위 모델 값 물려받기 허용" 체크박스. 인증·규격(cert) 속성은 모델마다 따로 받으므로 켤 수 없다 (서버도 400으로 막는다). */
+function InheritCell({ attribute, busy, onToggle }: { attribute: SpecAttribute; busy: boolean; onToggle: (a: SpecAttribute, inheritable: boolean) => void }) {
+    const isCert = attribute.category === 'cert';
+    return (
+        <td className="px-3 py-2">
+            <label
+                className={`inline-flex items-center gap-1.5 text-[11.5px] ${isCert ? 'text-muted/70' : 'text-muted'}`}
+                title={isCert ? '인증은 모델마다 따로 받으므로 상위 모델에서 물려받지 않습니다' : '파생 모델에 자기 값이 없을 때 상위 모델의 값을 씁니다'}
+            >
+                <input
+                    type="checkbox"
+                    checked={!isCert && Boolean(attribute.inheritable)}
+                    disabled={busy || isCert}
+                    onChange={(e) => onToggle(attribute, e.target.checked)}
+                    aria-label={`${attribute.name}: 상위 모델 값 물려받기 허용`}
+                    className="h-3.5 w-3.5 accent-brand"
+                />
+                {isCert ? '인증은 물려받지 않음' : '허용'}
+            </label>
+        </td>
     );
 }

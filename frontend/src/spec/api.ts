@@ -21,6 +21,8 @@ export interface SpecAttribute {
     unit: string;
     description: string;
     sort_order: number;
+    /** 1이면 파생 모델에 자기 값이 없을 때 상위 모델 값을 물려받는다. 인증(cert) 분류는 켤 수 없다 (서버 400) */
+    inheritable: number;
     usage_count: number;
     created_at: string;
     updated_at: string;
@@ -239,7 +241,7 @@ export const specApi = {
     createAttribute(input: AttributeInput): Promise<SpecAttribute> {
         return request<SpecAttribute>('/specs/attributes', json('POST', input));
     },
-    updateAttribute(key: string, patch: Partial<Omit<AttributeInput, 'key'>>): Promise<SpecAttribute> {
+    updateAttribute(key: string, patch: Partial<Omit<AttributeInput, 'key'> & { inheritable: boolean }>): Promise<SpecAttribute> {
         return request<SpecAttribute>(`/specs/attributes/${enc(key)}`, json('PUT', patch));
     },
     deleteAttribute(key: string): Promise<void> {
