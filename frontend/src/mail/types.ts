@@ -51,6 +51,13 @@ export interface DraftValidation {
     cited_ids: string[];
 }
 
+/** 에이전트가 부른 도구 하나 (가장 최근 실행) */
+export interface MailTraceItem {
+    tool: string;
+    args_summary: string;           // 인자 JSON 앞 200자
+    at: string;                     // ISO 8601
+}
+
 /** 상세(GET /mails/{task_id}) */
 export interface MailDetail extends MailSummary {
     assignee: string | null;        // 검토 담당자
@@ -61,6 +68,8 @@ export interface MailDetail extends MailSummary {
     retrieval: { query_top_k: number | null; rerank_top_n: number | null } | null;
     sources: MailSource[];
     validation?: DraftValidation | null; // 검증 전에 만든 초안·이전 버전 서버는 없음
+    read_sources?: MailSource[];    // 에이전트가 읽었지만 sources에 없는 근거 (인용하지 않음)
+    trace?: MailTraceItem[];        // 가장 최근 실행의 도구 호출 (이전 버전 서버는 없음)
     attachments?: MailAttachment[]; // 첨부 후보. 승인할 때 고른 것만 전송된다 (이전 버전 서버는 보내지 않음)
     created_at: string;
     updated_at: string;

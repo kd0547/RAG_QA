@@ -103,7 +103,7 @@ export function ReplyHeader({
     );
 }
 
-export function SourceList({ sources }: { sources: MailSource[] }) {
+export function SourceList({ sources, readSources = [] }: { sources: MailSource[]; readSources?: MailSource[] }) {
     // 답변이 '근거:' 줄로 인용한 근거가 있으면 그것만 오고(cited), 없으면 에이전트가 읽은 페이지가 온다
     const cited = sources.some((s) => s.cited);
     return (
@@ -117,26 +117,40 @@ export function SourceList({ sources }: { sources: MailSource[] }) {
             {sources.length === 0 ? (
                 <p className="mt-2 text-[12px] text-muted">연결된 근거 문서가 없습니다.</p>
             ) : (
-                <ul className="mt-1 divide-y divide-divide">
-                    {sources.map((s, i) => (
-                        <li key={i} className="flex gap-3 min-w-0 py-2.5">
-                            <span className="shrink-0 mt-0.5 w-7 h-7 rounded-lg bg-brand-pale text-brand flex items-center justify-center">
-                                <DocumentIcon className="w-3.5 h-3.5" />
-                            </span>
-                            <div className="min-w-0">
-                                <div className="text-[12.5px] font-semibold truncate" title={s.source}>
-                                    {s.source}
-                                </div>
-                                <div className="text-[11px] text-muted line-clamp-2">
-                                    {s.page != null && <span className="font-mono">p.{s.page} · </span>}
-                                    {s.text}
-                                </div>
-                            </div>
-                        </li>
-                    ))}
-                </ul>
+                <SourceItems sources={sources} />
+            )}
+            {readSources.length > 0 && (
+                <details className="mt-3">
+                    <summary className="cursor-pointer text-[12px] font-bold text-muted">
+                        읽었지만 인용하지 않은 근거 <span className="tabular-nums">{readSources.length}</span>
+                    </summary>
+                    <SourceItems sources={readSources} muted />
+                </details>
             )}
         </section>
+    );
+}
+
+function SourceItems({ sources, muted = false }: { sources: MailSource[]; muted?: boolean }) {
+    return (
+        <ul className={`mt-1 divide-y divide-divide ${muted ? 'opacity-70' : ''}`}>
+            {sources.map((s, i) => (
+                <li key={i} className="flex gap-3 min-w-0 py-2.5">
+                    <span className="shrink-0 mt-0.5 w-7 h-7 rounded-lg bg-brand-pale text-brand flex items-center justify-center">
+                        <DocumentIcon className="w-3.5 h-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                        <div className="text-[12.5px] font-semibold truncate" title={s.source}>
+                            {s.source}
+                        </div>
+                        <div className="text-[11px] text-muted line-clamp-2">
+                            {s.page != null && <span className="font-mono">p.{s.page} · </span>}
+                            {s.text}
+                        </div>
+                    </div>
+                </li>
+            ))}
+        </ul>
     );
 }
 

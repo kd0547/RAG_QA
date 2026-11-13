@@ -1,3 +1,4 @@
+import json
 import logging
 from dataclasses import asdict
 from datetime import datetime, date
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from entity.type import parse_status_filter, TaskStatus
 from mail.email_send import SENDER_EMAIL, SendOutcome, SendResult, send_email
 from mail.templates import render_answer_email
-from repository import task_repo
+from repository import evidence_repo, task_repo
 from repository.task_repository import TaskRepository
 from logging_config import mask_email
 
@@ -95,6 +96,11 @@ def view_mail_detail(task_id: str):
         raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
 
 
+    sources = [
+        {"source": PureWindowsPath(s["source"] or "").name, "page": s["page"], "text": s["text"],
+         "evidence_id": s["chunk_id"], "cited": bool(s["cited"])}
+        for s in task_repo.get_sources(task_id)
+    ]
     return {
         **asdict(detail),
         "recipient": SENDER_EMAIL,
@@ -104,17 +110,39 @@ def view_mail_detail(task_id: str):
         "validation": task_repo.get_validation(task_id),
         # 파일명만 내보낸다 (task_sources.source에는 디스크 경로가 들어 있을 수 있다).
         # 윈도우에서 저장한 경로를 리눅스(Docker)에서 읽어도 잘리도록 \와 / 둘 다 구분자로 본다.
-        "sources": [
-            {"source": PureWindowsPath(s["source"] or "").name, "page": s["page"], "text": s["text"],
-             "evidence_id": s["chunk_id"], "cited": bool(s["cited"])}
-            for s in task_repo.get_sources(task_id)
-        ],
+        # 답변이 인용한 근거가 있으면 그것(cited=true), 없으면 읽은 근거(cited=false)
+        "sources": sources,
+        # 에이전트가 읽었지만 sources에 없는 근거 (인용하지 않은 페이지). 화면이 따로 보여 준다
+        "read_sources": _read_sources(task_id, {s["evidence_id"] for s in sources}),
+        # 가장 최근 실행에서 에이전트가 부른 도구 [{tool, args_summary, at}] (검토 화면 '에이전트가 한 일')
+        "trace": _latest_trace(task_id),
         # 디스크 경로는 화면에 내보내지 않는다
         "attachments": [
             {k: v for k, v in c.items() if k != "path"}
             for c in _attachment_candidates(task_id)
         ],
     }
+
+def _latest_trace(task_id: str) -> list[dict]:
+    run = evidence_repo.latest_run("task", task_id)
+    if run is None or not run.get("tool_calls_json"):
+        return []
+    try:
+        return json.loads(run["tool_calls_json"])
+    except ValueError:
+        logger.warning("실행 기록의 도구 호출 목록을 읽지 못함: task_id=%s, run=%s", task_id, run["run_id"])
+        return []
+
+
+def _read_sources(task_id: str, shown: set) -> list[dict]:
+    """이 메일의 실행들에서 읽은 근거 중 sources에 없는 것 (본문 앞 300자)."""
+    return [
+        {"source": e["source_name"] or "", "page": e["page"], "text": (e["text"] or "")[:300],
+         "evidence_id": e["evidence_id"], "cited": False}
+        for e in evidence_repo.uses_for_owner("task", task_id, "read")
+        if e["evidence_id"] not in shown
+    ]
+
 
 @router.post("/mails/{task_id}/reject")
 def mail_reject(task_id: str, payload: RejectBody, request: Request):

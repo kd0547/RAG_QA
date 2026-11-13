@@ -31,6 +31,13 @@ const FILTER_STATUSES: Record<Exclude<Filter, 'all'>, MailStatus[]> = {
 
 const isSendIssue = (s: MailStatus) => SEND_ISSUE_STATUSES.includes(s);
 
+const clockFmt = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+/** 도구 호출 시각 (시:분:초) */
+const fmtClock = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '—' : clockFmt.format(d);
+};
+
 /** 발송 문제 상태의 안내 문구 (검토 캔버스) */
 const SEND_NOTICE: Partial<Record<MailStatus, string>> = {
     sending: '발송 중입니다. 오래 이 상태로 남아 있으면 서버가 발송 도중 재시작된 것일 수 있습니다. 보낸편지함에서 확인해 주세요.',
@@ -610,7 +617,25 @@ export function MailReviewPage({
                             )}
 
                             <div className="mt-8">
-                                <SourceList sources={detail.sources} />
+                                <SourceList sources={detail.sources} readSources={detail.read_sources ?? []} />
+                                {(detail.trace?.length ?? 0) > 0 && (
+                                    <details className="mt-6">
+                                        <summary className="cursor-pointer text-[12px] font-bold text-muted">
+                                            에이전트가 한 일 <span className="tabular-nums">{detail.trace!.length}</span>
+                                        </summary>
+                                        <ol className="mt-2 flex flex-col gap-1.5">
+                                            {detail.trace!.map((t, i) => (
+                                                <li key={i} className="flex gap-2 min-w-0 text-[11.5px]">
+                                                    <span className="shrink-0 tabular-nums text-muted">{fmtClock(t.at)}</span>
+                                                    <span className="shrink-0 font-semibold">{t.tool}</span>
+                                                    <span className="min-w-0 truncate font-mono text-muted" title={t.args_summary}>
+                                                        {t.args_summary}
+                                                    </span>
+                                                </li>
+                                            ))}
+                                        </ol>
+                                    </details>
+                                )}
                             </div>
                         </div>
 
