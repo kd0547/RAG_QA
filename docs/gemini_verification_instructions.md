@@ -92,6 +92,10 @@
 - 승인 전 초안은 어떤 답변 실행에도 읽히지 않는다. 자동 승인 경로가 없다. 답변 에이전트에 쓰기 도구가 없다.
 - 항목별 통과 조건(I-1 ~ I-12)은 [opus_development_instructions_I.md](opus_development_instructions_I.md) 10절을 따른다.
 
+### 남은 단계 통합 검증 (E · H · G · F, 2026-11-13)
+
+사용자 결정으로 남은 단계는 한 번에 만들고 한 번에 검증한다. 항목별 통과 조건은 [opus_development_instructions_remaining.md](opus_development_instructions_remaining.md) 9절 T5 표를 따른다. 아래 B-E ~ B-G는 그 표의 요약이다.
+
 ### B-E. 사양 계산·비교
 
 - `get_product_specs`: 자식 명시 값 > 허용 상속 부모 값. `inheritable=false` 속성은 상속 안 됨. 값 부재와 "미지원"을 구분.

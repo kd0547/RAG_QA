@@ -317,6 +317,8 @@ CREATE TABLE IF NOT EXISTS evidence_use (
 
 ## 6. 단계 D~H (개요, 별도 지시 예정)
 
+**2026-11-13 갱신**: D와 I는 구현됐다. 남은 E·H·G·F와 통합 테스트의 상세 지시는 [opus_development_instructions_remaining.md](opus_development_instructions_remaining.md)에 있다. 아래 표·6-1절과 다르면 그 문서를 따른다.
+
 | 단계 | 핵심 | 설계 참조 |
 |------|------|-----------|
 | D | 발신자별 고객방 조회 UI(`GET /customers`, `/customers/{sender}/timeline`), skill 문서 4종(`skills/<name>/SKILL.md`)과 선택 로딩 도구. **상세 지시: [opus_development_instructions_D.md](opus_development_instructions_D.md)** | total 10-2, 11-2, 11-3 |
