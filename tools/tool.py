@@ -12,6 +12,7 @@ from retrieval.embedder import get_embedding_model
 from repository.embedding_repository import search
 from agent import reranker
 from parser.file_parser import parse_file
+from parser.pdf.type import PageText
 
 logger = logging.getLogger(__name__)
 
@@ -438,6 +439,8 @@ def grep_documents(pattern: str, file_id: str | None = None, limit: int = 20) ->
 
 # attachment_page.parser_version과 첨부 근거의 revision. 파서를 바꿔 다시 파싱해야 하면 올린다.
 ATTACHMENT_PARSER_VERSION = "parse_file/1"
+# 파싱 결과가 빈 첨부에 저장하는 표시 행 (seq=0, page=0, text=''). 읽기 결과에서는 뺀다
+EMPTY_ATTACHMENT_MARKER = PageText(page=0, text="")
 
 
 def resolve_attachment(attachment_id: int) -> dict | None:
@@ -466,6 +469,7 @@ def attachment_page_texts(entry: dict) -> list[tuple[int, str]]:
 
     처음 읽을 때 그 첨부만 한 번 파싱한다. 메일 첨부는 attachment_page에 저장하고,
     임시 첨부는 세션 안에만 보관한다 (응답 뒤 파일과 함께 사라진다).
+    파싱 결과가 비면 표시 행(page=0, 빈 본문) 하나를 저장해 다시 파싱하지 않는다. 결과에서는 빼므로 빈 목록이 된다.
     """
     if entry["temp"]:
         if entry.get("pages") is None:
@@ -475,10 +479,12 @@ def attachment_page_texts(entry: dict) -> list[tuple[int, str]]:
         rows = repository.email_repo.attachment_pages(entry["attachment_id"])
         if not rows:
             parsed = parse_file(entry["path"])
-            repository.email_repo.save_attachment_pages(entry["attachment_id"], parsed, ATTACHMENT_PARSER_VERSION)
+            # 내용이 없는 첨부: 표시 행을 남겨 다음에 다시 파싱하지 않는다
+            to_save = parsed or [EMPTY_ATTACHMENT_MARKER]
+            repository.email_repo.save_attachment_pages(entry["attachment_id"], to_save, ATTACHMENT_PARSER_VERSION)
             logger.info("첨부 파싱·저장: attachment_id=%s, %s, %d블록", entry["attachment_id"], entry["filename"], len(parsed))
             rows = repository.email_repo.attachment_pages(entry["attachment_id"])
-        raw = [(row["page"], row["text"]) for row in rows]
+        raw = [(row["page"], row["text"]) for row in rows if not (row["page"] == 0 and not row["text"])]
     grouped: dict[int, list[str]] = {}
     for page, text in raw:
         grouped.setdefault(page, []).append(text)
@@ -521,6 +527,8 @@ def read_attachment(
         logger.exception("[read_attachment] 첨부 파싱 실패: attachment_id=%s, %s", attachment_id, entry["filename"])
         return {"error": f"첨부를 읽지 못했습니다: {entry['filename']}"}
 
+    if not page_texts:
+        return {"error": "이 첨부에서 추출된 텍스트가 없습니다"}
     wanted = _page_numbers(pages) if pages else list(page_texts)
     missing = [p for p in wanted if p not in page_texts]
     selected = [(p, page_texts[p], {}) for p in wanted if p in page_texts]

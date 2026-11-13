@@ -183,3 +183,32 @@ def test_tool_message_has_no_full_attachment_text(agent_env, tmp_path, parse_cal
     body = json.loads(tool_message.content)
     assert sum(len(p["text"]) for p in body["pages"]) == 6000
     assert body["truncated"] is True and body["next_pages"]
+
+
+# ---------------------------------------------------------------- C2-P8 내용이 없는 첨부
+
+def test_empty_attachment_is_parsed_once(agent_env, tmp_path, monkeypatch):
+    from agent import agent as agent_module
+    from agent.evidence_context import owner_scope, run_scope
+
+    calls = []
+    monkeypatch.setattr(tools, "parse_file", lambda path: calls.append(path) or [])
+    pdf = tmp_path / "blank.pdf"
+    pdf.write_bytes(b"%PDF")
+    task_id, attachments = _mail_with_attachments(agent_env, tmp_path, "m9", [
+        Attachment(type="pdf", filename="blank.pdf", content_type="application/pdf", image=None, path=str(pdf)),
+    ])
+    attachment_id = attachments[0].attachment_id
+    run_id = agent_env.evidence_repo.start_run("task", task_id, "test", None)
+
+    with owner_scope(Owner("task", task_id)), run_scope(run_id):
+        blocks = agent_module._attachment_to_blocks(attachments[0], 1, [])
+        first = tools.read_attachment.invoke({"attachment_id": attachment_id})
+        second = tools.read_attachment.invoke({"attachment_id": attachment_id, "pages": [1]})
+
+    assert len(calls) == 1
+    assert "0페이지" in blocks[0]["text"]
+    assert first == second == {"error": "이 첨부에서 추출된 텍스트가 없습니다"}
+    assert agent_env.email_repo.attachment_pages(attachment_id) == [
+        {"seq": 0, "page": 0, "text": "", "parser_version": tools.ATTACHMENT_PARSER_VERSION},
+    ]
