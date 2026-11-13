@@ -176,13 +176,16 @@ def run_agent(
         thread_id: str | None = None,
 ) -> dict:
     agent = get_agent(mode)
+    thread_id = thread_id or new_ask_thread_id()
 
-    with owner_scope(owner or new_session_owner()) as current:
-        result = _invoke_logged(
-            agent, [{"role": "user", "content": question}], mode, label="질문",
-            thread_id=thread_id or new_ask_thread_id(),
-        )
-        return _finish_answer(result, current)
+    try:
+        with owner_scope(owner or new_session_owner()) as current:
+            result = _invoke_logged(
+                agent, [{"role": "user", "content": question}], mode, label="질문", thread_id=thread_id,
+            )
+            return _finish_answer(result, current)
+    finally:
+        _cleanup_ask_thread(agent, thread_id)
 
 
 def run_agent_temp_attachments(
@@ -211,29 +214,47 @@ def run_agent_temp_attachments(
     thread_id = thread_id or new_ask_thread_id()
     has_history = bool(_message_ids(agent, {"configurable": {"thread_id": thread_id}}))
 
-    with owner_scope(owner or new_session_owner()) as current:
-        preread: list[str] = []
-        if has_history and review:
-            messages = [_review_message(thread_id, review)]
-            label = f"메일 반려 반영(review_id={review[0]}, 같은 대화)"
-        elif has_history and _ended_without_answer(agent, thread_id):
-            messages = [_retry_message(agent, thread_id, retry_id)]
-            label = f"메일 재시도(retry_id={retry_id}, 이전 실행이 답변 없이 끝남)"
-        elif has_history:
-            messages = None
-            label = "메일 이어서 실행(대화 기록에서 재개)"
-        else:
-            # 첨부 본문은 메시지에 넣지 않는다. 안내 한 줄만 넣고 모델이 read_attachment로 필요한 페이지를 읽는다.
-            content: list[dict] = [{"type": "text", "text": question}]
-            for index, attachment in enumerate(attachments or [], start=1):
-                content.extend(_attachment_to_blocks(attachment, index, preread))
-            messages = [HumanMessage(content=content, id=f"question:{thread_id}")]
-            if review:
-                messages.append(_review_message(thread_id, review))
-            label = f"메일(첨부 {len(attachments or [])}건, 반려 {'있음, 대화 기록 없음' if review else '없음'})"
+    try:
+        with owner_scope(owner or new_session_owner()) as current:
+            preread: list[str] = []
+            if has_history and review:
+                messages = [_review_message(thread_id, review)]
+                label = f"메일 반려 반영(review_id={review[0]}, 같은 대화)"
+            elif has_history and _ended_without_answer(agent, thread_id):
+                messages = [_retry_message(agent, thread_id, retry_id)]
+                label = f"메일 재시도(retry_id={retry_id}, 이전 실행이 답변 없이 끝남)"
+            elif has_history:
+                messages = None
+                label = "메일 이어서 실행(대화 기록에서 재개)"
+            else:
+                # 첨부 본문은 메시지에 넣지 않는다. 안내 한 줄만 넣고 모델이 read_attachment로 필요한 페이지를 읽는다.
+                content: list[dict] = [{"type": "text", "text": question}]
+                for index, attachment in enumerate(attachments or [], start=1):
+                    content.extend(_attachment_to_blocks(attachment, index, preread))
+                messages = [HumanMessage(content=content, id=f"question:{thread_id}")]
+                if review:
+                    messages.append(_review_message(thread_id, review))
+                label = f"메일(첨부 {len(attachments or [])}건, 반려 {'있음, 대화 기록 없음' if review else '없음'})"
 
-        result = _invoke_logged(agent, messages, mode, label=label, preread=preread, thread_id=thread_id)
-        return _finish_answer(result, current)
+            result = _invoke_logged(agent, messages, mode, label=label, preread=preread, thread_id=thread_id)
+            return _finish_answer(result, current)
+    finally:
+        _cleanup_ask_thread(agent, thread_id)
+
+
+def _cleanup_ask_thread(agent, thread_id: str) -> None:
+    """웹 질문(/ask)의 대화는 한 번 쓰고 버린다: checkpoint와 thread 잠금을 지운다. 메일(task:) 대화는 절대 지우지 않는다."""
+    if not thread_id.startswith("ask:"):
+        return
+    try:
+        checkpointer = getattr(agent, "checkpointer", None)
+        if checkpointer is not None:
+            checkpointer.delete_thread(thread_id)
+    except Exception:
+        logger.warning("웹 질문 대화 기록 삭제 실패: thread=%s", thread_id, exc_info=True)
+    finally:
+        with _thread_locks_guard:
+            _thread_locks.pop(thread_id, None)
 
 
 RETRY_TEXT = "[재시도] 이전 실행이 답변 없이 끝났습니다. 이미 읽은 근거로 답변을 작성하고, 부족하면 필요한 부분만 더 읽으세요."

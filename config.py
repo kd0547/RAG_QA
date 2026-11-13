@@ -74,6 +74,9 @@ CTX_SUMMARY_TRIGGER_TOKENS = int(os.getenv("CTX_SUMMARY_TRIGGER_TOKENS", "40000"
 # 모델 호출 한도(20회, ModelCallLimitMiddleware)가 먼저 걸리도록 넉넉히 둔다 (40이면 도구 9회 호출에서 끊긴다)
 AGENT_RECURSION_LIMIT = int(os.getenv("AGENT_RECURSION_LIMIT", "200"))
 
+# 웹 질문(/ask)의 근거·실행 기록 보관 기간(일). 서버 시작 때 이보다 오래된 것을 지운다 (메일 기록은 지우지 않는다)
+SESSION_EVIDENCE_RETENTION_DAYS = int(os.getenv("SESSION_EVIDENCE_RETENTION_DAYS", "14"))
+
 # ---------- 문서 그래프 (Graph RAG) ----------
 # 업로드·페이지 검수 저장 뒤 백그라운드로 개체·관계를 뽑을지 (0이면 끈다. /graph/rebuild로 따로 뽑을 수 있다)
 GRAPH_EXTRACT_ENABLED = os.getenv("GRAPH_EXTRACT_ENABLED", "1") not in ("0", "false", "False", "")

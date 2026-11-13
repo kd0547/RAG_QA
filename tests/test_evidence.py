@@ -90,3 +90,44 @@ def test_run_agent_without_owner_uses_new_session(agent_env):
     with agent_env.db.get_conn() as conn:
         rows = conn.execute("SELECT owner_type, status FROM run").fetchall()
     assert [tuple(r) for r in rows] == [("session", "ok")]
+
+
+# ---------------------------------------------------------------- C2-P6 웹 질문 기록 정리
+
+def test_purge_sessions_removes_only_old_session_rows(agent_env):
+    from datetime import datetime, timedelta
+
+    repo = agent_env.evidence_repo
+    old_ev = repo.register("session", "s-old", "chunk", "옛 근거", file_id="f", page=1)
+    old_run = repo.start_run("session", "s-old", "qwen", None)
+    repo.record_use(old_run, old_ev, "read")
+    new_ev = repo.register("session", "s-new", "chunk", "어제 근거", file_id="f", page=1)
+    new_run = repo.start_run("session", "s-new", "qwen", None)
+    repo.record_use(new_run, new_ev, "read")
+    task_ev = repo.register("task", "t1", "chunk", "메일 근거", file_id="f", page=1)
+    task_run = repo.start_run("task", "t1", "qwen", None)
+    repo.record_use(task_run, task_ev, "read")
+    month_ago = (datetime.now() - timedelta(days=30)).isoformat()
+    yesterday = (datetime.now() - timedelta(days=1)).isoformat()
+    with agent_env.db.get_conn() as conn:
+        conn.execute("UPDATE evidence SET created_at = ? WHERE evidence_id IN (?, ?)", (month_ago, old_ev, task_ev))
+        conn.execute("UPDATE run SET started_at = ? WHERE run_id IN (?, ?)", (month_ago, old_run, task_run))
+        conn.execute("UPDATE evidence SET created_at = ? WHERE evidence_id = ?", (yesterday, new_ev))
+        conn.execute("UPDATE run SET started_at = ? WHERE run_id = ?", (yesterday, new_run))
+
+    assert repo.purge_sessions(14) == {"evidence": 1, "evidence_use": 1, "run": 1}
+
+    assert repo.get(old_ev) is None and repo.get_run(old_run) is None
+    assert repo.get(new_ev) is not None and repo.get_run(new_run) is not None
+    assert repo.get(task_ev) is not None and repo.get_run(task_run) is not None  # 30일 지난 메일 기록도 남는다
+    assert [u["evidence_id"] for u in repo.uses_for_run(task_run)] == [task_ev]
+
+
+def test_lifespan_purges_sessions_with_configured_days():
+    from pathlib import Path
+
+    import config
+
+    source = (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
+    assert "evidence_repo.purge_sessions(config.SESSION_EVIDENCE_RETENTION_DAYS)" in source
+    assert config.SESSION_EVIDENCE_RETENTION_DAYS == 14

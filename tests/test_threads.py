@@ -41,16 +41,38 @@ def test_task_thread_is_saved_and_continued(agent_env, saver, tmp_path):
     assert agent_module.thread_message_count(thread) == 4
 
 
-def test_ask_uses_new_thread_each_call(agent_env, saver, tmp_path):
+def test_ask_uses_new_thread_each_call_and_leaves_none(agent_env, saver, tmp_path, monkeypatch):
+    """/ask는 호출마다 새 대화(ask:…)를 쓰고, 끝나면 그 대화 기록과 잠금을 지운다 (C2-P6)."""
     from agent import agent as agent_module
 
+    made = []
+    original = agent_module.new_ask_thread_id
+    monkeypatch.setattr(agent_module, "new_ask_thread_id", lambda: made.append(original()) or made[-1])
     agent_env.install([AIMessage(content="답1\n근거: 없음"), AIMessage(content="답2\n근거: 없음")], checkpointer=saver)
 
     agent_module.run_agent("질문", mode="local")
     agent_module.run_agent("질문", mode="local")
 
-    threads = _threads(tmp_path / "threads.db")
-    assert len(threads) == 2 and all(t.startswith("ask:") for t in threads)
+    assert len(set(made)) == 2 and all(t.startswith("ask:") for t in made)
+    assert _threads(tmp_path / "threads.db") == set()
+    assert not any(t in agent_module._thread_locks for t in made)
+
+
+def test_ask_thread_removed_even_on_failure_but_task_thread_kept(agent_env, saver, tmp_path):
+    from agent import agent as agent_module
+
+    def dies(messages):
+        raise ConnectionError("모델 끊김")
+
+    agent_env.install([AIMessage(content="메일 답\n근거: 없음"), dies, AIMessage(content="첨부 답\n근거: 없음")],
+                      checkpointer=saver)
+    agent_module.run_agent_temp_attachments("메일 질문", mode="local", owner=Owner("task", "t1"), thread_id="task:t1")
+    with pytest.raises(ConnectionError):
+        agent_module.run_agent("웹 질문", mode="local")
+    agent_module.run_agent_temp_attachments("첨부 질문", mode="local")  # /ask/attachments 경로
+
+    assert _threads(tmp_path / "threads.db") == {"task:t1"}
+    assert agent_env.evidence_repo.latest_run("task", "t1")["status"] == "ok"
 
 
 def test_run_counts_only_this_runs_messages(agent_env, saver):

@@ -32,7 +32,7 @@ from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
 from agent.agent import ALIASES, get_agent, open_checkpointer, set_checkpointer
-from repository import db, email_repo, graph_repo, group_repo, prompt_repo, task_repo
+from repository import db, email_repo, evidence_repo, graph_repo, group_repo, prompt_repo, task_repo
 from logging_config import setup_logging
 
 # uvicorn이 앱을 import할 때 한 번 실행된다. 이후 메일 스레드·라우터 로그가 logs/에 남는다.
@@ -73,6 +73,13 @@ async def lifespan(app: FastAPI):
             logger.warning("발송 중이던 작업 %d건을 send_unknown으로 넘김 (담당자 확인 필요)", stale)
     except Exception:
         logger.exception("생성·발송 중 작업 복구 실패")
+
+    # 웹 질문(/ask)의 근거·실행 기록은 보관 기간이 지나면 지운다. 메일 기록은 지우지 않는다.
+    try:
+        purged = evidence_repo.purge_sessions(config.SESSION_EVIDENCE_RETENTION_DAYS)
+        logger.info("오래된 웹 질문 기록 정리(%d일 초과): %s", config.SESSION_EVIDENCE_RETENTION_DAYS, purged)
+    except Exception:
+        logger.exception("웹 질문 기록 정리 실패")
 
     # 기본 프롬프트가 DB에 없으면 agent/prompt.py 내용으로 넣는다.
     # 실패해도 에이전트는 agent/prompt.py 원문으로 동작하므로 서버 시작은 막지 않는다.

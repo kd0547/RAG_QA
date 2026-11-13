@@ -9,7 +9,7 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from repository.repo_connect import Database
 
@@ -186,6 +186,29 @@ class EvidenceRepository:
             seen.add(row["evidence_id"])
             result.append(dict(row))
         return result
+
+    def purge_sessions(self, older_than_days: int) -> dict:
+        """웹 질문(owner_type='session')의 근거·근거 사용·실행 기록 중 기준일보다 오래된 것을 지운다.
+
+        메일(owner_type='task') 기록은 건드리지 않는다. 지운 건수를 돌려준다.
+        """
+        cutoff = (datetime.now() - timedelta(days=older_than_days)).isoformat()
+        with self.db.transaction() as conn:
+            uses = conn.execute(
+                """
+                DELETE FROM evidence_use
+                WHERE run_id IN (SELECT run_id FROM run WHERE owner_type = 'session' AND started_at < ?)
+                   OR evidence_id IN (SELECT evidence_id FROM evidence WHERE owner_type = 'session' AND created_at < ?)
+                """,
+                (cutoff, cutoff),
+            ).rowcount
+            evidence = conn.execute(
+                "DELETE FROM evidence WHERE owner_type = 'session' AND created_at < ?", (cutoff,),
+            ).rowcount
+            runs = conn.execute(
+                "DELETE FROM run WHERE owner_type = 'session' AND started_at < ?", (cutoff,),
+            ).rowcount
+        return {"evidence": evidence, "evidence_use": uses, "run": runs}
 
     # ------------------------------------------------------------ 실행
 
