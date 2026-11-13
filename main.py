@@ -18,6 +18,7 @@ from app import access_log, system_monitor
 from app.access_log import AccessLogMiddleware
 from app.routers.app_config import router as config_router
 from app.routers.monitor import router as monitor_router
+from app.routers.customers import router as customer_router
 from app.routers.files import router as file_router
 from app.routers.graph import router as graph_router
 from app.routers.group import router as group_router
@@ -164,6 +165,7 @@ app.include_router(search_router)
 app.include_router(question_router)
 app.include_router(mail_router)
 app.include_router(mail_link_router)
+app.include_router(customer_router)
 app.include_router(prompt_router)
 app.include_router(spec_router)
 app.include_router(spec_import_router)
@@ -175,7 +177,7 @@ if FRONTEND_DIST.is_dir():
     @app.get("/{spa_path:path}", include_in_schema=False)
     def frontend(spa_path: str) -> FileResponse:
         # 존재하지 않는 API 요청에 HTML을 반환하면 프론트엔드에서 JSON 파싱 오류가 난다.
-        if spa_path.split("/", 1)[0] in {"file", "files", "groups", "config", "upload", "ask", "search", "mails", "prompts", "specs", "graph", "monitor"}:
+        if spa_path.split("/", 1)[0] in {"file", "files", "groups", "config", "upload", "ask", "search", "mails", "prompts", "specs", "graph", "monitor", "customers"}:
             raise HTTPException(status_code=404, detail="요청한 API를 찾을 수 없습니다.")
         target = (FRONTEND_DIST / spa_path).resolve()
         # resolve() 후 dist 하위인지 확인해 경로 탈출(../)을 막는다
