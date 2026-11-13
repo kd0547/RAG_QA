@@ -7,6 +7,7 @@ import { customerPath, fmtDateTime, fmtReceived, isLongBody, reviewPath } from '
 import { mockCustomers, mockTimeline } from '../mockData';
 import type { Customer, CustomerTimeline, TimelineEvent, TimelineInquiry } from '../types';
 import { AiAvatar, Avatar, CenterNote, MockBadge, StatusChip } from '../ui';
+import { CustomerNotes } from '../CustomerNotes';
 
 const TRUNCATED_NOTE = '8,000자까지만 표시합니다. 전체는 검토 화면에서 보세요.';
 const INFERRED_NOTE = '기록 이전 작업이라 시각·본문이 정확하지 않을 수 있음';
@@ -23,7 +24,7 @@ const fmtAt = (at: string | null) => (at ? fmtDateTime(at) : '시각 기록 없�
 const initialSender = () => new URLSearchParams(window.location.search).get('sender')?.trim().toLowerCase() || null;
 
 /**
- * 고객방: 발신자별로 문의·초안·반려·발송을 시간순으로 보는 조회 화면.
+ * 고객방: 발신자별로 문의·초안·반려·발송을 시간순으로 보는 조회 화면. 오른쪽에서 담당자 메모를 남긴다.
  * 승인·반려·편집은 하지 않는다 — 처리는 메일 검토 화면에서만 한다.
  */
 export function MailCustomersPage() {
@@ -134,18 +135,21 @@ export function MailCustomersPage() {
                 </div>
             </section>
 
-            {/* 타임라인 */}
-            <main className="flex-1 min-w-0 min-h-0 flex flex-col">
-                {sender ? (
-                    <Timeline key={`${sender}:${offline}`} sender={sender} offline={offline} />
-                ) : (
-                    <CenterNote>
-                        왼쪽에서 고객을 고르면 문의·초안·반려·발송이 시간순으로 보입니다.
-                        <br />
-                        조회 전용입니다. 승인·반려는 메일 검토 화면에서 합니다.
-                    </CenterNote>
-                )}
-            </main>
+            {/* 타임라인 + 담당자 메모 (넓은 화면에서는 메모가 오른쪽, 좁으면 아래) */}
+            <div className="flex-1 min-w-0 min-h-0 flex flex-col xl:flex-row">
+                <main className="flex-1 min-w-0 min-h-0 flex flex-col">
+                    {sender ? (
+                        <Timeline key={`${sender}:${offline}`} sender={sender} offline={offline} />
+                    ) : (
+                        <CenterNote>
+                            왼쪽에서 고객을 고르면 문의·초안·반려·발송이 시간순으로 보입니다.
+                            <br />
+                            조회 전용입니다. 승인·반려는 메일 검토 화면에서 합니다.
+                        </CenterNote>
+                    )}
+                </main>
+                {sender && <CustomerNotes key={`${sender}:${offline}:notes`} sender={sender} offline={offline} />}
+            </div>
         </div>
     );
 }
@@ -201,7 +205,7 @@ function Timeline({ sender, offline }: { sender: string; offline: boolean }) {
             <div className="shrink-0 border-b border-divide px-4 sm:px-6 h-12 flex items-center gap-3">
                 <span className="text-[14px] font-bold truncate">{sender}</span>
                 {data && <span className="text-[12px] text-muted tabular-nums shrink-0">문의 {data.total}건</span>}
-                <span className="ml-auto text-[11px] text-muted shrink-0">조회 전용</span>
+                <span className="ml-auto text-[11px] text-muted shrink-0">조회 전용 · 메모만 남길 수 있음</span>
             </div>
             {!data && !error && <CenterNote>불러오는 중…</CenterNote>}
             {error && !data && <CenterNote tone="danger">{error}</CenterNote>}

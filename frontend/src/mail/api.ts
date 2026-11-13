@@ -6,6 +6,7 @@ import { request } from '../lib/http';
 import type {
     ApproveResult,
     CustomerListResponse,
+    CustomerNote,
     CustomerTimeline,
     MailDetail,
     MailListResponse,
@@ -119,5 +120,23 @@ export const customerApi = {
         if (p.limit != null) qs.set('limit', String(p.limit));
         const s = qs.toString();
         return request<CustomerTimeline>(`/customers/${encodeURIComponent(sender)}/timeline${s ? `?${s}` : ''}`);
+    },
+
+    /** 담당자 메모 (사용 중지한 것 포함, 최근 것부터) */
+    notes(sender: string): Promise<{ sender: string; items: CustomerNote[] }> {
+        return request(`/customers/${encodeURIComponent(sender)}/notes`);
+    },
+
+    /** 메모 추가 (500자까지) */
+    addNote(sender: string, text: string): Promise<CustomerNote> {
+        return request<CustomerNote>(`/customers/${encodeURIComponent(sender)}/notes`, {
+            method: 'POST',
+            body: JSON.stringify({ text }),
+        });
+    },
+
+    /** 메모 사용 중지 (지우지 않는다) */
+    retireNote(sender: string, noteId: number): Promise<CustomerNote> {
+        return request<CustomerNote>(`/customers/${encodeURIComponent(sender)}/notes/${noteId}/retire`, { method: 'POST' });
     },
 };

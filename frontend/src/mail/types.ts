@@ -173,6 +173,16 @@ export interface TimelineInquiry {
     events: TimelineEvent[];
 }
 
+/** 담당자 메모 (GET /customers/{sender}/notes). 사용 중지(retired_at)한 메모는 답변 에이전트에 보이지 않는다 */
+export interface CustomerNote {
+    note_id: number;
+    sender: string;
+    text: string;
+    created_at: string;
+    created_by: string;             // 요청 IP (로그인이 없다)
+    retired_at: string | null;
+}
+
 export interface CustomerTimeline {
     sender: string;
     total: number;
