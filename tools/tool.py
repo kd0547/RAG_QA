@@ -788,3 +788,37 @@ def compare_specs(owner_type: str, owner_ids: list[str], conditions: list[dict])
         [(t["model"], t["met"], t["not_met"], t["unknown"]) for t in result["targets"]],
     )
     return result
+
+
+
+# ---------- 고객 이력 (통합 지시서 G1) ----------
+
+MAX_HISTORY_LIMIT = 30
+
+
+@tool
+def get_customer_history(limit: int = 10) -> dict | str:
+    """이 메일을 보낸 사람의 이전 문의 목록과 담당자 메모를 봅니다. 참고 자료이며 근거가 아닙니다 (인용하지 않습니다).
+
+    발신자는 서버가 현재 메일로 정합니다 (인자로 바꿀 수 없습니다). 웹 질문에서는 쓸 수 없습니다.
+    이전 문의는 최근 것부터, 오래된 문의(기본 90일 초과)는 나오지 않습니다.
+    메일 본문·초안·발송 본문은 들어 있지 않습니다. 이전 문의의 조건을 지금 문의에 그대로 쓰지 않습니다.
+
+    Args:
+        limit: 이전 문의 최대 개수 (기본 10, 최대 30).
+
+    Returns:
+        {days, inquiry_total, inquiries: [{received_at, subject, request_type, reason, status}], notes: [{text, created_at}]}
+        status: 답변 발송됨 / 검토 중 / 생성 실패
+    """
+    owner = current_owner()
+    if owner is None or owner.type != "task":
+        return "오류: 고객 이력은 메일 문의에서만 볼 수 있습니다 (웹 질문에는 발신자가 없습니다)."
+    limit = min(max(1, int(limit or 10)), MAX_HISTORY_LIMIT)
+    history = repository.customer_history_repo.history_for_task(owner.id, config.CUSTOMER_HISTORY_DAYS, limit)
+    if history is None:
+        return "오류: 현재 메일의 발신자를 찾지 못했습니다."
+    # 근거로 등록하지 않는다 (인용할 수 없다)
+    logger.info("[get_customer_history] task=%s -> 문의 %d건(전체 %d), 메모 %d건",
+                owner.id, len(history["inquiries"]), history["inquiry_total"], len(history["notes"]))
+    return {**history, "note": "참고 자료이며 근거가 아닙니다. 답변의 사실·수치는 문서·사양 근거로 확인합니다."}

@@ -443,3 +443,17 @@ CREATE TABLE IF NOT EXISTS skill_doc (
 );
 CREATE INDEX IF NOT EXISTS idx_skill_doc_type ON skill_doc(type_id, status);
 CREATE INDEX IF NOT EXISTS idx_skill_doc_status ON skill_doc(status);
+
+
+-- ===== 고객 이력과 담당자 메모 (통합 지시서 G1) =====
+-- 고객 이력은 기존 기록(mails·tasks·request_analysis)에서 그때그때 조회한다. 사람이 남기는 메모만 여기에 둔다.
+-- sender는 고객방과 같은 키 LOWER(TRIM(mails.sender)). 사용 중지한 메모(retired_at)는 이력 도구에 나오지 않는다.
+CREATE TABLE IF NOT EXISTS customer_note (
+    note_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender     TEXT NOT NULL,
+    text       TEXT NOT NULL,                  -- 500자까지
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT '',       -- 요청 IP (로그인이 없다)
+    retired_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_customer_note_sender ON customer_note(sender, retired_at);

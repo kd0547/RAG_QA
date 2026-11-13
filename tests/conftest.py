@@ -120,6 +120,7 @@ def agent_env(tmp_path, monkeypatch):
 
     import repository
     from agent import agent as agent_module
+    from repository.customer_history_repository import CustomerHistoryRepository
     from repository.email_repository import EmailRepository
     from repository.evidence_repository import EvidenceRepository
     from repository.file_page_repository import FilePageRepository
@@ -145,6 +146,7 @@ def agent_env(tmp_path, monkeypatch):
         "task_repo": TaskRepository(db),
         "skill_repo": SkillRepository(db),
         "spec_repo": SpecRepository(db),
+        "customer_history_repo": CustomerHistoryRepository(db),
     }
     for name, value in repos.items():
         monkeypatch.setattr(repository, name, value)

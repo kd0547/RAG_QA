@@ -103,6 +103,10 @@ def _flag(name: str, default: str = "1") -> bool:
 SPEC_TOOLS_ENABLED = _flag("SPEC_TOOLS_ENABLED")
 # 0이면 사양 DB를 문서 그래프에 심지 않고(seed_specs), 그래프 추출에 사양 DB의 정식 이름을 넘기지 않는다
 GRAPH_SPEC_SEED_ENABLED = _flag("GRAPH_SPEC_SEED_ENABLED")
+# 0이면 get_customer_history가 도구 목록에서 빠지고, 메일 첫 메시지에 이전 문의·메모 건수 안내 줄을 붙이지 않는다
+CUSTOMER_HISTORY_ENABLED = _flag("CUSTOMER_HISTORY_ENABLED")
+# 고객 이력에 싣는 문의의 기간(일). 끝난 입찰 조건이 지금 문의에 섞이지 않게 오래된 문의는 뺀다
+CUSTOMER_HISTORY_DAYS = int(os.getenv("CUSTOMER_HISTORY_DAYS", "90"))
 
 # ---------- 문서 그래프 (Graph RAG) ----------
 # 업로드·페이지 검수 저장 뒤 백그라운드로 개체·관계를 뽑을지 (0이면 끈다. /graph/rebuild로 따로 뽑을 수 있다)

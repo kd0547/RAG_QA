@@ -26,7 +26,8 @@ from agent.validation import validate_answer
 from entity.type import Attachment, DocumentType
 from repository import graph_repo, group_repo, prompt_repo
 from tools.tool import (
-    attachment_page_texts, compare_specs, get_specs, graph_search, grep_documents, list_documents, list_evidence,
+    attachment_page_texts, compare_specs, get_customer_history, get_specs, graph_search, grep_documents, list_documents,
+    list_evidence,
     list_spec_attributes, load_skill, read_attachment, read_pages, rerank_documents, search_documents,
     search_spec_items,
 )
@@ -57,7 +58,26 @@ def active_tools() -> list:
     tools = list(BASE_TOOLS)
     if config.SPEC_TOOLS_ENABLED:
         tools += SPEC_TOOLS
+    if config.CUSTOMER_HISTORY_ENABLED:
+        tools.append(get_customer_history)
     return tools
+
+
+def customer_history_hint(owner: Owner) -> str | None:
+    """메일의 첫 user 메시지에 붙이는 안내 줄 (건수만, 내용은 넣지 않는다). 이전 문의도 메모도 없으면 None.
+
+    고객 이력을 모델 입력에 자동으로 넣지 않는다. 모델이 필요하면 get_customer_history로 본다.
+    """
+    if not config.CUSTOMER_HISTORY_ENABLED or owner is None or owner.type != "task":
+        return None
+    try:
+        inquiries, notes = repository.customer_history_repo.counts_for_task(owner.id, config.CUSTOMER_HISTORY_DAYS)
+    except Exception:
+        logger.warning("고객 이력 건수 조회 실패, 안내 줄 없이 진행: task=%s", owner.id, exc_info=True)
+        return None
+    if not inquiries and not notes:
+        return None
+    return f"[이 발신자의 이전 문의 {inquiries}건, 담당자 메모 {notes}건이 있다. 필요하면 get_customer_history로 본다]"
 
 
 # 서버 시작 시점 설정의 도구 목록 (예전 이름. 설정을 바꿔 보는 테스트는 active_tools()를 쓴다)
@@ -254,6 +274,9 @@ def run_agent_temp_attachments(
                 content: list[dict] = [{"type": "text", "text": question}]
                 for index, attachment in enumerate(attachments or [], start=1):
                     content.extend(_attachment_to_blocks(attachment, index, preread))
+                hint = customer_history_hint(current)
+                if hint:
+                    content.append({"type": "text", "text": hint})
                 messages = [HumanMessage(content=content, id=f"question:{thread_id}")]
                 if review:
                     messages.append(_review_message(thread_id, review))

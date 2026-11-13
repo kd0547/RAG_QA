@@ -7,6 +7,7 @@ Database/EmailRepository/TaskRepository는 SQLite 커넥션과 스레드 락을 
 from pathlib import Path
 
 from repository.access_log_repository import AccessLogRepository
+from repository.customer_history_repository import CustomerHistoryRepository
 from repository.customer_repository import CustomerRepository
 from repository.file_page_repository import FilePageRepository
 from repository.file_repository import FileRepository
@@ -32,4 +33,5 @@ graph_repo = GraphRepository(db)
 access_log_repo = AccessLogRepository(db)
 evidence_repo = EvidenceRepository(db)
 customer_repo = CustomerRepository(db)
+customer_history_repo = CustomerHistoryRepository(db)
 skill_repo = SkillRepository(db)
