@@ -11,6 +11,8 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+import config
+import repository
 from entity.spec import ATTRIBUTE_CATEGORIES, COMPONENT_KINDS, DATA_TYPES, PRODUCT_CATEGORIES, PRODUCT_STATUSES
 from repository import spec_repo
 from repository.spec_repository import SpecConflictError, SpecNotFoundError
@@ -30,6 +32,19 @@ def _run(action, *args, **kwargs):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SpecConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def reseed_spec_graph(reason: str) -> None:
+    """제품·상위 모델·제품-부품 연결이 바뀌면 문서 그래프의 spec 관계를 다시 심는다 (지시서 H2).
+
+    실패해도 사양 저장은 이미 끝났으므로 요청은 성공으로 둔다 (서버를 다시 시작하면 다시 심는다).
+    """
+    if not config.GRAPH_SPEC_SEED_ENABLED:
+        return
+    try:
+        logger.info("사양 변경(%s) 뒤 문서 그래프 다시 심기: %s", reason, repository.graph_repo.seed_specs())
+    except Exception:
+        logger.exception("사양 변경(%s) 뒤 문서 그래프 다시 심기 실패", reason)
 
 
 # ---------- 메타 ----------
@@ -134,6 +149,7 @@ def list_products() -> list[dict]:
 def create_product(body: ProductCreate) -> dict:
     product = _run(spec_repo.create_product, **body.model_dump())
     logger.info("제품 등록: %s (%s)", product["model"], product["id"])
+    reseed_spec_graph("제품 등록")
     return product
 
 
@@ -147,24 +163,31 @@ def get_product(product_id: str) -> dict:
 
 @router.put("/products/{product_id}")
 def update_product(product_id: str, body: ProductUpdate) -> dict:
-    return _run(spec_repo.update_product, product_id, **body.model_dump(exclude_unset=True))
+    product = _run(spec_repo.update_product, product_id, **body.model_dump(exclude_unset=True))
+    reseed_spec_graph("제품 수정")
+    return product
 
 
 @router.delete("/products/{product_id}", status_code=204)
 def delete_product(product_id: str) -> None:
     _run(spec_repo.delete_product, product_id)
     logger.info("제품 삭제: %s", product_id)
+    reseed_spec_graph("제품 삭제")
 
 
 @router.put("/products/{product_id}/components")
 def link_component(product_id: str, body: ComponentLink) -> dict:
     """제품에 부품을 넣거나 옵션 여부를 바꾼다. 바뀐 제품 상세를 돌려준다."""
-    return _run(spec_repo.link_component, product_id, body.component_id, body.is_option, body.note)
+    product = _run(spec_repo.link_component, product_id, body.component_id, body.is_option, body.note)
+    reseed_spec_graph("부품 연결")
+    return product
 
 
 @router.delete("/products/{product_id}/components/{component_id}")
 def unlink_component(product_id: str, component_id: str) -> dict:
-    return _run(spec_repo.unlink_component, product_id, component_id)
+    product = _run(spec_repo.unlink_component, product_id, component_id)
+    reseed_spec_graph("부품 연결 해제")
+    return product
 
 
 # ---------- 부품 ----------
@@ -205,13 +228,17 @@ def get_component(component_id: str) -> dict:
 
 @router.put("/components/{component_id}")
 def update_component(component_id: str, body: ComponentUpdate) -> dict:
-    return _run(spec_repo.update_component, component_id, **body.model_dump(exclude_unset=True))
+    component = _run(spec_repo.update_component, component_id, **body.model_dump(exclude_unset=True))
+    if component.get("product_count"):
+        reseed_spec_graph("연결된 부품 수정")
+    return component
 
 
 @router.delete("/components/{component_id}", status_code=204)
 def delete_component(component_id: str) -> None:
     _run(spec_repo.delete_component, component_id)
     logger.info("부품 삭제: %s", component_id)
+    reseed_spec_graph("부품 삭제")
 
 
 # ---------- 사양 값 ----------

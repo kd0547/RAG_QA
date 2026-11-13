@@ -207,4 +207,8 @@ def apply_table(body: ImportBody) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     logger.info("사양 표 가져오기 완료: %s, %s", body.owner_type, {k: v for k, v in summary.items() if k != "owners"})
+    if summary.get("owners_created") or summary.get("parents_set"):
+        # 새 제품·부품이나 상위 모델이 생겼으면 문서 그래프의 spec 관계를 다시 심는다 (지시서 H2)
+        from app.routers.specs import reseed_spec_graph
+        reseed_spec_graph("표 가져오기")
     return summary

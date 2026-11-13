@@ -9,10 +9,20 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if not hasattr(sys.modules.get("parser"), "__path__"):
     sys.modules.pop("parser", None)
 
-from graph_rag import extractor  # noqa: E402
-from graph_rag.types import NON_EXTRACT_RELATIONS, RELATION_TYPES, ExtractedRelation  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+import config  # noqa: E402
+from entity.file import create_file  # noqa: E402
+from graph_rag import extractor, service  # noqa: E402
+from graph_rag.types import (  # noqa: E402
+    NON_EXTRACT_RELATIONS, RELATION_TYPES, ExtractedEntity, ExtractedRelation, PageGraph,
+)
+from parser.pdf.type import PageText  # noqa: E402
+from repository.file_page_repository import FilePageRepository  # noqa: E402
+from repository.file_repository import FileRepository  # noqa: E402
 from repository.graph_repository import GraphRepository  # noqa: E402
 from repository.repo_connect import Database  # noqa: E402
+from repository.spec_repository import SpecRepository  # noqa: E402
 
 OLD_RELATION_SQL = """
 create table graph_relation (
@@ -113,3 +123,141 @@ def test_prune_keeps_entities_with_spec_ref(tmp_path):
     assert graph.prune_orphans() == 1
     with db.get_conn() as conn:
         assert [r[0] for r in conn.execute("select name from graph_entity")] == ["A650"]
+
+
+# ---------------------------------------------------------------- H2 심기
+
+@pytest.fixture
+def g(tmp_path, monkeypatch):
+    """사양 DB와 문서 그래프가 같은 임시 DB를 쓴다 (운영과 같다)."""
+    db = Database(str(tmp_path / "g.db"))
+    ns = SimpleNamespace(db=db, spec=SpecRepository(db), graph=GraphRepository(db), files=FileRepository(db),
+                         pages=FilePageRepository(db), tmp=tmp_path)
+    monkeypatch.setattr(service, "graph_repo", ns.graph)
+    monkeypatch.setattr(service, "page_repo", ns.pages)
+    monkeypatch.setattr(service, "file_repo", ns.files)
+
+    def add_file(name, texts):
+        file = create_file(original_name=name, stored_path=str(tmp_path / name))
+        ns.files.file_save(file)
+        ns.pages.save_pages(file.file_id, [PageText(i + 1, t) for i, t in enumerate(texts)])
+        return file.file_id
+
+    ns.add_file = add_file
+    a650 = ns.spec.create_product("A650", name="A650 Series")
+    ns.a650 = a650
+    ns.child = ns.spec.create_product("A650-GA70-PU02", name="Pro", parent_id=a650["id"])
+    ns.n5800 = ns.spec.create_product("N5800", name="N5800 14세대 노트북")
+    ns.ssd = ns.spec.create_component("ssd", "Samsung 980 500GB")
+    ns.opt = ns.spec.create_component("ssd", "Samsung 990 PRO 1TB")
+    ns.unlinked = ns.spec.create_component("ssd", "WD SN770 1TB")
+    ns.spec.link_component(a650["id"], ns.ssd["id"])
+    ns.spec.link_component(a650["id"], ns.opt["id"], is_option=True)
+    return ns
+
+
+def _entities(db):
+    with db.get_conn() as conn:
+        return {r["name"]: dict(r) for r in conn.execute("select id, type, name, ref_type, ref_id from graph_entity")}
+
+
+def _relations(db, origin=None):
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            """select s.name as src, r.type, d.name as dst, r.origin, r.is_option from graph_relation r
+               join graph_entity s on s.id = r.src_id join graph_entity d on d.id = r.dst_id
+               """ + ("where r.origin = ?" if origin else "") + " order by s.name, r.type, d.name",
+            (origin,) if origin else (),
+        ).fetchall()
+    return [tuple(r) for r in rows]
+
+
+def test_seed_products_variants_and_linked_components_only(g):
+    summary = g.graph.seed_specs()
+
+    entities = _entities(g.db)
+    assert {"A650", "A650-GA70-PU02", "N5800", "Samsung 980 500GB", "Samsung 990 PRO 1TB"} == set(entities)
+    assert "WD SN770 1TB" not in entities  # 연결되지 않은 부품은 심지 않는다
+    assert entities["A650"]["ref_type"] == "product" and entities["A650"]["ref_id"] == g.a650["id"]
+    assert entities["Samsung 980 500GB"]["ref_type"] == "component"
+    assert _relations(g.db) == [
+        ("A650", "has_component", "Samsung 980 500GB", "spec", 0),
+        ("A650", "has_component", "Samsung 990 PRO 1TB", "spec", 1),
+        ("A650-GA70-PU02", "variant_of", "A650", "spec", 0),
+    ]
+    assert summary == {"products": 3, "components": 2, "variant_of": 1, "has_component": 2, "blocked": 0}
+    # 모델명을 담은 제품 이름만 별칭이 된다 ("Pro"는 아무 질문에나 걸린다)
+    assert [e["name"] for e in g.graph.find_entities("N5800 14세대 노트북 무게")] == ["N5800"]
+    assert g.graph.find_entities("Windows 11 Pro 지원") == []
+
+
+def test_seed_reuses_extracted_entity_and_is_idempotent(g):
+    file_id = g.add_file("guide.pdf", ["N5800 인증"])
+    g.graph.replace_page(file_id, 1, PageGraph(entities=[ExtractedEntity(type="product", name="N5800")]))
+    before = _entities(g.db)["N5800"]["id"]
+
+    g.graph.seed_specs()
+    g.graph.seed_specs()
+
+    entities = _entities(g.db)
+    assert entities["N5800"]["id"] == before and entities["N5800"]["ref_id"] == g.n5800["id"]
+    assert len(_relations(g.db, "spec")) == 3
+
+
+def test_reextract_keeps_spec_relations_and_unlink_removes_them(g):
+    g.graph.seed_specs()
+    file_id = g.add_file("a650.pdf", ["A650 SSD Samsung 980 500GB"])
+    g.graph.replace_page(file_id, 1, PageGraph(
+        entities=[ExtractedEntity(type="product", name="A650"), ExtractedEntity(type="component", name="Samsung 980 500GB")],
+        relations=[ExtractedRelation(source="A650", type="has_component", target="Samsung 980 500GB")],
+    ))
+    g.graph.delete_file(file_id)  # 다시 뽑기 전에 지운다
+    g.graph.replace_page(file_id, 1, PageGraph())
+
+    assert len(_relations(g.db, "spec")) == 3 and _relations(g.db, "extract") == []
+    assert _entities(g.db)["A650"]["ref_id"] == g.a650["id"]
+
+    g.spec.unlink_component(g.a650["id"], g.ssd["id"])
+    g.graph.seed_specs()
+    assert ("A650", "has_component", "Samsung 980 500GB", "spec", 0) not in _relations(g.db)
+    # 문서에도 안 나오지만 사양 DB 대상을 가리키므로 개체는 남는다
+    assert "Samsung 980 500GB" in _entities(g.db)
+
+
+def test_deleted_spec_relation_is_not_reseeded(g):
+    g.graph.seed_specs()
+    with g.db.get_conn() as conn:
+        relation_id = conn.execute("select id from graph_relation where type = 'variant_of'").fetchone()[0]
+    g.graph.delete_relation(relation_id)
+
+    summary = g.graph.seed_specs()
+
+    assert all(r[1] != "variant_of" for r in _relations(g.db)) and summary["blocked"] == 1
+
+
+def test_deleted_product_ref_is_cleared(g):
+    g.graph.seed_specs()
+    g.spec.delete_product(g.n5800["id"])
+    g.graph.seed_specs()
+    assert "N5800" not in _entities(g.db)  # 문서에도 안 나오고 관계도 없으면 정리된다
+
+
+def test_router_changes_reseed_and_flag_off_skips(g, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import repository
+    from app.routers import specs
+
+    monkeypatch.setattr(specs, "spec_repo", g.spec)
+    monkeypatch.setattr(repository, "graph_repo", g.graph)
+    app = FastAPI()
+    app.include_router(specs.router)
+    client = TestClient(app)
+
+    assert client.put(f"/specs/products/{g.n5800['id']}/components", json={"component_id": g.unlinked["id"]}).status_code == 200
+    assert ("N5800", "has_component", "WD SN770 1TB", "spec", 0) in _relations(g.db)
+
+    monkeypatch.setattr(config, "GRAPH_SPEC_SEED_ENABLED", False)
+    client.delete(f"/specs/products/{g.n5800['id']}/components/{g.unlinked['id']}")
+    assert ("N5800", "has_component", "WD SN770 1TB", "spec", 0) in _relations(g.db)  # 꺼져 있으면 다시 심지 않는다

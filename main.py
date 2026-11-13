@@ -122,6 +122,15 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("문서 그래프 상위 개념 등록 실패")
 
+    # 사양 DB의 제품·상위 모델·제품-부품 연결을 문서 그래프에 심는다 (spec 관계만 다시 넣는다). 실패해도 서버는 뜬다
+    if config.GRAPH_SPEC_SEED_ENABLED:
+        try:
+            logger.info("문서 그래프 사양 DB 심기: %s", graph_repo.seed_specs())
+        except Exception:
+            logger.exception("문서 그래프 사양 DB 심기 실패")
+    else:
+        logger.info("문서 그래프 사양 DB 심기 꺼짐 (GRAPH_SPEC_SEED_ENABLED=0)")
+
     embedding_model = OllamaEmbeddings(
         model=config.EMBEDDING_MODEL)
 

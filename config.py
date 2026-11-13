@@ -101,6 +101,8 @@ def _flag(name: str, default: str = "1") -> bool:
 
 # 0이면 사양 도구 4개(list_spec_attributes, search_spec_items, get_specs, compare_specs)가 도구 목록에서 빠진다
 SPEC_TOOLS_ENABLED = _flag("SPEC_TOOLS_ENABLED")
+# 0이면 사양 DB를 문서 그래프에 심지 않고(seed_specs), 그래프 추출에 사양 DB의 정식 이름을 넘기지 않는다
+GRAPH_SPEC_SEED_ENABLED = _flag("GRAPH_SPEC_SEED_ENABLED")
 
 # ---------- 문서 그래프 (Graph RAG) ----------
 # 업로드·페이지 검수 저장 뒤 백그라운드로 개체·관계를 뽑을지 (0이면 끈다. /graph/rebuild로 따로 뽑을 수 있다)

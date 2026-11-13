@@ -94,6 +94,86 @@ class GraphRepository:
             _prune_orphans(conn)
         return count
 
+    def seed_specs(self) -> dict:
+        """사양 DB의 제품과 제품-부품 연결을 그래프에 심는다 (지시서 H2). 서버 시작 때와 제품·연결이 바뀔 때 부른다.
+
+        - 제품은 전부: product.model → product 개체(ref_type='product'), 제품 이름은 모델명을 담을 때만 별칭으로.
+          parent_id → variant_of(파생 모델 → 상위 모델).
+        - 부품은 제품에 연결된 것만: product_component → has_component(옵션 여부는 is_option). 연결되지 않은 부품은 심지 않는다.
+        - 심은 관계의 origin은 spec. 매번 spec 관계만 지우고 다시 넣는다. 문서에서 뽑은 관계·사람이 넣은 관계는 건드리지 않고,
+          화면에서 지운 관계(graph_relation_block)는 되살리지 않는다.
+        - 같은 이름(정규화)의 개체가 이미 있으면 새로 만들지 않고 그 개체에 ref_type·ref_id를 단다.
+        - 사양 DB에서 사라진 대상을 가리키는 ref는 지운다 (문서에도 안 나오고 관계도 없으면 개체가 정리된다).
+        넣은 개수를 돌려준다.
+        """
+        summary = {"products": 0, "components": 0, "variant_of": 0, "has_component": 0, "blocked": 0}
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM graph_relation WHERE origin = 'spec'")
+            conn.execute("""UPDATE graph_entity SET ref_type = NULL, ref_id = NULL
+                            WHERE ref_type = 'product' AND ref_id NOT IN (SELECT id FROM product)""")
+            conn.execute("""UPDATE graph_entity SET ref_type = NULL, ref_id = NULL
+                            WHERE ref_type = 'component' AND ref_id NOT IN (SELECT id FROM component)""")
+
+            products = conn.execute("SELECT id, model, name, parent_id FROM product ORDER BY model").fetchall()
+            product_entities: dict[str, int] = {}
+            for product in products:
+                entity_id = _link_spec_entity(conn, "product", product["model"], "product", product["id"])
+                if entity_id is None:
+                    continue
+                product_entities[product["id"]] = entity_id
+                summary["products"] += 1
+                name = (product["name"] or "").strip()
+                # 제품 이름은 모델명을 담을 때만 별칭으로 쓴다 ("Home", "Pro" 같은 이름은 아무 질문에나 걸린다)
+                if name and normalize(product["model"]) in normalize(name):
+                    _add_alias(conn, entity_id, name)
+
+            def put(src: int, dst: int, rel_type: str, is_option: bool = False) -> None:
+                if src == dst:
+                    return
+                if _is_blocked(conn, src, dst, rel_type):
+                    summary["blocked"] += 1
+                    return
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO graph_relation (src_id, dst_id, type, origin, is_option) VALUES (?, ?, ?, 'spec', ?)",
+                    (src, dst, rel_type, int(is_option)),
+                )
+                summary[rel_type] += cur.rowcount
+
+            for product in products:
+                if product["parent_id"] and product["id"] in product_entities and product["parent_id"] in product_entities:
+                    put(product_entities[product["id"]], product_entities[product["parent_id"]], "variant_of")
+
+            links = conn.execute(
+                """SELECT pc.product_id, pc.is_option, c.id AS component_id, c.model
+                   FROM product_component pc JOIN component c ON c.id = pc.component_id
+                   ORDER BY c.model"""
+            ).fetchall()
+            linked_components: set[str] = set()
+            for link in links:
+                if link["product_id"] not in product_entities:
+                    continue
+                component_entity = _link_spec_entity(conn, "component", link["model"], "component", link["component_id"])
+                if component_entity is None:
+                    continue
+                linked_components.add(link["component_id"])
+                put(product_entities[link["product_id"]], component_entity, "has_component", bool(link["is_option"]))
+            summary["components"] = len(linked_components)
+            _prune_orphans(conn)
+        return summary
+
+    def spec_names(self) -> dict[str, list[dict]]:
+        """추출 프롬프트에 넘길 사양 DB의 정식 이름 (지시서 H3). 제품은 전부, 부품은 전부(페이지별로 거르는 것은 호출부).
+
+        {"product": [{"name": 모델명, "aliases": [제품 이름]}], "component": [{"name": 모델명, "kind": 종류}]}
+        """
+        with self.db.get_conn() as conn:
+            products = conn.execute("SELECT model, name FROM product ORDER BY model").fetchall()
+            components = conn.execute("SELECT model, kind FROM component ORDER BY kind, model").fetchall()
+        return {
+            "product": [{"name": p["model"], "aliases": [p["name"]] if (p["name"] or "").strip() else []} for p in products],
+            "component": [{"name": c["model"], "kind": c["kind"]} for c in components],
+        }
+
     def replace_page(self, file_id: str, page: int, graph: PageGraph) -> dict:
         """한 페이지에서 뽑은 개체·관계로 그 페이지의 그래프를 갈아끼운다. 사람이 넣은 관계는 그대로 둔다."""
         with self.db.transaction() as conn:
@@ -682,6 +762,36 @@ def _upsert_entity(conn: sqlite3.Connection, entity_type: str, name: str) -> int
     conn.execute(
         "INSERT OR IGNORE INTO graph_alias (entity_id, alias, alias_norm) VALUES (?, ?, ?)",
         (entity_id, name, norm),
+    )
+    return entity_id
+
+
+def _add_alias(conn: sqlite3.Connection, entity_id: int, alias: str) -> None:
+    alias = (alias or "").strip()
+    alias_norm = normalize(alias)
+    if len(alias_norm) >= MIN_NORM_LEN:
+        conn.execute(
+            "INSERT OR IGNORE INTO graph_alias (entity_id, alias, alias_norm) VALUES (?, ?, ?)", (entity_id, alias, alias_norm)
+        )
+
+
+def _link_spec_entity(conn: sqlite3.Connection, entity_type: str, name: str, ref_type: str, ref_id: str) -> int | None:
+    """사양 DB 대상 하나를 가리키는 개체 id. 그 대상을 이미 가리키는 개체 → 같은 이름의 개체 → 새 개체 순서로 찾는다.
+
+    모델명이 바뀌었으면 새 모델명을 별칭으로 더한다. 같은 이름의 개체가 이미 다른 대상을 가리키면 바꾸지 않는다.
+    """
+    row = conn.execute(
+        "SELECT id FROM graph_entity WHERE type = ? AND ref_type = ? AND ref_id = ? ORDER BY id LIMIT 1",
+        (entity_type, ref_type, ref_id),
+    ).fetchone()
+    if row is not None:
+        _add_alias(conn, row[0], name)
+        return row[0]
+    entity_id = _upsert_entity(conn, entity_type, name)
+    if entity_id is None:
+        return None
+    conn.execute(
+        "UPDATE graph_entity SET ref_type = ?, ref_id = ? WHERE id = ? AND ref_id IS NULL", (ref_type, ref_id, entity_id)
     )
     return entity_id
 
