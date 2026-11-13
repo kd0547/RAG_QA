@@ -27,6 +27,7 @@ from app.routers.mails import router as mail_router
 from app.routers.prompt import router as prompt_router
 from app.routers.questions import router as question_router
 from app.routers.search import router as search_router
+from app.routers.skills import router as skill_router
 from app.routers.spec_import import router as spec_import_router
 from app.routers.specs import router as spec_router
 from mail.email_service import email_loop_build
@@ -187,6 +188,7 @@ app.include_router(mail_router)
 app.include_router(mail_link_router)
 app.include_router(customer_router)
 app.include_router(prompt_router)
+app.include_router(skill_router)
 app.include_router(spec_router)
 app.include_router(spec_import_router)
 
@@ -197,7 +199,7 @@ if FRONTEND_DIST.is_dir():
     @app.get("/{spa_path:path}", include_in_schema=False)
     def frontend(spa_path: str) -> FileResponse:
         # 존재하지 않는 API 요청에 HTML을 반환하면 프론트엔드에서 JSON 파싱 오류가 난다.
-        if spa_path.split("/", 1)[0] in {"file", "files", "groups", "config", "upload", "ask", "search", "mails", "prompts", "specs", "graph", "monitor", "customers"}:
+        if spa_path.split("/", 1)[0] in {"file", "files", "groups", "config", "upload", "ask", "search", "mails", "prompts", "specs", "graph", "monitor", "customers", "skills"}:
             raise HTTPException(status_code=404, detail="요청한 API를 찾을 수 없습니다.")
         target = (FRONTEND_DIST / spa_path).resolve()
         # resolve() 후 dist 하위인지 확인해 경로 탈출(../)을 막는다

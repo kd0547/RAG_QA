@@ -493,3 +493,205 @@ class SkillRepository:
                  (error or None) and error[:2000], doc_id),
             )
             return cursor.rowcount == 1
+
+    # ------------------------------------------------------------ 검토 (승인·반려·수정·사용 중지)
+
+    def update_draft(self, doc_id: int, description: str, body: str, digest: str, check: dict) -> bool:
+        """draft일 때만 설명·본문을 고친다 (origin='edited', 검사 결과 갱신). 고쳤으면 True."""
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """UPDATE skill_doc SET description = ?, body = ?, digest = ?, check_json = ?, origin = 'edited'
+                   WHERE doc_id = ? AND status = 'draft'""",
+                (description, body, digest, json.dumps(check, ensure_ascii=False), doc_id),
+            )
+            return cursor.rowcount == 1
+
+    def set_check(self, doc_id: int, check: dict) -> None:
+        """검사 결과만 갱신한다 (승인 시점 재검사가 errors를 낸 draft). 상태·본문은 그대로."""
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE skill_doc SET check_json = ? WHERE doc_id = ? AND status = 'draft'",
+                         (json.dumps(check, ensure_ascii=False), doc_id))
+
+    def approve_doc(self, doc_id: int, reviewer: str | None, note: str | None, check: dict) -> str:
+        """초안을 승인한다. approved로 바꾸는 유일한 함수다 (승인 API만 부른다).
+
+        상태 조건부 UPDATE라 두 번 눌러도 한 번만 승인된다. 돌려주는 값:
+        ok | not_found | not_draft(이미 처리됨) | has_errors(검사 errors) | stale(같은 이름의 더 새 버전이 이미 승인·사용 중지됨)
+        """
+        if not check.get("ok") or check.get("errors"):
+            return "has_errors"
+        with self.db.transaction() as conn:
+            row = conn.execute("SELECT name, version, status, type_id FROM skill_doc WHERE doc_id = ?", (doc_id,)).fetchone()
+            if row is None:
+                return "not_found"
+            if row["status"] != "draft":
+                return "not_draft"
+            newest = conn.execute(
+                "SELECT MAX(version) FROM skill_doc WHERE name = ? AND status IN ('approved', 'retired')", (row["name"],),
+            ).fetchone()[0]
+            if newest is not None and newest >= row["version"]:
+                return "stale"
+            cursor = conn.execute(
+                """UPDATE skill_doc SET status = 'approved', check_json = ?, reviewed_at = ?, reviewed_by = ?, review_note = ?
+                   WHERE doc_id = ? AND status = 'draft'""",
+                (json.dumps(check, ensure_ascii=False), _now(), reviewer, (note or None) and note[:2000], doc_id),
+            )
+            if cursor.rowcount != 1:
+                return "not_draft"
+            if row["type_id"] is not None:
+                conn.execute("UPDATE request_type SET skill_name = ?, updated_at = ? WHERE type_id = ?",
+                             (row["name"], _now(), row["type_id"]))
+        return "ok"
+
+    def reject_doc(self, doc_id: int, reviewer: str | None, reason: str) -> str:
+        """draft·error 초안을 반려한다. ok | not_found | not_rejectable"""
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """UPDATE skill_doc SET status = 'rejected', reviewed_at = ?, reviewed_by = ?, review_note = ?
+                   WHERE doc_id = ? AND status IN ('draft', 'error')""",
+                (_now(), reviewer, reason[:2000], doc_id),
+            )
+            if cursor.rowcount == 1:
+                return "ok"
+            exists = conn.execute("SELECT 1 FROM skill_doc WHERE doc_id = ?", (doc_id,)).fetchone()
+        return "not_rejectable" if exists else "not_found"
+
+    def open_draft_for_name(self, name: str) -> dict | None:
+        """같은 이름의 검토 대기 초안 중 마지막 승인·사용 중지 버전보다 새 것."""
+        with self.db.get_conn() as conn:
+            row = conn.execute(
+                """SELECT * FROM skill_doc d WHERE d.name = ? AND d.status = 'draft'
+                     AND d.version > COALESCE((SELECT MAX(version) FROM skill_doc
+                                               WHERE name = d.name AND status IN ('approved', 'retired')), 0)
+                   ORDER BY d.version DESC LIMIT 1""",
+                (name,),
+            ).fetchone()
+        return _doc(row)
+
+    def new_version_from_approved(self, name: str, check: dict, digest: str) -> int | None:
+        """마지막 승인본을 복사해 새 버전 초안(origin='edited')을 만든다. 승인본이 없으면 None."""
+        base = self.latest_approved(name)
+        if base is None:
+            return None
+        with self.db.transaction() as conn:
+            return self.insert_doc(
+                name=name, version=self.next_version(name, conn), status="draft", origin="edited",
+                description=base["description"], body=base["body"], digest=digest, type_id=base["type_id"],
+                source_tasks=base["source_tasks"], check=check, model=base["model"], conn=conn,
+            )
+
+    def retire(self, name: str, reviewer: str | None, note: str | None = None) -> int | None:
+        """사용 중인 DB 절차를 멈춘다: 새 retired 행을 만들고 유형의 skill_name을 비운다. 사용 중이 아니면 None."""
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                """SELECT d.* FROM skill_doc d
+                   WHERE d.name = ? AND d.status = 'approved'
+                     AND d.version = (SELECT MAX(version) FROM skill_doc WHERE name = ? AND status IN ('approved', 'retired'))""",
+                (name, name),
+            ).fetchone()
+            if row is None:
+                return None
+            doc_id = self.insert_doc(
+                name=name, version=self.next_version(name, conn), status="retired", origin=row["origin"],
+                description=row["description"], body=row["body"], digest=row["digest"], type_id=row["type_id"],
+                source_tasks=_loads(row["source_tasks_json"], []), model=row["model"], conn=conn,
+            )
+            conn.execute("UPDATE skill_doc SET reviewed_at = ?, reviewed_by = ?, review_note = ? WHERE doc_id = ?",
+                         (_now(), reviewer, (note or None) and note[:2000], doc_id))
+            conn.execute("UPDATE request_type SET skill_name = NULL, updated_at = ? WHERE skill_name = ?", (_now(), name))
+            return doc_id
+
+    def list_docs(self, statuses: tuple[str, ...]) -> list[dict]:
+        placeholders = ",".join("?" for _ in statuses)
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT d.*, t.label AS type_label FROM skill_doc d
+                    LEFT JOIN request_type t ON t.type_id = d.type_id
+                    WHERE d.status IN ({placeholders}) ORDER BY d.doc_id DESC""",
+                statuses,
+            ).fetchall()
+        return [_doc(r) for r in rows]
+
+    # ------------------------------------------------------------ 유형 관리
+
+    def set_type_state(self, type_id: int, state: str) -> str:
+        """open ↔ no_skill_needed. ok | not_found | merged | same"""
+        if state not in ("open", "no_skill_needed"):
+            raise ValueError(f"바꿀 수 없는 상태: {state}")
+        with self.db.transaction() as conn:
+            row = conn.execute("SELECT state FROM request_type WHERE type_id = ?", (type_id,)).fetchone()
+            if row is None:
+                return "not_found"
+            if row["state"] == "merged":
+                return "merged"
+            if row["state"] == state:
+                return "same"
+            conn.execute("UPDATE request_type SET state = ?, updated_at = ? WHERE type_id = ? AND state <> 'merged'",
+                         (state, _now(), type_id))
+        return "ok"
+
+    def merge_type(self, type_id: int, into: int) -> str:
+        """이 유형의 분석을 다른 유형으로 옮기고 merged로 둔다. ok | not_found | same | merged | target_merged"""
+        if type_id == into:
+            return "same"
+        with self.db.transaction() as conn:
+            source = conn.execute("SELECT state FROM request_type WHERE type_id = ?", (type_id,)).fetchone()
+            target = conn.execute("SELECT state FROM request_type WHERE type_id = ?", (into,)).fetchone()
+            if source is None or target is None:
+                return "not_found"
+            if source["state"] == "merged":
+                return "merged"
+            if target["state"] == "merged":
+                return "target_merged"
+            conn.execute("UPDATE request_analysis SET type_id = ? WHERE type_id = ?", (into, type_id))
+            conn.execute("UPDATE request_type SET state = 'merged', merged_into = ?, updated_at = ? WHERE type_id = ?",
+                         (into, _now(), type_id))
+        return "ok"
+
+    def recent_cases(self, type_id: int, limit: int = 5) -> list[dict]:
+        with self.db.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT t.task_id, t.status, m.subject, m.received_at FROM request_analysis a
+                   JOIN tasks t ON t.task_id = a.task_id JOIN mails m ON m.uid = t.mail_uid
+                   WHERE a.status = 'ok' AND a.type_id = ? ORDER BY t.created_at DESC, t.rowid DESC LIMIT ?""",
+                (type_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_analysis(self, type_id: int | None = None, limit: int | None = None) -> list[dict]:
+        """분석된 문의 (최근 것부터): 제목·상태·유형·covered_by·실제 사용 절차. 본문은 넣지 않는다."""
+        where = "WHERE a.type_id = ?" if type_id is not None else ""
+        params: list = [type_id] if type_id is not None else []
+        sql = f"""SELECT a.*, t.status AS task_status, m.subject, m.received_at, rt.label AS type_label
+                  FROM request_analysis a
+                  JOIN tasks t ON t.task_id = a.task_id JOIN mails m ON m.uid = t.mail_uid
+                  LEFT JOIN request_type rt ON rt.type_id = a.type_id
+                  {where} ORDER BY t.created_at DESC, t.rowid DESC"""
+        if limit:
+            sql += " LIMIT ?"
+            params.append(limit)
+        with self.db.get_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["used_skills"] = _loads(item.pop("used_skills_json", None), [])
+            item["mismatch"] = bool(item["covered_by"]) and item["covered_by"] not in item["used_skills"]
+            result.append(item)
+        return result
+
+    def skill_usage_since(self, since: str) -> dict[str, int]:
+        """since 이후 실행에서 절차별로 쓴 실행 수 (서버 적용 + load_skill 호출, 한 실행에 한 번)."""
+        counts: dict[str, int] = {}
+        with self.db.get_conn() as conn:
+            rows = conn.execute("SELECT skills_json, tool_calls_json FROM run WHERE started_at >= ?", (since,)).fetchall()
+        for row in rows:
+            names = {ref.get("name") for ref in _loads(row["skills_json"], []) if isinstance(ref, dict)}
+            for call in _loads(row["tool_calls_json"], []):
+                if isinstance(call, dict) and call.get("tool") == "load_skill":
+                    args = _loads(call.get("args_summary"), {})
+                    if isinstance(args, dict):
+                        names.add(args.get("name"))
+            for name in names - {None}:
+                counts[name] = counts.get(name, 0) + 1
+        return counts
