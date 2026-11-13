@@ -42,3 +42,8 @@ ask:27c795a6… 36행, ask:9aaa93db… 22행 (P6 이전 것, 그대로), task:6b
 - `[재시도]` 안내는 "대화 기록이 있고 직전 실행이 답 없이 끝난" 작업에서만 나간다. 운영의 `failed` 24건은 모두 2026-09-30 ~ 10-27, 대화 저장(C1) 이전 작업이라 대화가 없다 → 다시 생성하면 첫 실행 경로로 돌고 `[재시도]`는 나가지 않는다.
 - 다시 생성은 초안 저장 뒤 검토자에게 실제 알림 메일을 보낸다. 그래서 운영 작업으로 시험하지 않았다.
 - 확인하려면 C1 이후 모델 호출 한도로 실패한 작업이 생겨야 한다.
+
+## P6 이전 ask: 대화 정리 (사용자 지시 "지워", 2026-11-13)
+- 백업: `storage/agent_threads.db.bak-20261113` (sqlite backup API, 서버 가동 중)
+- 삭제: `ask:27c795a6…` (checkpoints 36·writes 57), `ask:9aaa93db…` (checkpoints 22·writes 32) → checkpoints 58행, writes 89행
+- 남은 것: `task:6b40acb4…` (checkpoints 30·writes 45) 그대로
