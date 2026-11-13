@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { linkProps } from '../lib/router';
 import { LogoMark } from './icons';
 
-type AppKey = 'rag' | 'mail' | 'spec' | 'knowledge' | 'prompt' | 'status';
+type AppKey = 'rag' | 'mail' | 'spec' | 'knowledge' | 'skill' | 'prompt' | 'status';
 
 /** 공통 메뉴. OCR 도구는 /ocr 경로로만 제공한다. */
 const APPS: { key: AppKey; label: string; path: string }[] = [
@@ -10,6 +10,7 @@ const APPS: { key: AppKey; label: string; path: string }[] = [
     { key: 'mail', label: '메일', path: '/mail' },
     { key: 'spec', label: '제품 사양', path: '/spec' },
     { key: 'knowledge', label: '지식 그래프', path: '/knowledge' },
+    { key: 'skill', label: '업무 절차', path: '/skill' },
     { key: 'prompt', label: '프롬프트', path: '/prompt' },
     { key: 'status', label: '서버 상태', path: '/status' },
 ];

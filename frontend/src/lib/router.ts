@@ -8,6 +8,7 @@
  *  - `/ocr`   OCR 도구
  *  - `/review?file_id=…`  파일 검수 (저장된 페이지 텍스트를 원본과 비교하며 수정)
  *  - `/prompt` 프롬프트 설정
+ *  - `/skill?tab=…&doc=…&name=…`  업무 절차 (초안 검토·승인, 사용 중 절차, 문의 유형)
  *  - `/spec`   제품·부품 사양 관리
  *  - `/knowledge?entity=…`  지식 그래프 (문서에서 뽑은 개체·관계 보기와 편집)
  *  - `/status` 서버 상태 (CPU·메모리·GPU, 접속 기록)
@@ -18,10 +19,11 @@
 
 const ROUTE_CHANGE = 'routechange'
 
-/** 화면 간 이동 (전체 새로고침 없이) */
-export function navigate(path: string) {
+/** 화면 간 이동 (전체 새로고침 없이). replace면 방문 기록을 늘리지 않는다 (자동 선택 등) */
+export function navigate(path: string, options: { replace?: boolean } = {}) {
     if (path === window.location.pathname + window.location.search) return
-    window.history.pushState(null, '', path)
+    if (options.replace) window.history.replaceState(null, '', path)
+    else window.history.pushState(null, '', path)
     window.dispatchEvent(new Event(ROUTE_CHANGE))
 }
 
