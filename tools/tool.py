@@ -10,7 +10,7 @@ from agent.evidence_context import current_owner, current_run, temp_attachments
 
 from retrieval.embedder import get_embedding_model
 from repository.embedding_repository import search
-from agent import reranker, skills
+from agent import reranker, skills, spec_service
 from parser.file_parser import parse_file
 from parser.pdf.type import PageText
 
@@ -596,3 +596,192 @@ def load_skill(name: str) -> str:
         return f"오류: '{name[:80]}' 절차는 이 질문에서 쓸 수 없습니다. 사용할 수 있는 절차: {names}"
     logger.info("[load_skill] %s · %s (channel=%s)", found.name, found.digest, channel)
     return f"[업무 절차 {found.name} · {found.digest}]\n{found.body}"
+
+
+# ---------- 사양 DB (지시서 E3) ----------
+
+# get_specs 한 번에 돌려주는 최대 값 수, compare_specs 한 번에 비교하는 최대 대상 수
+MAX_SPEC_VALUES = 60
+MAX_COMPARE_TARGETS = 10
+
+
+def _spec_value_line(value: dict) -> str:
+    """근거 본문 한 줄: 속성 이름(키) = 값 [옵션] [상위 모델 ○○에서 상속] [부품 ○○]"""
+    line = f"{value['attribute_name']}({value['attribute_key']}) = {value['value_text']}"
+    if value["is_option"]:
+        line += " [옵션]"
+    if value["inherited_from"]:
+        line += f" [상위 모델 {value['inherited_from']}에서 상속]"
+    if value["via_component"]:
+        line += f" [부품 {value['via_component']}]"
+    return line
+
+
+def _register_spec_evidence(owner_type: str, model: str, values: list[dict]) -> str | None:
+    """대상 하나에 근거 하나. 같은 대상·같은 값이면 같은 근거 ID (본문 해시 중복 제거). 값이 없으면 None.
+
+    본문 첫 줄에 대상 이름을 넣어, 값이 똑같은 서로 다른 대상이 같은 근거로 합쳐지지 않게 한다.
+    revision은 그 값들의 가장 늦은 updated_at이다 (값을 고치면 새 근거가 된다).
+    """
+    if not values:
+        return None
+    label = spec_service.OWNER_LABELS.get(owner_type, owner_type)
+    text = "\n".join([f"사양 DB: {model} ({label})", *(_spec_value_line(v) for v in values)])
+    revision = max((v.get("updated_at") or "" for v in values), default="") or None
+    return _register_read("spec_value", text, revision=revision, source_name=f"사양 DB: {model}")
+
+
+def _public_value(value: dict) -> dict:
+    return {k: value[k] for k in ("attribute_key", "attribute_name", "data_type", "unit", "value_text", "is_option",
+                                  "inherited_from", "via_component")}
+
+
+@tool
+def list_spec_attributes(category: str | None = None, kind: str | None = None) -> list[dict]:
+    """사양 DB의 속성 사전(키·이름·자료형·단위·분류)을 봅니다. 질문의 조건을 속성 키로 바꿀 때 씁니다.
+
+    Args:
+        category: 분류로 좁힐 때 (예: memory, storage, cpu, body, cert).
+        kind: 부품 종류(예: ssd, cpu)를 주면 그 종류 부품이 값을 가진 속성만 봅니다.
+
+    Returns:
+        [{key, name, data_type(number|text|bool), unit, category, inheritable}]
+        이 결과는 근거가 아닙니다.
+    """
+    attributes = spec_service.list_attributes(category=category, kind=kind)
+    logger.info("[list_spec_attributes] category=%r kind=%r -> %d개", category, kind, len(attributes))
+    return attributes
+
+
+@tool
+def search_spec_items(
+    query: str | None = None,
+    owner_type: str | None = None,
+    kind: str | None = None,
+    conditions: list[dict] | None = None,
+    limit: int = 20,
+) -> dict:
+    """사양 DB에서 제품·부품을 모델명이나 조건으로 찾습니다. 결과는 후보다. 답에 쓰려면 get_specs나 compare_specs로 값을 읽는다.
+
+    Args:
+        query: 모델명 (예: "N5800", "Samsung 980 500GB"). 정규화해 같은 모델명이 있으면 그것만 나옵니다.
+            "N5800"으로 "N5800-GB70-PU02"(파생 모델)를 찾지 않습니다. 파생 모델은 결과의 variants에 있습니다.
+        owner_type: "product"(제품) 또는 "component"(부품). 비우면 둘 다.
+        kind: 부품 종류로 좁힐 때 (예: "ssd", "cpu").
+        conditions: 조건 목록. 주면 대상마다 조건을 판정해 만족(met) 개수가 많은 순으로 돌려줍니다.
+            조건 형식은 compare_specs와 같습니다.
+            예: [{"attribute": "ssd_tbw", "op": ">=", "value": "300", "unit": "TB"}]
+        limit: 최대 개수 (기본 20).
+
+    Returns:
+        {items: [{owner_type, id, model, name, kind 또는 category, vendor, status, parent_model, variants,
+                  (조건이 있으면) met, met_with_option, not_met, unknown, not_met_attributes, unknown_attributes}],
+         total, limit}
+        id를 get_specs·compare_specs의 owner_id로 넘깁니다. 이 결과만으로 답하지 않습니다 (근거가 아닙니다).
+    """
+    if owner_type is not None and owner_type not in spec_service.OWNER_TYPES:
+        return {"error": f"owner_type은 product 또는 component입니다: {owner_type}"}
+    if not (query and str(query).strip()) and not conditions:
+        return {"error": "query(모델명)나 conditions(조건) 중 하나는 있어야 합니다."}
+    result = spec_service.search_items(owner_type=owner_type, kind=kind, conditions=conditions, query=query, limit=limit)
+    logger.info(
+        "[search_spec_items] query=%r owner_type=%r kind=%r conditions=%d -> %d/%d건",
+        query, owner_type, kind, len(conditions or []), len(result["items"]), result["total"],
+    )
+    return result
+
+
+@tool
+def get_specs(owner_type: str, owner_id: str, attribute_keys: list[str] | None = None) -> dict:
+    """제품·부품의 사양 값을 읽습니다. 사양 근거는 여기서 나옵니다 (결과의 evidence_id를 인용합니다).
+
+    제품은 자기 값이 먼저이고, 자기 값이 없을 때만 상속이 허용된 속성을 가장 가까운 상위 모델에서 가져옵니다
+    (inherited_from). 인증 값은 상위 모델에서 물려받지 않습니다. 제품에 연결된 부품의 값은 via_component와 함께 나옵니다.
+    값이 없는 속성(missing_attributes)은 "값 없음"이지 "미지원"이 아닙니다.
+
+    Args:
+        owner_type: "product" 또는 "component".
+        owner_id: search_spec_items 결과의 id (정확한 모델명도 받습니다).
+        attribute_keys: 읽을 속성 키 목록. 비우면 전부 (최대 60개 값).
+
+    Returns:
+        {owner_type, id, model, evidence_id, values: [{attribute_key, attribute_name, data_type, unit, value_text,
+         is_option, inherited_from, via_component}], truncated, missing_attributes, unknown_attributes}
+    """
+    error = _context_error()
+    if error:
+        return error
+    found = spec_service.find_owner(owner_type, owner_id)
+    if found is None:
+        return {"error": f"사양 DB에 없는 대상입니다: {owner_type} {owner_id}. search_spec_items로 찾으세요."}
+    specs = spec_service.effective_specs(owner_type, found["id"], attribute_keys or None)
+    values = specs["values"][:MAX_SPEC_VALUES]
+    evidence_id = _register_spec_evidence(owner_type, specs["model"], values)
+    result = {
+        "owner_type": owner_type, "id": found["id"], "model": specs["model"], "evidence_id": evidence_id,
+        "values": [_public_value(v) for v in values],
+        "truncated": len(specs["values"]) > MAX_SPEC_VALUES,
+        "missing_attributes": specs["missing_attributes"],
+        "unknown_attributes": specs["unknown_attributes"],
+    }
+    if result["truncated"]:
+        result["message"] = (f"값이 {len(specs['values'])}개라 {MAX_SPEC_VALUES}개만 돌려줬습니다. "
+                             "attribute_keys로 필요한 속성만 읽으세요.")
+    if not values:
+        result["message"] = "사양 DB에 이 대상의 값이 없습니다 (근거 없음). 문서에서 찾으세요."
+    logger.info("[get_specs] %s %s keys=%s -> %d개, evidence=%s",
+                owner_type, specs["model"], attribute_keys, len(values), evidence_id)
+    return result
+
+
+@tool
+def compare_specs(owner_type: str, owner_ids: list[str], conditions: list[dict]) -> dict:
+    """조건 목록을 제품·부품의 사양 값과 비교해 조건별 판정을 받습니다. 숫자 크기 비교와 단위 환산은 이 도구가 한다. 직접 계산하지 않는다.
+
+    Args:
+        owner_type: "product" 또는 "component".
+        owner_ids: search_spec_items 결과의 id 목록 (최대 10개).
+        conditions: 조건 목록. 각 조건은 {"attribute": 속성 키, "op": 비교, "value": 값, "unit": 단위(선택)}.
+            op: ">=", "<=", ">", "<", "==", "contains", "exists"
+            unit을 비우면 속성 단위로 봅니다. 다른 단위(예: kg 속성에 g)는 같은 종류 단위끼리만 환산합니다.
+            예: [{"attribute": "ram_gb", "op": ">=", "value": "16", "unit": "GB"},
+                 {"attribute": "ssd_tbw", "op": ">=", "value": "350", "unit": "TB"}]
+
+    Returns:
+        {targets: [{owner_type, id, model, evidence_id, met, met_with_option, not_met, unknown,
+                    results: [{attribute, attribute_name, op, value, unit, verdict, reason, values}]}], errors}
+        verdict: met(기본 값이 만족) / met_with_option(옵션 구성으로만 만족) / not_met(만족하지 않음, 명시적 미지원) /
+                 unknown(값 없음·속성 키 없음·단위 확인 필요·표기가 달라 판정 불가 → 답변에 "확인 필요")
+        판정을 그대로 옮겨 적고, 대상마다 evidence_id를 인용합니다.
+    """
+    error = _context_error()
+    if error:
+        return error
+    if isinstance(owner_ids, str):
+        owner_ids = [owner_ids]
+    ids = list(dict.fromkeys(str(i) for i in owner_ids or []))
+    conditions = [c for c in (conditions if isinstance(conditions, list) else [conditions]) if isinstance(c, dict)]
+    if not ids or not conditions:
+        return {"error": "owner_ids와 conditions가 모두 있어야 합니다."}
+    result: dict = {"targets": [], "errors": []}
+    if len(ids) > MAX_COMPARE_TARGETS:
+        result["message"] = (f"대상은 한 번에 {MAX_COMPARE_TARGETS}개까지입니다. 앞 {MAX_COMPARE_TARGETS}개만 비교했습니다. "
+                             f"나머지: {ids[MAX_COMPARE_TARGETS:]}")
+        ids = ids[:MAX_COMPARE_TARGETS]
+    for owner_id in ids:
+        found = spec_service.find_owner(owner_type, owner_id)
+        if found is None:
+            result["errors"].append(f"사양 DB에 없는 대상입니다: {owner_type} {owner_id}")
+            continue
+        compared = spec_service.compare(owner_type, found["id"], conditions)
+        evidence_id = _register_spec_evidence(owner_type, compared["model"], compared["values"])
+        result["targets"].append({
+            "owner_type": owner_type, "id": found["id"], "model": compared["model"], "evidence_id": evidence_id,
+            **spec_service.summarize(compared["results"]),
+            "results": compared["results"],
+        })
+    logger.info(
+        "[compare_specs] %s %d개 x 조건 %d -> %s", owner_type, len(result["targets"]), len(conditions),
+        [(t["model"], t["met"], t["not_met"], t["unknown"]) for t in result["targets"]],
+    )
+    return result

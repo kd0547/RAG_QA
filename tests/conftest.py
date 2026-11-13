@@ -129,6 +129,7 @@ def agent_env(tmp_path, monkeypatch):
     from repository.prompt_repository import PromptRepository
     from repository.repo_connect import Database
     from repository.skill_repository import SkillRepository
+    from repository.spec_repository import SpecRepository
     from repository.task_repository import TaskRepository
 
     db = Database(str(tmp_path / "agent.db"))
@@ -143,6 +144,7 @@ def agent_env(tmp_path, monkeypatch):
         "prompt_repo": PromptRepository(db),
         "task_repo": TaskRepository(db),
         "skill_repo": SkillRepository(db),
+        "spec_repo": SpecRepository(db),
     }
     for name, value in repos.items():
         monkeypatch.setattr(repository, name, value)

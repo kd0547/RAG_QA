@@ -26,8 +26,9 @@ from agent.validation import validate_answer
 from entity.type import Attachment, DocumentType
 from repository import graph_repo, group_repo, prompt_repo
 from tools.tool import (
-    attachment_page_texts, graph_search, grep_documents, list_documents, list_evidence,
-    load_skill, read_attachment, read_pages, rerank_documents, search_documents,
+    attachment_page_texts, compare_specs, get_specs, graph_search, grep_documents, list_documents, list_evidence,
+    list_spec_attributes, load_skill, read_attachment, read_pages, rerank_documents, search_documents,
+    search_spec_items,
 )
 from langchain.agents.middleware import (
     ClearToolUsesEdit, ContextEditingMiddleware, ModelCallLimitMiddleware, ModelRequest, SummarizationMiddleware,
@@ -40,10 +41,27 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-TOOLS = [
+BASE_TOOLS = [
     graph_search, list_documents, grep_documents, read_pages, read_attachment,
     search_documents, rerank_documents, list_evidence, load_skill,
 ]
+# 사양 DB 도구 (지시서 E3). config.SPEC_TOOLS_ENABLED가 꺼지면 도구 목록에서 빠진다
+SPEC_TOOLS = [list_spec_attributes, search_spec_items, get_specs, compare_specs]
+
+
+def active_tools() -> list:
+    """지금 설정에서 답변 에이전트가 쓰는 도구 목록. 에이전트를 만들 때와 절차 초안 검사(skill_author)가 같이 쓴다.
+
+    답변 에이전트에는 쓰기 도구가 없다 (모든 도구가 조회·읽기다).
+    """
+    tools = list(BASE_TOOLS)
+    if config.SPEC_TOOLS_ENABLED:
+        tools += SPEC_TOOLS
+    return tools
+
+
+# 서버 시작 시점 설정의 도구 목록 (예전 이름. 설정을 바꿔 보는 테스트는 active_tools()를 쓴다)
+TOOLS = active_tools()
 
 
 # ---------- Agent ----------
@@ -136,7 +154,7 @@ def create_rag_agent(llm, *, checkpointer=None, summary_model=None):
     """도구·미들웨어·대화 기록을 붙인 에이전트. 테스트는 대역 모델로 이 함수를 그대로 쓴다."""
     return create_agent(
         model=llm,
-        tools=TOOLS,
+        tools=active_tools(),
         middleware=build_middleware(summary_model or llm),
         context_schema=AgentContext,
         checkpointer=checkpointer,

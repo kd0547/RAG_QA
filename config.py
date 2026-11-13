@@ -94,6 +94,14 @@ SKILL_DRAFT_TIMEOUT_SECONDS = float(os.getenv("SKILL_DRAFT_TIMEOUT_SECONDS", "30
 SKILL_DRAFT_MIN_CASES = int(os.getenv("SKILL_DRAFT_MIN_CASES", "3"))
 SKILL_DRAFT_AUTO = os.getenv("SKILL_DRAFT_AUTO", "1") not in ("0", "false", "False", "")
 
+# ---------- 기능 끄기 (통합 지시서 0-4. 문제가 생긴 기능만 끌 수 있게, 기본값은 모두 켬) ----------
+def _flag(name: str, default: str = "1") -> bool:
+    return os.getenv(name, default) not in ("0", "false", "False", "")
+
+
+# 0이면 사양 도구 4개(list_spec_attributes, search_spec_items, get_specs, compare_specs)가 도구 목록에서 빠진다
+SPEC_TOOLS_ENABLED = _flag("SPEC_TOOLS_ENABLED")
+
 # ---------- 문서 그래프 (Graph RAG) ----------
 # 업로드·페이지 검수 저장 뒤 백그라운드로 개체·관계를 뽑을지 (0이면 끈다. /graph/rebuild로 따로 뽑을 수 있다)
 GRAPH_EXTRACT_ENABLED = os.getenv("GRAPH_EXTRACT_ENABLED", "1") not in ("0", "false", "False", "")

@@ -50,9 +50,9 @@ class SkillDraftOutput(BaseModel):
 # ---------------------------------------------------------------- 검사
 
 def tool_names() -> dict[str, str]:
-    """답변 에이전트 도구 이름 → 설명 첫 줄 (agent.agent.TOOLS 그대로)."""
-    from agent.agent import TOOLS
-    return {t.name: (t.description or "").strip().splitlines()[0] if t.description else "" for t in TOOLS}
+    """답변 에이전트 도구 이름 → 설명 첫 줄 (agent.agent.active_tools() 그대로. 설정으로 끈 도구는 빠진다)."""
+    from agent.agent import active_tools
+    return {t.name: (t.description or "").strip().splitlines()[0] if t.description else "" for t in active_tools()}
 
 
 def blocked_names() -> set[str]:
