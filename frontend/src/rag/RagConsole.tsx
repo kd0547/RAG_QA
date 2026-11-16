@@ -9,6 +9,7 @@ import { FileList as RegisteredFileList } from './FileList';
 import { GroupHome } from './GroupHome';
 import { GroupInfoSidebar } from './GroupInfoSidebar';
 import { ragApi, reviewPath } from './api';
+import { qaHistory, type QaTurn, type SentAttachment } from './qaHistory';
 import type { AskMode, AskSource, FileDetail, FileGroup, FileSummary, UploadResult } from './types';
 import { AlertIcon, CloseIcon, DocumentIcon, ImageIcon, PaperclipIcon, UploadIcon } from '../components/icons';
 
@@ -970,18 +971,9 @@ function PdfPreview({ doc, onClose }: { doc: FileSummary; onClose: () => void })
 /*  오른쪽 — 질의응답                                                  */
 /* ================================================================== */
 
-interface QaTurn {
-    id: string;
-    question: string;
-    mode: AskMode;
-    queryTopN: number;
-    rerankTopN: number;
-    askedAt: string;
-    attachments: QaAttachment[];
-    status: 'pending' | 'done' | 'error';
-    answer?: string;
-    sources?: AskSource[];
-    error?: string;
+/** 입력창 첨부 → 보낸 질문에 남길 정보 (이미지 미리보기 URL은 그대로 넘긴다) */
+function toSent(a: QaAttachment): SentAttachment {
+    return { id: a.id, name: a.file.name, size: a.file.size, isImage: a.isImage, previewUrl: a.previewUrl };
 }
 
 function Workspace({
@@ -991,7 +983,9 @@ function Workspace({
     docCount: number;
     lastUpload: UploadResult[];
 }) {
-    const [turns, setTurns] = useState<QaTurn[]>([]);
+    // 대화는 화면 밖 저장소에 둔다 (다른 페이지에 다녀와도, 새로고침해도 남는다)
+    const turns = useSyncExternalStore(qaHistory.subscribe, qaHistory.getSnapshot);
+    const [confirmClear, setConfirmClear] = useState(false);
     const [question, setQuestion] = useState('');
     const [mode, setMode] = useState<AskMode>('local');
     // 서버에 ANTHROPIC_API_KEY가 없으면 Claude 버튼을 잠근다.
@@ -1027,10 +1021,11 @@ function Workspace({
         logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
     }, [turns]);
 
-    // 입력창 높이를 내용에 맞춰 늘린다 (최대 160px)
+    // 입력창 높이를 내용에 맞춰 늘린다 (최대 160px).
+    // 문서 관리 화면에서는 질의응답이 숨겨진 채 그려져 높이를 잴 수 없다(0이 된다). 그때는 건드리지 않고 기본 한 줄 높이를 둔다
     useEffect(() => {
         const el = inputRef.current;
-        if (!el) return;
+        if (!el || el.offsetParent === null) return;
         el.style.height = 'auto';
         el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }, [question]);
@@ -1074,8 +1069,8 @@ function Workspace({
     };
 
     const clearTurns = () => {
-        for (const t of turns) releaseAttachments(t.attachments);
-        setTurns([]);
+        qaHistory.clear();
+        setConfirmClear(false);
     };
 
     const ask = async () => {
@@ -1090,16 +1085,17 @@ function Workspace({
             queryTopN,
             rerankTopN,
             askedAt: new Date().toISOString(),
-            attachments: sent,
+            attachments: sent.map(toSent),
             status: 'pending',
         };
-        setTurns((prev) => [...prev, turn]);
+        qaHistory.update((prev) => [...prev, turn]);
         setQuestion('');
         setAttachments([]);
         setAttachError(null);
 
+        // 저장소에 바로 쓴다: 답을 기다리는 중 다른 페이지로 가도 답이 기록에 남는다
         const patch = (fields: Partial<QaTurn>) =>
-            setTurns((prev) => prev.map((t) => (t.id === turn.id ? { ...t, ...fields } : t)));
+            qaHistory.update((prev) => prev.map((t) => (t.id === turn.id ? { ...t, ...fields } : t)));
 
         try {
             const payload = { question: q, mode, query_top_n: queryTopN, rerank_top_n: rerankTopN };
@@ -1128,14 +1124,25 @@ function Workspace({
                             <span>
                                 질문 {turns.length}개 · 문서 {docCount}건
                             </span>
-                            <button
-                                type="button"
-                                onClick={clearTurns}
-                                disabled={busy}
-                                className="ml-auto h-7 px-2.5 rounded-lg font-semibold hover:text-ink hover:bg-chip disabled:opacity-40 transition-colors"
-                            >
-                                기록 지우기
-                            </button>
+                            {confirmClear ? (
+                                <span role="alertdialog" aria-label="대화 초기화 확인" className="ml-auto flex items-center gap-1.5 rounded-lg bg-warn-soft/50 py-0.5 pl-2.5 pr-1 text-ink">
+                                    대화 {turns.length}개를 지울까요?
+                                    <button type="button" onClick={clearTurns} disabled={busy}
+                                        className="h-6 px-2 rounded-md bg-ink text-white font-semibold disabled:opacity-40">지우기</button>
+                                    <button type="button" onClick={() => setConfirmClear(false)}
+                                        className="h-6 px-2 rounded-md font-semibold hover:bg-white">취소</button>
+                                </span>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => setConfirmClear(true)}
+                                    disabled={busy}
+                                    title={busy ? '답변을 기다리는 중에는 지울 수 없습니다' : undefined}
+                                    className="ml-auto h-7 px-2.5 rounded-lg font-semibold hover:text-ink hover:bg-chip disabled:opacity-40 transition-colors"
+                                >
+                                    대화 초기화
+                                </button>
+                            )}
                         </div>
                         <div className="mt-4 flex flex-col gap-10">
                             {turns.map((t) => (
@@ -1170,7 +1177,7 @@ function Workspace({
                         <ul className="flex flex-wrap gap-2 px-3 pt-3">
                             {attachments.map((a) => (
                                 <li key={a.id}>
-                                    <AttachmentChip attachment={a} onRemove={busy ? undefined : () => removeAttachment(a.id)} />
+                                    <AttachmentChip attachment={toSent(a)} onRemove={busy ? undefined : () => removeAttachment(a.id)} />
                                 </li>
                             ))}
                         </ul>
@@ -1332,10 +1339,10 @@ function TurnView({ turn }: { turn: QaTurn }) {
                         {turn.attachments.map((a) => (
                             <li key={a.id}>
                                 {a.previewUrl ? (
-                                    <a href={a.previewUrl} target="_blank" rel="noreferrer" title={`${a.file.name} · ${formatBytes(a.file.size)}`}>
+                                    <a href={a.previewUrl} target="_blank" rel="noreferrer" title={`${a.name} · ${formatBytes(a.size)}`}>
                                         <img
                                             src={a.previewUrl}
-                                            alt={a.file.name}
+                                            alt={a.name}
                                             className="max-h-40 max-w-[240px] rounded-xl border border-divide object-contain bg-white"
                                         />
                                     </a>
@@ -1389,11 +1396,11 @@ function TurnView({ turn }: { turn: QaTurn }) {
 }
 
 /** 입력창과 질문 말풍선에 같이 쓰는 첨부 칩. onRemove 가 있으면 지우기 버튼이 붙는다 */
-function AttachmentChip({ attachment, onRemove }: { attachment: QaAttachment; onRemove?: () => void }) {
-    const { file, isImage, previewUrl } = attachment;
+function AttachmentChip({ attachment, onRemove }: { attachment: SentAttachment; onRemove?: () => void }) {
+    const { name, size, isImage, previewUrl } = attachment;
     return (
         <span
-            title={`${file.name} · ${formatBytes(file.size)}`}
+            title={`${name} · ${formatBytes(size)}`}
             className="inline-flex items-center gap-1.5 h-8 pl-1.5 pr-2 rounded-lg bg-chip text-[12px] max-w-[260px]"
         >
             {isImage && previewUrl ? (
@@ -1403,13 +1410,13 @@ function AttachmentChip({ attachment, onRemove }: { attachment: QaAttachment; on
             ) : (
                 <DocumentIcon className="w-4 h-4 shrink-0 text-muted" />
             )}
-            <span className="truncate font-medium">{file.name}</span>
-            <span className="shrink-0 text-[10.5px] text-muted tabular-nums">{formatBytes(file.size)}</span>
+            <span className="truncate font-medium">{name}</span>
+            <span className="shrink-0 text-[10.5px] text-muted tabular-nums">{formatBytes(size)}</span>
             {onRemove && (
                 <button
                     type="button"
                     onClick={onRemove}
-                    aria-label={`${file.name} 첨부 제거`}
+                    aria-label={`${name} 첨부 제거`}
                     className="ml-0.5 w-5 h-5 shrink-0 rounded-md inline-flex items-center justify-center text-muted hover:text-ink hover:bg-white transition-colors"
                 >
                     <CloseIcon />
