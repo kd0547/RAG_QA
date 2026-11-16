@@ -6,312 +6,16 @@ import { reviewPath } from '../rag/api';
 import { graphApi } from './api';
 import { EntityPicker, TypeDot, type PickedEntity } from './EntityPicker';
 import { errorText } from './errors';
-import { ORIGIN_META } from './meta';
-import { entityMeta, relationLabel, ruleWarning, useGraphSchema } from './schemaContext';
+import { entityMeta, useGraphSchema } from './schemaContext';
 import { SpecDiffBox, TypeChanger } from './EntityEditExtras';
 import { EntityProperties } from './GraphEditing';
 import { ModelHierarchy, SpecAttributeSection, SpecValuesSection } from './SpecPanels';
 import { groupRelations } from './relationGroups';
-import type { GraphEntityDetail, GraphNode, GraphRelation, RelationType } from './types';
+import { AddRelation, RelationDetail, RelationGroups } from './RelationViews';
+import type { GraphEntityDetail, GraphNode, GraphRelation } from './types';
 
 /** "그래프에서 고르기": 부모가 다음 노드 클릭을 이 콜백으로 넘긴다 */
 export type RequestPick = (onPicked: (node: GraphNode) => void) => void;
-
-function OriginBadge({ relation }: { relation: Pick<GraphRelation, 'origin'> }) {
-    const meta = ORIGIN_META[relation.origin];
-    return <span className={`shrink-0 rounded-full border px-1.5 py-px text-[10px] font-semibold ${meta.className}`}>{meta.label}</span>;
-}
-
-function evidenceText(relation: Pick<GraphRelation, 'original_name' | 'page'>): string | null {
-    if (!relation.original_name) return null;
-    return relation.page !== null ? `${relation.original_name} · ${relation.page}쪽` : relation.original_name;
-}
-
-/**
- * 관계 한 줄: 종류 바꾸기, 방향 뒤집기, 지우기.
- * 문서에서 뽑은 관계를 고치거나 지우면 서버가 기억해서, 문서를 다시 뽑아도 원래대로 돌아가지 않는다.
- */
-export function RelationRow({
-    relation,
-    perspectiveId,
-    onOpenEntity,
-    onReplaced,
-    onDeleted,
-    siblings = [],
-}: {
-    relation: GraphRelation;
-    /** 같은 관계(출발·종류·도착)의 다른 출처 행. 함께 근거로 보인다 */
-    siblings?: GraphRelation[];
-    /** 이 개체 입장에서 보여준다 (상대 개체를 크게). 없으면 출발 → 도착 */
-    perspectiveId?: number;
-    onOpenEntity: (id: number) => void;
-    onReplaced: (relation: GraphRelation) => void;
-    onDeleted: () => void;
-}) {
-    const { schema } = useGraphSchema();
-    const [busy, setBusy] = useState(false);
-    const [confirming, setConfirming] = useState(false);
-    const [deleteScope, setDeleteScope] = useState('all');
-    const [error, setError] = useState('');
-
-    const outgoing = perspectiveId === undefined || relation.source_id === perspectiveId;
-    const other = outgoing
-        ? { id: relation.target_id, type: relation.target_type, name: relation.target_name }
-        : { id: relation.source_id, type: relation.source_type, name: relation.source_name };
-    const evidence = evidenceText(relation);
-    const warning = ruleWarning(schema, relation.type, relation.source_type, relation.target_type);
-
-    const run = async (action: () => Promise<void>) => {
-        setBusy(true);
-        setError('');
-        try {
-            await action();
-        } catch (e) {
-            setError(errorText(e));
-        } finally {
-            setBusy(false);
-        }
-    };
-
-    return (
-        <li className="rounded-lg border border-divide bg-white px-3 py-2">
-            <div className="flex items-center gap-2">
-                {perspectiveId !== undefined && (
-                    <span className="shrink-0 text-[12px] font-bold text-muted" title={outgoing ? '이 개체에서 나가는 관계' : '이 개체로 들어오는 관계'}>
-                        {outgoing ? '→' : '←'}
-                    </span>
-                )}
-                {perspectiveId === undefined ? (
-                    <span className="min-w-0 flex-1 text-[12.5px] font-semibold">
-                        <button type="button" onClick={() => onOpenEntity(relation.source_id)} className="hover:underline">{relation.source_name}</button>
-                        <span className="mx-1 text-muted">→</span>
-                        <button type="button" onClick={() => onOpenEntity(relation.target_id)} className="hover:underline">{relation.target_name}</button>
-                    </span>
-                ) : (
-                    <button type="button" onClick={() => onOpenEntity(other.id)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[12.5px] font-semibold hover:underline">
-                        <TypeDot type={other.type} />
-                        <span className="truncate">{other.name}</span>
-                    </button>
-                )}
-                <OriginBadge relation={relation} />
-            </div>
-            {warning && <p className="mt-1 rounded bg-warn-soft/60 px-1.5 py-0.5 text-[11px] text-ink/80" title="규칙은 문서 자동 추출만 거릅니다. 의도한 관계면 그대로 두세요">⚠ {warning}</p>}
-            {!schema.editing_enabled && <p className="mt-1.5 text-xs">{relationLabel(schema, relation.type)}</p>}
-            <div hidden={!schema.editing_enabled} className="mt-1.5 flex-wrap items-center gap-1.5">
-                <select
-                    aria-label="관계 종류"
-                    value={relation.type}
-                    disabled={busy}
-                    onChange={(e) => {
-                        const type = e.target.value as RelationType;
-                        void run(async () => onReplaced(await graphApi.updateRelation(relation.id, { type, expected_revision: relation.revision })));
-                    }}
-                    className="h-7 rounded-md border border-line bg-white px-1.5 text-[11.5px] font-semibold disabled:opacity-50"
-                >
-                    {schema.relation_types.filter((t) => t.active || t.key === relation.type).map((t) => <option key={t.key} value={t.key}>{t.label} ({t.description})</option>)}
-                    {!schema.relation_types.some((t) => t.key === relation.type) && <option value={relation.type}>{relation.type}</option>}
-                </select>
-                <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void run(async () => onReplaced(await graphApi.updateRelation(relation.id, { reverse: true, expected_revision: relation.revision })))}
-                    title="출발과 도착을 바꿉니다"
-                    className="h-7 rounded-md border border-line px-2 text-[11.5px] font-semibold text-ink/70 hover:bg-chip disabled:opacity-50"
-                >
-                    ⇄ 방향
-                </button>
-                {confirming ? (
-                    <span className="ml-auto flex items-center gap-1">
-                        <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void run(async () => {
-                                await graphApi.deleteRelation(relation.id, relation.revision, deleteScope);
-                                onDeleted();
-                            })}
-                            className="h-7 rounded-md bg-danger px-2 text-[11.5px] font-bold text-white hover:opacity-90 disabled:opacity-50"
-                        >
-                            지우기
-                        </button>
-                        <button type="button" onClick={() => setConfirming(false)} className="h-7 rounded-md px-2 text-[11.5px] font-semibold text-muted hover:bg-chip">취소</button>
-                    </span>
-                ) : (
-                    <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => setConfirming(true)}
-                        className="ml-auto h-7 rounded-md px-2 text-[11.5px] font-semibold text-danger hover:bg-danger-surface disabled:opacity-50"
-                    >
-                        삭제
-                    </button>
-                )}
-            </div>
-            {confirming && (
-                <p className="mt-1.5 text-[11px] leading-4 text-muted">
-                    {relation.origin === 'manual' ? '이 사용자 입력을 삭제 상태로 보관합니다. 삭제된 항목에서 복구할 수 있습니다.' : '이 논리 관계의 모든 자동 출처를 그래프에서 제외합니다. 원본 문서·사양 연결은 유지됩니다.'}
-                </p>
-            )}
-            {confirming && relation.origin !== 'manual' && <select aria-label="자동 관계 제외 범위" value={deleteScope} onChange={(e) => setDeleteScope(e.target.value)} className="mt-1 w-full rounded border border-line text-xs">
-                <option value="all">이 논리 관계의 모든 출처 제외</option><option value="source">선택한 출처 주장만 제외</option>
-            </select>}
-            {siblings.length > 0 && (
-                <div className="mt-1 text-[11px] text-muted">
-                    <p className="font-semibold">근거 {siblings.length + 1}곳</p>
-                    <ul className="mt-0.5 space-y-0.5">
-                        {[relation, ...siblings].map((r) => {
-                            const text = evidenceText(r) ?? (r.origin === 'spec' ? '사양 DB' : r.origin === 'manual' ? '사용자 입력' : '근거 없음');
-                            return <li key={r.id} className="truncate">· {r.file_id
-                                ? <a {...linkProps(reviewPath(r.file_id))} className="hover:text-brand-hover hover:underline">{text}</a> : text}</li>;
-                        })}
-                    </ul>
-                </div>
-            )}
-            {evidence && siblings.length === 0 && (
-                relation.file_id ? (
-                    <a {...linkProps(reviewPath(relation.file_id))} className="mt-1 block truncate text-[11px] text-muted hover:text-brand-hover hover:underline">
-                        근거: {evidence}
-                    </a>
-                ) : <p className="mt-1 truncate text-[11px] text-muted">근거: {evidence}</p>
-            )}
-            {error && <p role="alert" className="mt-1 text-[11px] text-danger">{error}</p>}
-            {relation.sources?.map((s) => <p key={s.source_id} className="mt-1 text-[11px] text-muted">{s.file_deleted ? '근거 파일 삭제됨 · ' : ''}{s.source_name || '사용자 입력'}{s.page ? ` · ${s.page}쪽` : ''} · {s.reason || '사유 없음'} · 파일 검증 미완료</p>)}
-        </li>
-    );
-}
-
-/** 이 개체에서 새 관계 넣기 */
-function AddRelationForm({
-    entity,
-    onCreated,
-    requestPick,
-}: {
-    entity: GraphEntityDetail;
-    onCreated: (relation: GraphRelation) => void;
-    requestPick: RequestPick;
-}) {
-    const { schema } = useGraphSchema();
-    const [type, setType] = useState<RelationType>(entity.type === 'certification' ? 'issued_by' : 'has_component');
-    const [outgoing, setOutgoing] = useState(true);
-    const [target, setTarget] = useState<PickedEntity | null>(null);
-    const [picking, setPicking] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const [error, setError] = useState('');
-    const [reason, setReason] = useState('');
-    const [notice, setNotice] = useState('');
-    const [fileId, setFileId] = useState('');
-    const [page, setPage] = useState('');
-
-    const save = async () => {
-        if (!target) return;
-        setSaving(true);
-        setError('');
-        try {
-            const source = { reason, file_id: fileId || null, page: page ? Number(page) : null };
-            let relation: GraphRelation;
-            if (outgoing) {
-                relation = await graphApi.createRelation(target.kind === 'existing'
-                    ? { source_id: entity.id, type, target_id: target.id, source }
-                    : { source_id: entity.id, type, new_target: { type: target.type, name: target.name }, source });
-            } else {
-                // 들어오는 관계: 새 개체가 출발점이면 먼저 이 개체 쪽으로 만든 뒤 뒤집는다
-                if (target.kind === 'existing') {
-                    relation = await graphApi.createRelation({ source_id: target.id, type, target_id: entity.id, source });
-                } else {
-                    relation = await graphApi.createRelation({ source_id: entity.id, type, new_target: { type: target.type, name: target.name }, reverse: true, source });
-                }
-            }
-            setTarget(null);
-            setNotice(relation.warnings?.length ? `만들었습니다. ${relation.warnings.join(' ')}` : '');
-            onCreated(relation);
-        } catch (e) {
-            setError(errorText(e));
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <div className="rounded-lg border border-dashed border-line bg-surface p-3">
-            <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2 text-[12px]">
-                <span className="font-semibold text-muted">관계</span>
-                <select
-                    aria-label="새 관계 종류"
-                    value={type}
-                    onChange={(e) => setType(e.target.value as RelationType)}
-                    className="h-8 rounded-md border border-line bg-white px-1.5 text-[12px]"
-                >
-                    {schema.relation_types.filter((t) => t.active).map((t) => <option key={t.key} value={t.key}>{t.label} ({t.description})</option>)}
-                </select>
-                <span className="font-semibold text-muted">방향</span>
-                <div role="group" aria-label="관계 방향" className="flex rounded-md bg-chip p-0.5">
-                    {[true, false].map((value) => (
-                        <button
-                            key={String(value)}
-                            type="button"
-                            aria-pressed={outgoing === value}
-                            onClick={() => setOutgoing(value)}
-                            className={`h-7 flex-1 rounded px-2 text-[11.5px] font-semibold ${outgoing === value ? 'bg-white text-ink shadow-[0_1px_2px_rgba(20,28,43,0.10)]' : 'text-muted'}`}
-                        >
-                            {value ? '이 개체 → 대상' : '대상 → 이 개체'}
-                        </button>
-                    ))}
-                </div>
-                <span className="font-semibold text-muted">대상</span>
-                {target ? (
-                    <div className="flex min-w-0 items-center gap-1.5 rounded-md border border-line bg-white px-2 py-1">
-                        <TypeDot type={target.type} />
-                        <span className="min-w-0 flex-1 truncate font-semibold">{target.name}</span>
-                        {target.kind === 'new' && <span className="shrink-0 text-[10.5px] text-brand-hover">새 {entityMeta(schema, target.type).label}</span>}
-                        <button type="button" onClick={() => setTarget(null)} aria-label="대상 지우기" className="shrink-0 px-1 text-muted hover:text-ink">×</button>
-                    </div>
-                ) : (
-                    <div className="flex min-w-0 gap-1.5">
-                        <div className="min-w-0 flex-1">
-                            <EntityPicker label="관계 대상 개체" excludeId={entity.id} allowCreate onPick={setTarget}
-                                defaultNewType={type === 'has_component' ? 'component' : type === 'has_certification' ? 'certification'
-                                    : type === 'has_number' ? 'cert_number' : type === 'issued_by' ? 'organization'
-                                        : type === 'complies_with' ? 'standard' : 'product'} />
-                        </div>
-                        <button
-                            type="button"
-                            aria-pressed={picking}
-                            onClick={() => {
-                                setPicking(true);
-                                requestPick((node) => {
-                                    setPicking(false);
-                                    if (node.id !== entity.id) setTarget({ kind: 'existing', id: node.id, type: node.type, name: node.name, revision: node.revision });
-                                });
-                            }}
-                            title="그래프에서 노드를 눌러 고릅니다"
-                            className={`h-9 shrink-0 rounded-lg border px-2 text-[11.5px] font-semibold ${picking ? 'border-brand bg-brand-tint text-brand-hover' : 'border-line bg-white text-ink/70 hover:bg-chip'}`}
-                        >
-                            {picking ? '노드를 누르세요' : '그래프에서'}
-                        </button>
-                    </div>
-                )}
-            </div>
-            <p className="mt-2 text-xs font-semibold">{outgoing ? entity.name : target?.name || '대상'} → {relationLabel(schema, type)} → {outgoing ? target?.name || '대상' : entity.name}</p>
-            <details className="mt-2 text-xs"><summary>입력 사유·근거 (선택)</summary>
-                <label className="mt-2 block">사유<textarea className="w-full rounded border border-line p-1" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={4000} /></label>
-                <label className="block">근거 파일 ID<input className="w-full rounded border border-line p-1" value={fileId} onChange={(e) => setFileId(e.target.value)} /></label>
-                <label className="block">페이지<input type="number" min={1} className="w-full rounded border border-line p-1" value={page} onChange={(e) => setPage(e.target.value)} /></label>
-                <p>파일 선택만으로 내용이 검증되지는 않습니다.</p>
-            </details>
-            {notice && <p className="mt-2 rounded bg-warn-soft/60 px-2 py-1 text-[11.5px] text-ink/80">{notice}</p>}
-            {error && <p role="alert" className="mt-2 text-[11.5px] text-danger">{error}</p>}
-            <div className="mt-2.5 flex justify-end">
-                <button
-                    type="button"
-                    disabled={!target || saving}
-                    onClick={() => void save()}
-                    className="h-8 rounded-lg bg-brand px-3 text-[12px] font-bold text-white hover:bg-brand-hover disabled:opacity-40"
-                >
-                    {saving ? '저장 중…' : '관계 추가'}
-                </button>
-            </div>
-        </div>
-    );
-}
 
 function Section({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
     return (
@@ -377,9 +81,6 @@ export function EntityPanel({
     if (!entity || entity.id !== entityId) return <p className="p-4 text-[12.5px] text-muted">불러오는 중…</p>;
 
     const meta = entityMeta(schema, entity.type);
-    // 사양 값 노드가 아닌 개체에서는 사양 값 관계(has_spec)를 따로 접어 둔다 (수백 개라 다른 관계를 가린다)
-    const specRelations = entity.type === 'spec_value' ? [] : entity.relations.filter((r) => r.type === 'has_spec');
-    const mainRelations = entity.type === 'spec_value' ? entity.relations : entity.relations.filter((r) => r.type !== 'has_spec');
     const otherAliases = entity.aliases.filter((a) => a !== entity.name);
 
     const rename = async () => {
@@ -461,34 +162,16 @@ export function EntityPanel({
             <SpecValuesSection entity={entity} />
             <SpecAttributeSection entity={entity} onOpenEntity={onOpenEntity} />
             <EntityProperties key={entity.id} entity={entity} changed={changed} removed={() => onMerged(entity.id, 0)} />
-            <Section title="관계" count={groupRelations(mainRelations).length}>
-                {mainRelations.length === 0 && <p className="mb-2 text-[12px] text-muted">연결된 관계가 없습니다.</p>}
-                <ul className="space-y-1.5">
-                    {groupRelations(mainRelations).map(([r, ...others]) => (
-                        <RelationRow
-                            key={r.id}
-                            relation={r}
-                            siblings={others}
-                            perspectiveId={entity.id}
-                            onOpenEntity={onOpenEntity}
-                            onReplaced={changed}
-                            onDeleted={changed}
-                        />
-                    ))}
-                </ul>
-                {specRelations.length > 0 && (
-                    <details className="mt-2 rounded border border-line">
-                        <summary className="cursor-pointer px-2 py-1 text-[12px] font-semibold">사양 값 관계 <span className="text-muted">{specRelations.length}</span></summary>
-                        <ul className="space-y-1.5 p-2">
-                            {specRelations.map((r) => (
-                                <RelationRow key={r.id} relation={r} perspectiveId={entity.id} onOpenEntity={onOpenEntity} onReplaced={changed} onDeleted={changed} />
-                            ))}
-                        </ul>
-                    </details>
+            <Section title="관계" count={groupRelations(entity.relations).length}>
+                <RelationGroups key={entity.id} entityId={entity.id} relations={entity.relations} onOpenEntity={onOpenEntity} onChanged={changed} />
+                {schema.editing_enabled && (
+                    <div className="mt-2.5">
+                        <AddRelation key={entity.id} entity={entity} onCreated={changed}
+                            onPickFromGraph={(done) => requestPick((node) => {
+                                if (node.id !== entity.id) done({ kind: 'existing', id: node.id, type: node.type, name: node.name, revision: node.revision });
+                            })} />
+                    </div>
                 )}
-                <div className="mt-2.5">
-                    {schema.editing_enabled && <AddRelationForm key={entity.id} entity={entity} onCreated={changed} requestPick={requestPick} />}
-                </div>
             </Section>
 
             <Section title="나온 문서" count={entity.mentions.length}>
@@ -528,7 +211,7 @@ export function EntityPanel({
     );
 }
 
-/** 엣지를 눌렀을 때: 관계 하나 편집 */
+/** 선을 눌렀을 때: 관계 하나를 문장으로 보이고 바꾸기·지우기 */
 export function EdgePanel({
     relation,
     siblings = [],
@@ -543,15 +226,13 @@ export function EdgePanel({
     onReplaced: (relation: GraphRelation) => void;
     onDeleted: () => void;
 }) {
-    const { schema } = useGraphSchema();
     return (
         <div className="p-4">
             <p className="text-[11px] font-bold text-muted">관계</p>
-            <h2 className="mt-1 text-[15px] font-bold">{relationLabel(schema, relation.type)}</h2>
-            <p className="mt-0.5 text-[11.5px] text-muted">{schema.relation_types.find((r) => r.key === relation.type)?.description}</p>
-            <ul className="mt-3">
-                <RelationRow key={relation.id} relation={relation} siblings={siblings} onOpenEntity={onOpenEntity} onReplaced={onReplaced} onDeleted={onDeleted} />
-            </ul>
+            <div className="mt-2">
+                <RelationDetail key={relation.id} rows={[relation, ...siblings]} onOpenEntity={onOpenEntity}
+                    onChanged={(result) => (result ? onReplaced(result) : onDeleted())} />
+            </div>
             <p className="mt-3 text-[11.5px] leading-5 text-muted">
                 문서에서 뽑은 관계를 고치거나 지우면, 그 문서를 다시 추출해도 원래 관계로 돌아가지 않습니다.
             </p>

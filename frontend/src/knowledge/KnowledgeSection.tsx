@@ -12,6 +12,8 @@ import { GraphCanvas, type Selection } from './GraphCanvas';
 import { layoutGraph, layoutHierarchy, type Point } from './layout';
 import { GraphSchemaProvider } from './schema';
 import { GraphEditingToolbar } from './GraphEditing';
+import { RelationChooser } from './RelationViews';
+import { relationPhrase } from './relationPhrases';
 import { ORIGIN_META } from './meta';
 import { entityMeta, typeKeys, useGraphSchema } from './schemaContext';
 import type { EntityType, GraphEdge, GraphNode, GraphRelation, GraphStats, GraphView, RelationOrigin } from './types';
@@ -131,6 +133,11 @@ function KnowledgeContent() {
     // 사양 값 노드는 고른 노드의 이웃으로만, 관계 없는 사양 노드 숨기기 (둘 다 기본 켬, 지시서 GR4-8)
     const [valuesNearOnly, setValuesNearOnly] = useState(true);
     const [hideIsolatedSpec, setHideIsolatedSpec] = useState(true);
+    // 선 잇기: 켜면 노드를 누를 때 선이 포인터를 따라오고, 두 번째 노드를 누르면 관계를 고르는 창이 뜬다
+    const [connectMode, setConnectMode] = useState(false);
+    const [connecting, setConnecting] = useState<{ fromId: number; toId: number; x: number; y: number } | null>(null);
+    const [connectNotice, setConnectNotice] = useState('');
+    const mainRef = useRef<HTMLElement>(null);
     // 계층 보기: null이면 자동 (중심 개체가 제품군이면 켬)
     const [treeChoice, setTreeChoice] = useState<boolean | null>(null);
 
@@ -346,7 +353,7 @@ function KnowledgeContent() {
             <GraphEditingToolbar onChanged={changed} onSelect={focus} />
 
             <div className="flex-1 min-h-0 flex flex-col md:flex-row">
-                <main className="relative flex-1 min-w-0 min-h-[480px] bg-surface">
+                <main ref={mainRef} className="relative flex-1 min-w-0 min-h-[480px] bg-surface">
                     {/* 도구 모음 */}
                     <div className="absolute left-3 right-3 top-3 z-10 flex flex-wrap items-start gap-2 pointer-events-none">
                         <div className="pointer-events-auto w-full sm:w-64">
@@ -390,6 +397,10 @@ function KnowledgeContent() {
                                     <button type="button" onClick={() => showMore(x.id)} className="h-6 rounded-md px-1.5 font-semibold text-ink hover:bg-chip">{EXPAND_STEP}개 더</button>
                                 </span>
                             ))}
+                            {schema.editing_enabled && <button type="button" aria-pressed={connectMode}
+                                onClick={() => { setConnectMode(!connectMode); setConnecting(null); setConnectNotice(''); }}
+                                title="켜면 노드를 누를 때 선이 마우스를 따라오고, 이을 노드를 누르면 관계를 고릅니다"
+                                className={`h-6 rounded-md px-2 font-semibold ${connectMode ? 'bg-brand text-white' : 'hover:bg-chip'}`}>선 잇기</button>}
                             {hasTree && <button type="button" aria-pressed={treeOn} onClick={toggleTree}
                                 className={`h-6 rounded-md px-2 font-semibold ${treeOn ? 'bg-ink text-white' : 'hover:bg-chip'}`}>계층 보기</button>}
                             <label className="flex items-center gap-1"><input type="checkbox" checked={valuesNearOnly} onChange={(e) => setValuesNearOnly(e.target.checked)} /> 사양 값은 이웃만</label>
@@ -417,6 +428,34 @@ function KnowledgeContent() {
                         </div>
                     </div>
 
+                    {connectMode && !connecting && (
+                        <div className="pointer-events-none absolute bottom-14 left-1/2 z-20 max-w-[92%] -translate-x-1/2 rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-semibold text-white shadow-lg">
+                            선 잇기: 노드를 누르면 선이 따라옵니다. 이을 노드를 누르세요 · 빈 곳이나 Esc로 취소
+                        </div>
+                    )}
+                    {connectNotice && !connecting && (
+                        <div role="status" className="absolute bottom-14 left-1/2 z-20 max-w-[90%] -translate-x-1/2 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-lg">
+                            {connectNotice}
+                            <button type="button" onClick={() => setConnectNotice('')} aria-label="알림 닫기" className="ml-2 text-muted hover:text-ink">×</button>
+                        </div>
+                    )}
+                    {connecting && nodeById.get(connecting.fromId) && nodeById.get(connecting.toId) && (
+                        <div className="absolute z-30 w-[300px] max-h-[70%] overflow-y-auto rounded-xl border border-line bg-white p-3 shadow-xl"
+                            style={{ left: connecting.x, top: connecting.y }}>
+                            <RelationChooser
+                                a={nodeById.get(connecting.fromId)!}
+                                b={nodeById.get(connecting.toId)!}
+                                onCancel={() => setConnecting(null)}
+                                onCreated={(relation) => {
+                                    setConnecting(null);
+                                    setConnectNotice(relation.warnings?.length
+                                        ? `연결했습니다. ${relation.warnings.join(' ')}`
+                                        : `연결했습니다: ${relationPhrase(schema, relation.type, relation.source_name, relation.target_name)}`);
+                                    changed();
+                                }}
+                            />
+                        </div>
+                    )}
                     {picking && (
                         <div className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full bg-ink px-3.5 py-1.5 text-[12px] font-semibold text-white shadow-lg">
                             연결할 노드를 누르세요 · Esc로 취소
@@ -483,6 +522,18 @@ function KnowledgeContent() {
                             }}
                             expandedIds={expandedIds}
                             onToggleExpand={toggleExpand}
+                            connectMode={connectMode}
+                            onConnect={(fromId, toId, clientX, clientY) => {
+                                const box = mainRef.current?.getBoundingClientRect();
+                                const width = box?.width ?? 600;
+                                const height = box?.height ?? 600;
+                                setConnectNotice('');
+                                setConnecting({
+                                    fromId, toId,
+                                    x: Math.min(Math.max((clientX - (box?.left ?? 0)) + 12, 8), Math.max(8, width - 310)),
+                                    y: Math.min(Math.max((clientY - (box?.top ?? 0)) - 20, 8), Math.max(8, height - 320)),
+                                });
+                            }}
                             onMoveNode={(id, p) => {
                                 pinnedRef.current.add(id);
                                 setPositions((prev) => new Map(prev).set(id, p));

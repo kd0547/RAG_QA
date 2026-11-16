@@ -30,6 +30,8 @@ export function GraphCanvas({
     onMoveNode,
     expandedIds = new Set<number>(),
     onToggleExpand,
+    connectMode = false,
+    onConnect,
 }: {
     nodes: GraphNode[];
     edges: GraphEdge[];
@@ -46,11 +48,25 @@ export function GraphCanvas({
     expandedIds?: Set<number>;
     /** 노드를 두 번 누르거나 +숫자를 누르면 숨은 이웃을 펼치고, 다시 하면 접는다 */
     onToggleExpand?: (nodeId: number) => void;
+    /** 선 잇기: 노드를 누르면 선이 포인터를 따라오고, 다른 노드를 누르면 onConnect */
+    connectMode?: boolean;
+    /** 선 잇기로 두 노드를 골랐다. clientX·clientY는 두 번째 노드를 누른 화면 좌표 */
+    onConnect?: (fromId: number, toId: number, clientX: number, clientY: number) => void;
 }) {
     const { schema } = useGraphSchema();
     const svgRef = useRef<SVGSVGElement>(null);
     const [view, setView] = useState<ViewBox>({ x: -300, y: -200, w: 600, h: 400 });
     const [hovered, setHovered] = useState<number | null>(null);
+    // 선 잇기: 선이 시작된 노드와 지금 포인터 위치 (SVG 좌표)
+    const [connectStart, setConnectStart] = useState<number | null>(null);
+    const [pointer, setPointer] = useState<Point | null>(null);
+    const connectFrom = connectMode ? connectStart : null;
+    useEffect(() => {
+        if (connectFrom === null) return;
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setConnectStart(null); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [connectFrom]);
     const drag = useRef<
         | { kind: 'pan'; startX: number; startY: number; view: ViewBox; moved: boolean }
         | { kind: 'node'; id: number; startX: number; startY: number; moved: boolean }
@@ -126,6 +142,10 @@ export function GraphCanvas({
         drag.current = { kind: 'node', id, startX: e.clientX, startY: e.clientY, moved: false };
     };
     const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
+        if (connectFrom !== null) {
+            const p = toSvg(e.clientX, e.clientY);
+            if (p) setPointer(p);
+        }
         const d = drag.current;
         if (!d) return;
         const distance = Math.hypot(e.clientX - d.startX, e.clientY - d.startY);
@@ -148,9 +168,22 @@ export function GraphCanvas({
         drag.current = null;
         if (!d || d.moved) return;
         if (d.kind === 'pan') {
+            if (connectFrom !== null) { setConnectStart(null); return; } // 빈 곳을 누르면 선 잇기 취소
             if (!picking) onSelect(null);
         } else if (picking) {
             onPick(d.id);
+        } else if (connectMode && onConnect) {
+            if (connectFrom === null) {
+                // 첫 번째 노드: 선이 여기서 시작해 포인터를 따라온다
+                setConnectStart(d.id);
+                setPointer(toSvg(e.clientX, e.clientY));
+                onSelect({ kind: 'node', id: d.id });
+            } else if (connectFrom === d.id) {
+                setConnectStart(null); // 같은 노드를 다시 누르면 취소
+            } else {
+                onConnect(connectFrom, d.id, e.clientX, e.clientY);
+                setConnectStart(null);
+            }
         } else {
             const now = e.timeStamp;
             const last = lastNodeClick.current;
@@ -262,7 +295,7 @@ export function GraphCanvas({
                 aria-label={`지식 그래프: 개체 ${nodes.length}개, 관계 ${edges.length}개`}
                 viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
                 preserveAspectRatio="xMidYMid meet"
-                className={`h-full w-full touch-none select-none ${picking ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
+                className={`h-full w-full touch-none select-none ${picking || connectMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
                 onPointerDown={onBackgroundDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
@@ -341,6 +374,10 @@ export function GraphCanvas({
                     })}
                 </g>
 
+                {connectFrom !== null && pointer && positions.get(connectFrom) && (
+                    <line x1={positions.get(connectFrom)!.x} y1={positions.get(connectFrom)!.y} x2={pointer.x} y2={pointer.y}
+                        stroke="#00A4E4" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />
+                )}
                 <g>
                     {nodes.map((node) => {
                         const p = positions.get(node.id);
@@ -375,6 +412,9 @@ export function GraphCanvas({
                                 }}
                             >
                                 {selected && <circle r={r + 5} fill="none" stroke={meta.color} strokeOpacity={0.35} strokeWidth={4} />}
+                                {connectFrom !== null && connectFrom !== node.id && hovered === node.id && (
+                                    <circle r={r + 7} fill="none" stroke="#00A4E4" strokeWidth={3} strokeDasharray="4 3" />
+                                )}
                                 <circle
                                     r={r}
                                     fill={meta.color}
