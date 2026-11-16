@@ -33,7 +33,7 @@ from app.routers.specs import router as spec_router
 from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
-from agent.agent import ALIASES, get_agent, open_checkpointer, set_checkpointer
+from agent.agent import get_agent, open_checkpointer, set_checkpointer
 from agent.skills import reload_skills
 from agent.request_analysis import start_analyzer
 from repository import db, email_repo, evidence_repo, graph_repo, group_repo, prompt_repo, skill_repo, task_repo
@@ -116,13 +116,6 @@ async def lifespan(app: FastAPI):
             logger.info("사용하지 않는 기본 문서 그룹 %d개 정리", removed)
     except Exception:
         logger.exception("기본 문서 그룹 정리 실패")
-
-    # aliases.yaml의 상위 개념(KC 인증 등)을 문서 그래프에 넣는다. 실패해도 그래프 검색만 덜 펼쳐질 뿐이다.
-    try:
-        linked = graph_repo.seed_concepts(ALIASES)
-        logger.info("문서 그래프 상위 개념 등록: 연결 %d개, %s", linked, graph_repo.stats())
-    except Exception:
-        logger.exception("문서 그래프 상위 개념 등록 실패")
 
     # 사양 DB의 제품·상위 모델·제품-부품 연결을 문서 그래프에 심는다 (spec 관계만 다시 넣는다). 실패해도 서버는 뜬다
     if config.GRAPH_SPEC_SEED_ENABLED:

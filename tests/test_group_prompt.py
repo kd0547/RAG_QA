@@ -10,9 +10,9 @@ def test_group_catalog_is_added_as_search_hint_only():
         {"id": "certificate", "name": "인증서", "description": "KC 안전확인과 적합등록 인증서", "file_count": 2},
     ]
 
-    prompt = render_prompt("기본 지침\n$aliases", {"N5800": ["엔오팔공공"]}, groups)
+    prompt = render_prompt("기본 지침\n$aliases", groups)
 
-    assert "N5800 = 엔오팔공공" in prompt
+    assert "$aliases" not in prompt and "엔오팔공공" not in prompt
     assert "검색 범위를 고를 때만" in prompt
     assert "답변의 근거로도 사용하지 마세요" in prompt
     assert json.dumps([{"id": "certificate", "name": "인증서", "description": "KC 안전확인과 적합등록 인증서"}], ensure_ascii=False) in prompt
@@ -20,4 +20,4 @@ def test_group_catalog_is_added_as_search_hint_only():
 
 
 def test_prompt_without_groups_has_no_catalog():
-    assert render_prompt("기본 지침", {}, []) == "기본 지침"
+    assert render_prompt("기본 지침", []) == "기본 지침"

@@ -248,7 +248,7 @@ function AddRelationForm({
                             <EntityPicker label="관계 대상 개체" excludeId={entity.id} allowCreate onPick={setTarget}
                                 defaultNewType={type === 'has_component' ? 'component' : type === 'has_certification' ? 'certification'
                                     : type === 'has_number' ? 'cert_number' : type === 'issued_by' ? 'organization'
-                                        : type === 'complies_with' ? 'standard' : type === 'part_of' ? 'concept' : 'product'} />
+                                        : type === 'complies_with' ? 'standard' : 'product'} />
                         </div>
                         <button
                             type="button"

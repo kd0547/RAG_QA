@@ -37,7 +37,6 @@ from langchain.agents.middleware import (
 )
 from langchain.agents.middleware.summarization import DEFAULT_SUMMARY_PROMPT
 import logging
-import yaml
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -85,14 +84,6 @@ TOOLS = active_tools()
 
 
 # ---------- Agent ----------
-
-ALIAS_PATH = Path(__file__).parents[1] / "aliases.yaml"
-
-def load_aliases(path=ALIAS_PATH) -> dict[str, list[str]]:
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
-
-ALIASES = load_aliases()
 
 @dataclass
 class AgentContext:
@@ -445,11 +436,10 @@ def _invoke_logged(
         with run_scope(run_id), _thread_lock(thread_id):
             prior_ids = _message_ids(agent, config)
             groups = group_repo.list_all()
-            concepts = _graph_concepts()
             result = agent.invoke(
                 {"messages": messages} if messages is not None else None,
                 context=AgentContext(system_prompt=render_prompt(
-                    prompt_repo.get_system_prompt(), ALIASES, groups, concepts,
+                    prompt_repo.get_system_prompt(), groups,
                     applied_skills=applied_skills, optional_skills=optional_skills,
                 )),
                 config=config)
@@ -507,15 +497,6 @@ def thread_message_count(thread_id: str, mode: str = "local") -> int:
         return 0
     state = agent.get_state({"configurable": {"thread_id": thread_id}})
     return len((state.values or {}).get("messages", []))
-
-def _graph_concepts() -> list[dict] | None:
-    """프롬프트 힌트용 상위 개념 목록. 그래프를 못 읽어도 답변은 계속한다."""
-    try:
-        return graph_repo.list_concepts()
-    except Exception:
-        logger.warning("그래프 상위 개념 조회 실패, 힌트 없이 진행", exc_info=True)
-        return None
-
 
 def _attachment_to_blocks(attachment: Attachment, index: int, preread: list[str]) -> list[dict]:
     """첨부 하나를 메시지 content 블록으로 바꾼다. 처리할 수 없으면 빈 목록.

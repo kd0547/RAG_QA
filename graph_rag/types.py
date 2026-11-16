@@ -15,7 +15,6 @@ ENTITY_TYPES: dict[str, str] = {
     "cert_number": "인증서·등록·신고·시험성적서 번호 (예: R-R-TGE-N5800)",
     "organization": "회사·시험기관·발급기관 (예: 국립전파연구원, KTL)",
     "standard": "규격·표준·기준 (예: KN 32, IEC 62368-1)",
-    "concept": "여러 인증 종류를 묶는 상위 개념 (예: KC 인증). aliases.yaml에서만 만든다",
 }
 EntityType = Literal["product", "component", "certification", "cert_number", "organization", "standard"]
 
@@ -26,11 +25,10 @@ RELATION_TYPES: dict[str, str] = {
     "has_number": "인증 종류 또는 제품 -> 인증·등록 번호",
     "issued_by": "인증 종류 또는 번호 -> 발급·시험 기관",
     "complies_with": "제품 또는 인증 -> 규격·표준",
-    "part_of": "인증 종류 -> 상위 개념. aliases.yaml에서만 만든다",
     "variant_of": "파생 모델 -> 상위 모델. 사양 DB에서만 만든다 (LLM 추출 대상이 아니다)",
 }
-# LLM 추출에 쓰지 않는 관계 (aliases.yaml·사양 DB에서만 만든다)
-NON_EXTRACT_RELATIONS = frozenset({"part_of", "variant_of"})
+# LLM 추출에 쓰지 않는 관계 (사양 DB에서만 만든다)
+NON_EXTRACT_RELATIONS = frozenset({"variant_of"})
 RelationType = Literal["has_component", "has_certification", "has_number", "issued_by", "complies_with"]
 
 # 관계 양 끝의 개체 종류. LLM이 관계에는 썼지만 entities에서 빠뜨린 이름을 채울 때 쓴다 (None이면 추론하지 않음)
@@ -55,7 +53,6 @@ class ExtractedEntity(BaseModel):
     type: EntityType = Field(description="개체 종류")
     name: str = Field(description="문서에 적힌 그대로의 이름")
     aliases: list[str] = Field(default_factory=list, description="같은 페이지에 나온 다른 표기 (없으면 빈 목록)")
-    concept: str | None = Field(default=None, description="certification일 때 속하는 상위 개념 이름. 없거나 모르면 null")
 
 
 class ExtractedRelation(BaseModel):

@@ -270,7 +270,7 @@ CREATE INDEX IF NOT EXISTS idx_file_page_file_page ON file_page(file_id, page);
 -- ===== 문서 그래프 (Graph RAG) =====
 -- 업로드 문서의 페이지 텍스트(file_page.text)에서 LLM으로 뽑은 개체와 관계. 사양 DB와는 별개다.
 -- 문서에서 뽑은 행은 file_id에 걸려 있어 파일이 지워지면 같이 지워진다. 남는 개체는 graph_repository.prune_orphans()가 치운다.
--- aliases.yaml에서 넣은 상위 개념(concept)과 그 연결은 file_id가 NULL이다.
+-- 사양 DB에서 심은 것(spec)과 근거 없이 사람이 넣은 것(manual)은 file_id가 NULL이다. 시스템 상위 개념(concept)은 없다 (GR1).
 
 -- graph_entity: 개체. 같은 type 안에서 norm(소문자, 공백·기호 제거)이 같으면 같은 개체로 본다.
 create table if not exists graph_entity (
@@ -313,7 +313,7 @@ create table if not exists graph_relation (
     type       text not null,                  -- graph_rag/types.py RELATION_TYPES
     file_id    text references file(file_id) on delete cascade,  -- 근거 문서. seed와 근거 없이 넣은 manual은 NULL
     page       integer,
-    -- extract: 문서에서 뽑음 (페이지를 다시 뽑으면 갈아끼운다) / seed: aliases.yaml / manual: 화면에서 사람이 넣음 (다시 뽑아도 유지)
+    -- extract: 문서에서 뽑음 (페이지를 다시 뽑으면 갈아끼운다) / seed: 옛 aliases.yaml (GR1에서 없앰) / manual: 화면에서 사람이 넣음 (다시 뽑아도 유지)
     -- spec: 사양 DB에서 심음 (제품 상위·파생 모델, 제품-부품 연결. 서버 시작·사양 변경 때 spec 관계만 다시 넣는다)
     -- 기존 DB에는 repo_connect.py의 마이그레이션이 이 컬럼을 추가하고, CHECK에 spec이 없으면 테이블을 새로 만들어 옮긴다
     origin     text not null default 'extract' check (origin in ('extract', 'seed', 'manual', 'spec')),
@@ -326,7 +326,7 @@ create table if not exists graph_relation (
 CREATE INDEX IF NOT EXISTS idx_graph_relation_dst ON graph_relation(dst_id);
 CREATE INDEX IF NOT EXISTS idx_graph_relation_file ON graph_relation(file_id, page);
 
--- graph_relation_block: 사람이 화면에서 지운 관계. 문서를 다시 뽑거나 서버가 aliases.yaml을 다시 넣어도 되살리지 않는다.
+-- graph_relation_block: 사람이 화면에서 지운 관계. 문서를 다시 뽑거나 서버가 사양 DB를 다시 심어도 되살리지 않는다.
 -- 개체 id는 다시 뽑으면 바뀔 수 있으므로 (종류, 정규화 이름)으로 기억한다. 같은 관계를 화면에서 다시 넣으면 지운다.
 create table if not exists graph_relation_block (
     src_type   text not null,

@@ -23,11 +23,8 @@ from repository.file_repository import FileRepository  # noqa: E402
 from repository.graph_repository import GraphEditError, GraphRepository  # noqa: E402
 from repository.repo_connect import Database  # noqa: E402
 
-KC = {"KC 인증": ["안전확인 신고", "적합성 등록"]}
-
-
-def _e(type_, name, *aliases, concept=None):
-    return ExtractedEntity(type=type_, name=name, aliases=list(aliases), concept=concept)
+def _e(type_, name, *aliases):
+    return ExtractedEntity(type=type_, name=name, aliases=list(aliases))
 
 
 def _r(source, type_, target):
@@ -138,27 +135,14 @@ def test_update_relation_reverses_and_changes_type(env):
     assert ("A650", "has_number", "A600", "extract") not in _relations(graph, a650)
 
 
-def test_part_of_needs_concept_target(env):
+def test_part_of_relation_type_is_gone(env):
     _, graph, add_file = env
-    graph.seed_concepts(KC)
     file = add_file("a650.docx")
     graph.replace_page(file.file_id, 1, A650_PAGE)
-    with pytest.raises(GraphEditError):
+    with pytest.raises(LookupError):
         graph.add_relation(_id(graph, "product", "A650"), "part_of", target_id=_id(graph, "component", "RTX 5070"))
     with pytest.raises(GraphEditError):
         graph.add_relation(_id(graph, "product", "A650"), "has_component", target_id=_id(graph, "product", "A650"))
-
-
-def test_deleted_seed_link_is_not_reseeded(env):
-    _, graph, _ = env
-    graph.seed_concepts(KC)
-    concept = _id(graph, "concept", "KC 인증")
-    link = next(r for r in graph.get_entity(concept)["relations"] if r["source_name"] == "적합성 등록")
-
-    graph.delete_relation(link["id"])
-    graph.seed_concepts(KC)  # 서버 재시작
-
-    assert graph.list_concepts() == [{"name": "KC 인증", "members": ["안전확인 신고"]}]
 
 
 def test_rename_keeps_old_name_as_alias(env):
@@ -199,18 +183,19 @@ def test_merge_moves_mentions_relations_and_future_extractions(env):
 
 def test_view_focus_depth_and_overview_limit(env):
     _, graph, add_file = env
-    graph.seed_concepts(KC)
     file = add_file("a650.docx")
     graph.replace_page(file.file_id, 1, PageGraph(
-        entities=[_e("product", "A650"), _e("component", "RTX 5070"), _e("certification", "KC 안전확인", concept="KC 인증")],
-        relations=[_r("A650", "has_component", "RTX 5070"), _r("A650", "has_certification", "KC 안전확인")],
+        entities=[_e("product", "A650"), _e("component", "RTX 5070"), _e("certification", "KC 안전확인"),
+                  _e("organization", "KTL")],
+        relations=[_r("A650", "has_component", "RTX 5070"), _r("A650", "has_certification", "KC 안전확인"),
+                   _r("KC 안전확인", "issued_by", "KTL")],
     ))
     a650 = _id(graph, "product", "A650")
 
     one = graph.view(entity_id=a650, depth=1)
     two = graph.view(entity_id=a650, depth=2)
     assert {n["name"] for n in one["nodes"]} == {"A650", "RTX 5070", "KC 안전확인"}
-    assert "KC 인증" in {n["name"] for n in two["nodes"]}
+    assert "KTL" in {n["name"] for n in two["nodes"]} and "KTL" not in {n["name"] for n in one["nodes"]}
     assert all({e["source"], e["target"]} <= {n["id"] for n in two["nodes"]} for e in two["edges"])
 
     overview = graph.view(limit=2)
@@ -236,7 +221,10 @@ def test_migration_adds_origin_to_first_version_table(tmp_path):
     db = Database(str(path))
 
     with db.get_conn() as conn:
-        assert conn.execute("SELECT origin FROM graph_relation").fetchone()[0] == "seed"
+        # 출처 컬럼이 생기고(옛 part_of는 seed), 시스템 상위 개념과 part_of는 GR1 마이그레이션이 지운다
+        assert conn.execute("SELECT count(*) FROM graph_relation").fetchone()[0] == 0
+        assert [r[0] for r in conn.execute("SELECT type FROM graph_entity")] == ["certification"]
+        assert "origin" in {r["name"] for r in conn.execute("PRAGMA table_info(graph_relation)")}
 
 
 def test_api_create_update_delete(env, monkeypatch):
@@ -259,10 +247,11 @@ def test_api_create_update_delete(env, monkeypatch):
         assert client.patch(f"/graph/relations/{relation['id']}", json={"reverse": True}).status_code == 409
         assert client.patch(f"/graph/relations/{relation['id']}", json={"reverse": True,"expected_revision":1}).status_code == 400
         bad = client.post("/graph/relations", json={"source_id": a650, "type": "part_of", "target_id": a650})
-        assert bad.status_code == 400
+        assert bad.status_code == 404  # part_of 관계 종류가 없다 (GR1)
         assert client.delete("/graph/relations/999999").status_code == 404
 
         view = client.get("/graph/view", params={"entity_id": a650}).json()
         assert {"A650", "RTX 5070", "A600", "KC 적합등록"} == {n["name"] for n in view["nodes"]}
         assert client.get("/graph/view", params={"types": "nope"}).status_code == 400
-        assert {t["key"] for t in client.get("/graph/schema").json()["relation_types"]} >= {"part_of", "has_component"}
+        keys = {t["key"] for t in client.get("/graph/schema").json()["relation_types"]}
+        assert "has_component" in keys and "part_of" not in keys

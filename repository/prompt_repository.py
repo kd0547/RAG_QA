@@ -15,7 +15,7 @@ from repository.repo_connect import Database
 logger = logging.getLogger(__name__)
 
 # 기본 프롬프트의 처음 내용이자 백업. DB에 기본 프롬프트가 없거나 DB를 못 읽을 때 이 원문을 쓴다.
-# $aliases 는 실행 시 aliases.yaml 별칭으로 채워지므로 그대로 둔다.
+# 옛 본문의 $aliases·용어 별칭 줄은 render_prompt가 렌더링 때 지운다 (지시서 GR1). 저장된 본문은 그대로 둔다.
 DEFAULT_PROMPT = SYSTEM_PROMPT_TEMPLATE.template
 DEFAULT_PROMPT_NAME = "기본 프롬프트"
 

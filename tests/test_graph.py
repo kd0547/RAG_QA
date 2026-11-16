@@ -1,4 +1,4 @@
-"""문서 그래프: 추출 결과 정리, 페이지 단위 저장, 상위 개념 펼치기, 문서 순위를 확인한다.
+"""문서 그래프: 추출 결과 정리, 페이지 단위 저장, 문서 순위를 확인한다. 시스템 상위 개념은 없다 (GR1).
 
 임시 SQLite DB와 가짜 LLM을 쓴다.
 """
@@ -23,9 +23,6 @@ from repository.file_page_repository import FilePageRepository  # noqa: E402
 from repository.file_repository import FileRepository  # noqa: E402
 from repository.graph_repository import GraphRepository  # noqa: E402
 from repository.repo_connect import Database  # noqa: E402
-
-KC = {"KC 인증": ["안전확인 신고", "적합성 등록"]}
-
 
 class FakeLLM:
     """with_structured_output(...).invoke(...)가 정해 둔 PageGraph를 돌려준다."""
@@ -84,44 +81,35 @@ def test_extractor_drops_names_not_on_page_and_adds_kc_number():
     assert product.aliases == ["N 5800"]
 
 
-def test_extractor_fills_relation_endpoints_and_keeps_known_concepts():
-    page = "A650 구성: NVIDIA GeForce RTX 5070. 인증: KC 안전확인, KC 적합등록, 우수조달"
+def test_extractor_fills_relation_endpoints_and_has_no_concepts():
+    page = "A650 구성: NVIDIA GeForce RTX 5070. 인증: KC 안전확인"
     llm = FakeLLM(PageGraph(
-        entities=[
-            _entity("product", "A650"),
-            ExtractedEntity(type="certification", name="KC 안전확인", concept="KC인증"),  # 표기만 다른 개념 이름
-            ExtractedEntity(type="certification", name="우수조달", concept="조달 인증"),  # 없는 개념
-        ],
+        entities=[_entity("product", "A650"), _entity("certification", "KC 안전확인")],
         relations=[ExtractedRelation(source="A650", type="has_component", target="NVIDIA GeForce RTX 5070")],
     ))
 
-    graph = extract_page_graph(page, llm=llm, concepts=[{"name": "KC 인증", "members": ["안전확인 신고"]}])
+    graph = extract_page_graph(page, llm=llm)
 
     by_name = {e.name: e for e in graph.entities}
     assert by_name["NVIDIA GeForce RTX 5070"].type == "component"
-    assert by_name["KC 안전확인"].concept == "KC 인증"
-    assert by_name["우수조달"].concept is None
+    assert not hasattr(by_name["KC 안전확인"], "concept")
     system_prompt = llm.calls[0][0]["content"]
-    assert "- KC 인증: 안전확인 신고" in system_prompt
+    assert "상위 개념" not in system_prompt and "concept" not in system_prompt
 
 
-def test_extracted_concept_link_joins_kc_expansion(env):
+def test_bundle_name_is_not_expanded(env):
     _, _, graph, add_file = env
-    graph.seed_concepts(KC)
     file = add_file("a650.docx")
     graph.replace_page(file.file_id, 1, PageGraph(entities=[
-        _entity("product", "A650"),
-        ExtractedEntity(type="certification", name="KC 적합등록", concept="KC 인증"),
+        _entity("product", "A650"), _entity("certification", "KC 적합등록"),
     ]))
 
     result = service.search_graph("A650 KC인증 자료")
 
-    assert "KC 적합등록" in result["expanded"][0]["members"]
-    assert [(d["original_name"], d["matched_terms"]) for d in result["documents"]] == [("a650.docx", 2)]
-
-    # 페이지를 다시 뽑아 인증이 빠지면 그 연결도 사라진다
-    graph.replace_page(file.file_id, 1, PageGraph(entities=[_entity("product", "A650")]))
-    assert "KC 적합등록" not in graph.list_concepts()[0]["members"]
+    assert "expanded" not in result
+    assert [m["name"] for m in result["matched"]] == ["A650"]
+    assert [(d["original_name"], d["matched_terms"]) for d in result["documents"]] == [("a650.docx", 1)]
+    assert graph.list_entities("concept") == []
 
 
 def test_empty_page_does_not_call_llm():
@@ -130,21 +118,20 @@ def test_empty_page_does_not_call_llm():
     assert llm.calls == []
 
 
-def test_seed_merges_extracted_certification_into_concept_member(env):
+def test_same_certification_spelling_is_one_entity(env):
     _, _, graph, add_file = env
-    graph.seed_concepts(KC)
-    file = add_file("safety.pdf")
+    first, second = add_file("safety.pdf"), add_file("guide.pdf")
 
-    graph.replace_page(file.file_id, 1, PageGraph(entities=[_entity("certification", "안전확인신고")]))
+    graph.replace_page(first.file_id, 1, PageGraph(entities=[_entity("certification", "안전확인 신고")]))
+    graph.replace_page(second.file_id, 1, PageGraph(entities=[_entity("certification", "안전확인신고")]))
 
     members = [e for e in graph.list_entities("certification") if e["name"].startswith("안전")]
     assert len(members) == 1  # 공백만 다른 표기는 같은 개체
-    assert members[0]["mention_count"] == 1
+    assert members[0]["mention_count"] == 2
 
 
-def test_kc_question_expands_concept_and_ranks_documents(env):
+def test_documents_ranked_by_matched_entities(env):
     _, _, graph, add_file = env
-    graph.seed_concepts(KC)
     safety, radio, other = add_file("safety.pdf"), add_file("radio.pdf"), add_file("a650.pdf")
     graph.replace_page(safety.file_id, 1, PageGraph(
         entities=[_entity("product", "N5800"), _entity("certification", "안전확인 신고")],
@@ -156,16 +143,19 @@ def test_kc_question_expands_concept_and_ranks_documents(env):
     ))
     graph.replace_page(other.file_id, 1, PageGraph(entities=[_entity("product", "A650")]))
 
-    result = service.search_graph("N5800 KC인증 자료 보내주세요")
+    result = service.search_graph("N5800 안전확인 신고 자료 보내주세요")
 
-    assert {m["name"] for m in result["matched"]} == {"N5800", "KC 인증"}
-    assert result["expanded"] == [{"concept": "KC 인증", "members": ["안전확인 신고", "적합성 등록"]}]
-    docs = {d["original_name"]: d for d in result["documents"]}
-    assert set(docs) == {"safety.pdf", "radio.pdf"}
-    assert docs["safety.pdf"]["matched_terms"] == 2 and docs["radio.pdf"]["matched_terms"] == 2
-    assert docs["radio.pdf"]["pages"] == [2]
-    assert docs["safety.pdf"]["source"].endswith("safety.pdf")
+    assert {m["name"] for m in result["matched"]} == {"N5800", "안전확인 신고"}
+    assert "expanded" not in result
+    docs = [(d["original_name"], d["matched_terms"]) for d in result["documents"]]
+    assert docs == [("safety.pdf", 2), ("radio.pdf", 1)]
+    assert result["documents"][1]["pages"] == [2]
+    assert result["documents"][0]["source"].endswith("safety.pdf")
     assert any("has_certification" in r for r in result["relations"])
+
+    # 묶음 이름(KC 인증)은 개체가 아니라서 펼쳐지지 않는다
+    bundle = service.search_graph("N5800 KC인증 자료")
+    assert [m["name"] for m in bundle["matched"]] == ["N5800"]
 
 
 def test_partial_model_name_matches(env):
@@ -186,7 +176,6 @@ def test_no_match_tells_agent_to_use_vector_search(env):
 
 def test_replacing_page_and_deleting_file_clean_up(env):
     files, _, graph, add_file = env
-    graph.seed_concepts(KC)
     file = add_file("doc.pdf")
     graph.replace_page(file.file_id, 1, PageGraph(entities=[_entity("product", "N5800"), _entity("component", "RTX 5070")]))
 
@@ -197,8 +186,6 @@ def test_replacing_page_and_deleting_file_clean_up(env):
     files.delete_file(file.file_id)  # 외래키로 등장 위치가 지워진다
     graph.prune_orphans()
     assert graph.list_entities("product") == []
-    # aliases.yaml에서 넣은 상위 개념과 인증 종류는 남는다
-    assert graph.list_concepts() == [{"name": "KC 인증", "members": ["안전확인 신고", "적합성 등록"]}]
 
 
 def test_index_file_combines_blocks_and_skips_failed_pages(env, monkeypatch):
@@ -209,7 +196,7 @@ def test_index_file_combines_blocks_and_skips_failed_pages(env, monkeypatch):
     ])
     seen = []
 
-    def fake_extract(text, concepts=None, known=None):
+    def fake_extract(text, known=None):
         seen.append(text)
         if "실패" in text:
             raise RuntimeError("LLM 오류")
@@ -224,12 +211,10 @@ def test_index_file_combines_blocks_and_skips_failed_pages(env, monkeypatch):
     assert graph.stats()["indexed_files"] == 1
 
 
-def test_prompt_adds_concept_list_only_when_graph_has_concepts():
-    """그래프 사용법은 프롬프트 v2 본문에 있고, render_prompt는 상위 개념 목록만 덧붙인다."""
-    assert render_prompt("지침", {}, [], None) == "지침"
-    assert render_prompt("지침", {}, [], []) == "지침"
-    rendered = render_prompt("지침", {}, [], [{"name": "KC 인증", "members": ["안전확인 신고"]}])
-    assert rendered == "지침\n\n**상위 개념 (개념 = 속한 인증 종류)**\n- KC 인증 = 안전확인 신고"
+def test_prompt_has_no_concepts_or_aliases():
+    """render_prompt는 상위 개념·별칭을 붙이지 않는다 (GR1)."""
+    assert render_prompt("지침", []) == "지침"
+    assert render_prompt("지침\n$aliases\n끝") == "지침\n끝"
 
 
 # ---------------------------------------------------------------- A5 한국어 개체 매칭
@@ -238,9 +223,9 @@ def test_prompt_adds_concept_list_only_when_graph_has_concepts():
 def aliases(env):
     """제품·인증번호 별칭을 심은 그래프. 이름 -> 개체 ID."""
     _, _, graph, add_file = env
-    graph.seed_concepts(KC)
     file = add_file("guide.pdf")
     graph.replace_page(file.file_id, 1, PageGraph(entities=[
+        _entity("certification", "KC 안전확인"),
         _entity("product", "N5800 14세대"),
         _entity("product", "N5800-GB70-PU02"),
         _entity("cert_number", "R-R-TGE-N5800"),
@@ -267,9 +252,9 @@ def test_longer_part_number_is_not_confused_with_model(aliases):
 
 
 def test_kc_spacing_gives_same_result(aliases):
-    joined = _names(aliases, "KC인증 자료")
-    spaced = _names(aliases, "KC 인증 자료")
-    assert joined == spaced == ["KC 인증"]
+    joined = _names(aliases, "KC안전확인 자료")
+    spaced = _names(aliases, "KC 안전확인 자료")
+    assert joined == spaced == ["KC 안전확인"]
 
 
 def test_cert_number_not_matched_by_model_suffix(aliases):

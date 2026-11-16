@@ -205,7 +205,6 @@ def graph_search(query: str, group_id: str | None = None) -> dict:
 
     다음 질문에 먼저 사용합니다.
     - 제품 모델명(예: N5800), 부품, 인증번호, 규격이 나오는 질문
-    - "KC인증 자료"처럼 여러 인증 종류를 묶는 상위 개념을 묻는 질문 (속한 인증 종류로 펼쳐서 찾습니다)
     - 한 제품의 인증·부품·시험 문서를 모아야 하는 질문
 
     결과 documents의 file_id와 pages를 read_pages에 넘겨 원본 페이지를 읽은 뒤 답합니다.
@@ -218,7 +217,6 @@ def graph_search(query: str, group_id: str | None = None) -> dict:
     Returns:
         - matched: 질문에서 찾은 개체. ref_type·ref_id가 있으면 사양 DB의 같은 대상이다
           (get_specs(owner_type=ref_type, owner_id=ref_id)로 사양 값을 읽을 수 있다)
-        - expanded: 펼친 상위 개념과 그에 속한 인증 종류. 답변에는 각 인증 종류의 문서를 모두 포함합니다.
         - relations: "출발 -[관계]-> 도착 (파일 p페이지)" 형식의 관계
         - documents: 관련 문서. matched_terms가 클수록 질문의 대상을 더 많이 담은 문서입니다.
           각 항목의 source, original_name, pages(개체가 나온 페이지), entities

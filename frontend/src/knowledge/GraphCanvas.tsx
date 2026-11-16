@@ -317,7 +317,7 @@ export function GraphCanvas({
                         const selected = node.id === selectedNodeId;
                         const dim = focus !== null && !focus.nodeIds.has(node.id);
                         const showLabel = showAllLabels || selected || hovered === node.id || node.degree >= 4
-                            || node.type === 'concept' || (focus !== null && focus.nodeIds.has(node.id));
+                            || (focus !== null && focus.nodeIds.has(node.id));
                         return (
                             <g
                                 key={node.id}
@@ -341,12 +341,11 @@ export function GraphCanvas({
                                 {selected && <circle r={r + 5} fill="none" stroke={meta.color} strokeOpacity={0.35} strokeWidth={4} />}
                                 <circle
                                     r={r}
-                                    fill={node.type === 'concept' ? '#141C2B' : meta.color}
-                                    fillOpacity={node.type === 'concept' ? 1 : 0.92}
+                                    fill={meta.color}
+                                    fillOpacity={0.92}
                                     stroke="#fff"
                                     strokeWidth={2}
                                 />
-                                {node.type === 'concept' && <circle r={r - 5} fill="none" stroke="#fff" strokeWidth={1.4} />}
                                 {showLabel && (
                                     <text
                                         y={r + 12}

@@ -5,7 +5,7 @@
 
 관계의 출처(origin)
 - extract: 문서에서 뽑음. 그 페이지를 다시 뽑으면 갈아끼운다.
-- seed: aliases.yaml의 상위 개념 연결. 서버 시작 때 다시 넣는다.
+- spec: 사양 DB에서 심음. 서버 시작·사양 변경 때 다시 넣는다.
 - manual: 그래프 화면에서 사람이 넣음. 다시 뽑아도 유지한다.
 사람이 화면에서 지운 관계는 graph_relation_block에 남겨 다시 뽑아도 되살리지 않는다.
 """
@@ -68,31 +68,6 @@ class GraphRepository:
         self.db = db
 
     # ------------------------------------------------------------ 추출 결과 쓰기
-
-    def seed_concepts(self, concepts: dict[str, list[str]]) -> int:
-        """aliases.yaml의 '상위 개념: [인증 종류, ...]'를 concept 개체와 part_of 관계로 넣는다.
-
-        매번 seed 관계를 지우고 다시 넣어 yaml 수정이 반영되게 한다. 화면에서 지운 연결은 넣지 않는다.
-        넣은 part_of 관계 수를 돌려준다.
-        """
-        count = 0
-        with self.db.transaction() as conn:
-            conn.execute("DELETE FROM graph_relation WHERE origin = 'seed'")
-            for concept, members in (concepts or {}).items():
-                concept_id = _upsert_entity(conn, "concept", str(concept), creation_origin='seed')
-                if concept_id is None:
-                    continue
-                for member in members or []:
-                    member_id = _upsert_entity(conn, "certification", str(member), creation_origin='seed')
-                    if member_id is None or member_id == concept_id or _is_blocked(conn, member_id, concept_id, "part_of"):
-                        continue
-                    conn.execute(
-                        "INSERT OR IGNORE INTO graph_relation (src_id, dst_id, type, origin) VALUES (?, ?, 'part_of', 'seed')",
-                        (member_id, concept_id),
-                    )
-                    count += 1
-            _prune_orphans(conn)
-        return count
 
     def seed_specs(self) -> dict:
         """사양 DB의 제품과 제품-부품 연결을 그래프에 심는다 (지시서 H2). 서버 시작 때와 제품·연결이 바뀔 때 부른다.
@@ -201,13 +176,6 @@ class GraphRepository:
                     if ref is not None:
                         conn.execute("UPDATE graph_entity SET ref_type = ?, ref_id = ? WHERE id = ? AND ref_id IS NULL",
                                      (entity.type, ref, entity_id))
-                if entity.concept:
-                    # 추출기가 고른 상위 개념. 이 페이지에서 나온 연결이라 페이지를 다시 뽑으면 같이 바뀐다
-                    concept = conn.execute(
-                        "SELECT id FROM graph_entity WHERE type = 'concept' AND norm = ?", (normalize(entity.concept),)
-                    ).fetchone()
-                    if concept is not None:
-                        pending.append((entity_id, concept[0], "part_of"))
                 for alias in entity.aliases:
                     alias_norm = normalize(alias)
                     if len(alias_norm) < MIN_NORM_LEN:
@@ -308,7 +276,7 @@ class GraphRepository:
           "N5800" -> "N5800 14세대" (어절 "N5800"), "N5800-GB70-PU02"는 한 어절이라 제외.
           (중간 일치는 "R-R-TGE-N5800"처럼 다른 개체까지 잡아서 쓰지 않는다)
         - 어절 끝 조사 하나를 뗀 것도 검색어 단어로 쓴다: "N5800의 사양" -> "N5800"
-        - 다른 개체의 더 긴 표기 안에만 들어 있는 개체는 뺀다 (상위 개념 제외):
+        - 다른 개체의 더 긴 표기 안에만 들어 있는 개체는 뺀다:
           "N5800-GB70-PU02 인증"에서 N5800은 질문에 따로 나오지 않았다. "N5800과 N5800-GB70-PU02"면 둘 다 찾는다.
         반환 항목: {id, type, name, ref_type, ref_id} (ref는 사양 DB 대상. 없으면 None)
         """
@@ -345,7 +313,7 @@ class GraphRepository:
                 best[row["id"]] = (match_len, row)
         contained = {
             entity_id: row["alias_norm"] for entity_id, (_, row) in best.items()
-            if row["type"] != "concept" and row["alias_norm"] in query_norm
+            if row["alias_norm"] in query_norm
         }
         for entity_id, alias in contained.items():
             longer = [a for other, a in contained.items() if other != entity_id and len(a) > len(alias) and alias in a]
@@ -386,23 +354,8 @@ class GraphRepository:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def concept_members(self, concept_ids: list[int]) -> list[dict]:
-        """상위 개념에 속한 인증 종류 (part_of의 src)."""
-        if not concept_ids:
-            return []
-        marks = ",".join("?" * len(concept_ids))
-        with self.db.get_conn() as conn:
-            rows = conn.execute(
-                f"""SELECT DISTINCT e.id, e.type, e.name, r.dst_id AS concept_id
-                    FROM effective_graph_relation r JOIN effective_graph_entity e ON e.id = r.src_id
-                    WHERE r.type = 'part_of' AND r.dst_id IN ({marks})
-                    ORDER BY e.id""",
-                concept_ids,
-            ).fetchall()
-            return [dict(r) for r in rows]
-
     def relations_of(self, entity_ids: list[int], group_id: str | None = None, limit: int = 40) -> list[dict]:
-        """개체에 붙은 관계 (양방향). part_of는 concept_members()가 따로 다룬다.
+        """개체에 붙은 관계 (양방향).
 
         group_id를 주면 그 그룹 문서를 근거로 한 관계와 근거 문서 없이 사람이 넣은 관계만 본다.
         """
@@ -416,7 +369,7 @@ class GraphRepository:
         with self.db.get_conn() as conn:
             rows = conn.execute(
                 f"""SELECT {_RELATION_COLUMNS} {_RELATION_JOINS}
-                    WHERE r.type != 'part_of' AND (r.src_id IN ({marks}) OR r.dst_id IN ({marks})) {group_sql}
+                    WHERE (r.src_id IN ({marks}) OR r.dst_id IN ({marks})) {group_sql}
                     ORDER BY r.id
                     LIMIT ?""",
                 (*params, limit),
@@ -447,22 +400,6 @@ class GraphRepository:
 
     # ------------------------------------------------------------ 화면·프롬프트용 조회
 
-    def list_concepts(self) -> list[dict]:
-        """상위 개념과 그에 속한 인증 종류 이름. 시스템 프롬프트 힌트에 쓴다."""
-        with self.db.get_conn() as conn:
-            rows = conn.execute(
-                """SELECT DISTINCT c.id AS concept_id, c.name AS concept, e.id AS member_id, e.name AS member
-                   FROM effective_graph_entity c
-                   JOIN effective_graph_relation r ON r.dst_id = c.id AND r.type = 'part_of'
-                   JOIN effective_graph_entity e ON e.id = r.src_id
-                   WHERE c.type = 'concept'
-                   ORDER BY c.id, e.id"""
-            ).fetchall()
-        concepts: dict[str, list[str]] = {}
-        for row in rows:
-            concepts.setdefault(row["concept"], []).append(row["member"])
-        return [{"name": name, "members": members} for name, members in concepts.items()]
-
     def list_entities(self, entity_type: str | None = None, q: str | None = None, limit: int = 100, offset: int = 0) -> list[dict]:
         conditions, params = [], []
         if entity_type:
@@ -488,7 +425,7 @@ class GraphRepository:
             return [dict(r) for r in rows]
 
     def get_entity(self, entity_id: int) -> dict | None:
-        """개체 하나의 별칭, 모든 관계(상위 개념 포함, 출처·id 포함), 나온 문서 페이지."""
+        """개체 하나의 별칭, 모든 관계(출처·id 포함), 나온 문서 페이지."""
         with self.db.get_conn() as conn:
             row = conn.execute("SELECT * FROM effective_graph_entity WHERE id = ?", (entity_id,)).fetchone()
             if row is None:
@@ -750,11 +687,10 @@ def _link_spec_entity(conn: sqlite3.Connection, entity_type: str, name: str, ref
 
 
 def _prune_orphans(conn: sqlite3.Connection) -> int:
-    """어느 페이지에도 안 나오고 관계도 없는 개체를 지운다. 상위 개념(concept)과 사양 DB 대상을 가리키는 개체(ref_id)는 남긴다."""
+    """어느 페이지에도 안 나오고 관계도 없는 개체를 지운다. 사양 DB 대상을 가리키는 개체(ref_id)는 남긴다."""
     cur = conn.execute(
         """DELETE FROM graph_entity
-           WHERE type != 'concept'
-             AND manual_retained=0 AND lifecycle_state='active'
+           WHERE manual_retained=0 AND lifecycle_state='active'
              AND NOT EXISTS (SELECT 1 FROM graph_property_value p WHERE p.entity_id=graph_entity.id)
              AND NOT EXISTS (SELECT 1 FROM graph_entity e WHERE e.merged_into_id=graph_entity.id)
              AND ref_id IS NULL

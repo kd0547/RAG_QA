@@ -16,8 +16,11 @@ def test_v3_is_prompt_doc_code_block_verbatim():
     assert PROMPT_V3_TEMPLATE.template == block + "\n"
     assert PROMPT_V3_NAME == "v3 근거 ID·사양"
     assert SYSTEM_PROMPT_TEMPLATE is PROMPT_V3_TEMPLATE  # 기본값도 v3
-    rendered = render_prompt(PROMPT_V3_TEMPLATE.template, {"KC 인증": ["안전확인 신고"]})
-    assert "- KC 인증 = 안전확인 신고" in rendered and "$aliases" not in rendered
+    rendered = render_prompt(PROMPT_V3_TEMPLATE.template)
+    for removed in ("$aliases", "용어 별칭", "상위 개념"):
+        assert removed not in rendered
+    # CRLF로 저장된 옛 본문도 같다
+    assert "상위 개념" not in render_prompt(PROMPT_V3_TEMPLATE.template.replace("\n", "\r\n"))
 
 
 def test_v3_table_names_existing_tools_only():

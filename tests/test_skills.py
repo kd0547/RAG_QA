@@ -144,13 +144,13 @@ def test_prompt_section_order():
 
     skill = skills.get_skills()["mail-reply-style"]
     optional = [skills.get_skills()["spec-compare"]]
-    prompt = render_prompt("본문", {}, groups=[{"id": "g", "name": "그룹", "description": "설명"}],
-                           concepts=[{"name": "KC 인증", "members": ["안전확인"]}],
+    prompt = render_prompt("본문", groups=[{"id": "g", "name": "그룹", "description": "설명"}],
                            applied_skills=[skill], optional_skills=optional)
 
-    order = [prompt.index(s) for s in ("본문", "**상위 개념", "**적용 절차", "**선택 절차", "**문서 그룹 검색 힌트")]
+    order = [prompt.index(s) for s in ("본문", "**적용 절차", "**선택 절차", "**문서 그룹 검색 힌트")]
     assert order == sorted(order)
-    assert render_prompt("본문", {}) == "본문"  # 절차가 없으면 절을 붙이지 않는다
+    assert "상위 개념" not in prompt
+    assert render_prompt("본문") == "본문"  # 절차가 없으면 절을 붙이지 않는다
 
 
 # ---------------------------------------------------------------- load_skill

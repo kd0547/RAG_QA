@@ -83,12 +83,13 @@ def test_check_migration_keeps_rows_ids_and_indexes(tmp_path):
         indexes = {r[1] for r in conn.execute("pragma index_list(graph_relation)")}
         options = conn.execute("select distinct is_option from graph_relation").fetchall()
         entity_columns = [r[1] for r in conn.execute("pragma table_info(graph_entity)")]
-        conn.execute("insert into graph_relation (src_id, dst_id, type, origin) values (1, 3, 'variant_of', 'spec')")
+        conn.execute("insert into graph_relation (src_id, dst_id, type, origin) values (1, 2, 'variant_of', 'spec')")
         with pytest.raises(sqlite3.IntegrityError):  # 유일 인덱스가 그대로 있다
-            conn.execute("insert into graph_relation (src_id, dst_id, type, origin) values (2, 3, 'part_of', 'seed')")
+            conn.execute("insert into graph_relation (src_id, dst_id, type, file_id, page, origin) values (1, 2, 'has_certification', 'f1', 3, 'extract')")
         with pytest.raises(sqlite3.IntegrityError):  # CHECK도 그대로 있다
             conn.execute("insert into graph_relation (src_id, dst_id, type, origin) values (1, 2, 'x', 'guess')")
-    assert after == before
+    # 시스템 상위 개념(3)과 part_of(12), 개념을 가리키던 관계(40)는 GR1 마이그레이션이 지운다. 나머지는 id·값 그대로
+    assert after == [row for row in before if row[0] == 7]
     assert "'spec'" in table_sql and "graph_relation_new" not in table_sql
     assert {"idx_graph_relation_source", "idx_graph_relation_dst", "idx_graph_relation_file"} <= indexes
     assert options == [(0,)]
@@ -105,7 +106,7 @@ def test_migration_copies_rows_even_with_dangling_file(tmp_path):
     Database(str(path))
 
     with sqlite3.connect(path) as conn:
-        assert [r[0] for r in conn.execute("select id from graph_relation order by id")] == [7, 12, 40]
+        assert [r[0] for r in conn.execute("select id from graph_relation order by id")] == [7]  # 12·40은 개념 관계 (GR1)
 
 
 def test_variant_of_is_known_but_not_extracted():
@@ -282,8 +283,8 @@ class FakeLLM:
 
 
 def _use_fake(monkeypatch, llm):
-    def fake(text, concepts=None, **kwargs):
-        return extractor.extract_page_graph(text, llm=llm, concepts=concepts, **kwargs)
+    def fake(text, **kwargs):
+        return extractor.extract_page_graph(text, llm=llm, **kwargs)
 
     monkeypatch.setattr(service, "extract_page_graph", fake)
 

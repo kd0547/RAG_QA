@@ -1,8 +1,12 @@
 """Transactional, additive user-edit migration. Never open the production DB here."""
 import json
 import hashlib
+import logging
+import uuid
 
 from graph_rag.types import RELATION_TYPES
+
+logger = logging.getLogger(__name__)
 
 
 def migrate_graph_editing(conn):
@@ -91,9 +95,9 @@ def _migrate(conn):
         'has_number': (['product','certification'], ['cert_number']),
         'issued_by': (['certification','cert_number'], ['organization']),
         'complies_with': (['product','certification'], ['standard']),
-        'part_of': (['certification'], ['concept']), 'variant_of': (['product'], ['product']),
+        'variant_of': (['product'], ['product']),
     }
-    labels = ['부품', '인증', '번호', '발급 기관', '규격 준수', '상위 개념', '상위 모델']
+    labels = ['부품', '인증', '번호', '발급 기관', '규격 준수', '상위 모델']
     for (key, description), label in zip(RELATION_TYPES.items(), labels):
         src, dst = endpoints[key]
         conn.execute("""INSERT OR IGNORE INTO graph_relation_type
@@ -140,3 +144,54 @@ def _migrate(conn):
       WHERE b.src_id=r.src_id AND b.dst_id=r.dst_id AND b.type=r.type AND b.source_key IN ('*',r.source_key))
       AND NOT EXISTS (SELECT 1 FROM graph_relation_block b WHERE b.src_type=s.type AND b.src_norm=s.norm
       AND b.dst_type=d.type AND b.dst_norm=d.norm AND b.type=r.type)))""")
+    remove_system_concepts(conn)
+
+
+def remove_system_concepts(conn):
+    """시스템이 만든 상위 개념을 지운다 (지시서 GR1). 출처와 관계없이 concept 개체와 part_of 관계 전부.
+
+    몇 번 돌려도 결과가 같다. 지운 것이 있을 때만 편집 이력 한 건(action='migration', target_kind='schema')과 INFO 로그를 남긴다.
+    """
+    concept_ids = [r[0] for r in conn.execute("SELECT id FROM graph_entity WHERE type='concept'")]
+    marks = ",".join("?" * len(concept_ids))
+    counts = {}
+    relation_filter = "type='part_of'" + (f" OR src_id IN ({marks}) OR dst_id IN ({marks})" if concept_ids else "")
+    relation_params = [*concept_ids, *concept_ids] if concept_ids else []
+    relation_ids = [r[0] for r in conn.execute(f"SELECT id FROM graph_relation WHERE {relation_filter}", relation_params)]
+    if relation_ids:
+        rel_marks = ",".join("?" * len(relation_ids))
+        conn.execute(f"DELETE FROM graph_fact_source WHERE fact_kind='relation' AND fact_id IN ({rel_marks})", relation_ids)
+    counts["relations"] = conn.execute(f"DELETE FROM graph_relation WHERE {relation_filter}", relation_params).rowcount
+    exclusion_filter = "type='part_of'" + (f" OR src_id IN ({marks}) OR dst_id IN ({marks})" if concept_ids else "")
+    counts["exclusions"] = conn.execute(f"DELETE FROM graph_exclusion WHERE {exclusion_filter}", relation_params).rowcount
+    counts["blocks"] = conn.execute(
+        "DELETE FROM graph_relation_block WHERE type='part_of' OR src_type='concept' OR dst_type='concept'").rowcount
+    if concept_ids:
+        value_ids = [r[0] for r in conn.execute(f"SELECT value_id FROM graph_property_value WHERE entity_id IN ({marks})", concept_ids)]
+        if value_ids:
+            value_marks = ",".join("?" * len(value_ids))
+            conn.execute(f"DELETE FROM graph_fact_source WHERE fact_kind='property' AND fact_id IN ({value_marks})", value_ids)
+        counts["property_values"] = conn.execute(
+            f"DELETE FROM graph_property_value WHERE entity_id IN ({marks})", concept_ids).rowcount
+        conn.execute(f"DELETE FROM graph_alias WHERE entity_id IN ({marks})", concept_ids)
+        conn.execute(f"DELETE FROM graph_mention WHERE entity_id IN ({marks})", concept_ids)
+        conn.execute(f"UPDATE graph_entity SET merged_into_id=NULL WHERE merged_into_id IN ({marks})", concept_ids)
+        counts["entities"] = conn.execute(f"DELETE FROM graph_entity WHERE id IN ({marks})", concept_ids).rowcount
+    else:
+        counts["property_values"] = counts["entities"] = 0
+    counts["relation_types"] = conn.execute("DELETE FROM graph_relation_type WHERE key='part_of'").rowcount
+    # 사용자 정의의 허용 종류 목록에서 concept을 뺀다 (다른 종류가 남을 때만)
+    for table, key, columns in (("graph_relation_type", "key", ("source_entity_types", "target_entity_types")),
+                                ("graph_property_definition", "property_id", ("allowed_entity_types",))):
+        for row in conn.execute(f"SELECT {key}, {', '.join(columns)} FROM {table}").fetchall():
+            for column in columns:
+                values = json.loads(row[column])
+                if "concept" in values and len(values) > 1:
+                    conn.execute(f"UPDATE {table} SET {column}=? WHERE {key}=?",
+                                 (json.dumps(sorted(v for v in values if v != "concept"), ensure_ascii=False, sort_keys=True), row[key]))
+    if any(counts.values()):
+        conn.execute("""INSERT INTO graph_edit_event (target_kind,target_id,action,before_json,after_json,correlation_id)
+          VALUES ('schema','GR1-remove-system-concepts','migration',NULL,?,?)""",
+          (json.dumps(counts, ensure_ascii=False, sort_keys=True), uuid.uuid4().hex))
+        logger.info("시스템 상위 개념 삭제 (GR1): %s", counts)
+    return counts

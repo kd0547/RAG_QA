@@ -13,8 +13,12 @@ def test_v2_template_content():
     # 절차 번호·횟수 제한·없어진 도구는 쓰지 않는다
     for removed in ("check_answerability", "read_source_document", "start=0", "최대 2회", "\n1. "):
         assert removed not in text
-    rendered = render_prompt(text, {"KC 인증": ["안전확인 신고"]})
-    assert "- KC 인증 = 안전확인 신고" in rendered and "$aliases" not in rendered
+    rendered = render_prompt(text)
+    # 옛 본문의 별칭 줄·상위 개념 문장은 렌더링 때 지운다 (GR1). DB에 저장된 본문은 그대로다
+    assert "$aliases" in text and "용어 별칭" in text
+    for removed in ("$aliases", "용어 별칭", "상위 개념"):
+        assert removed not in rendered
+    assert "인증 묶음 이름(예: KC 인증)은 시스템이 속한 종류로 펼쳐 주지 않는다" in rendered
 
 
 def test_ensure_v2_inserts_once_and_keeps_existing(agent_env):

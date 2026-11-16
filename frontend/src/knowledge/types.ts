@@ -6,12 +6,11 @@ export type EntityType =
     | 'certification'
     | 'cert_number'
     | 'organization'
-    | 'standard'
-    | 'concept';
+    | 'standard';
 
 export type RelationType = string;
 
-/** extract: 문서에서 뽑음 · seed: aliases.yaml · manual: 사람이 넣음 (다시 뽑아도 유지) · spec: 사양 DB에서 심음 */
+/** extract: 문서에서 뽑음 · seed: 옛 기본 연결(지금은 만들지 않음) · manual: 사람이 넣음 (다시 뽑아도 유지) · spec: 사양 DB에서 심음 */
 export type RelationOrigin = 'extract' | 'seed' | 'manual' | 'spec';
 
 export interface GraphNode {

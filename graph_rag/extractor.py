@@ -11,7 +11,7 @@ from graph_rag.types import (
 
 logger = logging.getLogger(__name__)
 
-_ENTITY_GUIDE = "\n".join(f"- {k}: {v}" for k, v in ENTITY_TYPES.items() if k != "concept")
+_ENTITY_GUIDE = "\n".join(f"- {k}: {v}" for k, v in ENTITY_TYPES.items())
 _RELATION_GUIDE = "\n".join(f"- {k}: {v}" for k, v in RELATION_TYPES.items() if k not in NON_EXTRACT_RELATIONS)
 
 EXTRACT_PROMPT = f"""당신은 사내 문서(제품 제안서, 세일즈 가이드, 인증서, 시험성적서)에서 검색용 지식 그래프를 만드는 추출기입니다.
@@ -30,13 +30,6 @@ EXTRACT_PROMPT = f"""당신은 사내 문서(제품 제안서, 세일즈 가이�
 - relations의 source와 target은 entities의 name과 똑같이 쓰세요.
 - 뽑을 것이 없으면 빈 목록을 돌려주세요."""
 
-_CONCEPT_GUIDE = """
-
-## 상위 개념
-certification 개체가 아래 상위 개념에 속하면 concept에 상위 개념 이름을 그대로 적으세요. 표기가 달라도 같은 인증이면 속합니다
-(예: "KC 안전확인"은 "안전확인 신고"와 같은 인증). 속하지 않거나 확실하지 않으면 null로 두세요.
-{concepts}"""
-
 _KNOWN_GUIDE = """
 
 ## 사양 DB의 정식 이름
@@ -48,10 +41,9 @@ _KNOWN_GUIDE = """
 _KC_REGISTRATION = re.compile(r"\b(?:R|MSIP|KCC)-[A-Z]{1,3}-[A-Za-z0-9]{2,6}-[A-Za-z0-9][A-Za-z0-9\-]{1,30}\b")
 
 
-def extract_page_graph(text: str, llm=None, concepts: list[dict] | None = None, known: list[dict] | None = None) -> PageGraph:
+def extract_page_graph(text: str, llm=None, known: list[dict] | None = None) -> PageGraph:
     """한 페이지 텍스트의 개체·관계. LLM이 실패하면 예외를 그대로 던진다 (호출부가 기록).
 
-    concepts는 graph_repo.list_concepts() 결과다. 주면 인증 종류마다 속하는 상위 개념을 같이 고르게 한다.
     known은 사양 DB의 정식 이름 [{"type": "product"|"component", "name": 모델명, "aliases": [다른 표기]}]이다 (지시서 H3).
     주면 같은 대상을 정식 이름으로 뽑게 하고, 정식 이름이 페이지에 없어도 별칭 중 하나가 있으면 남긴다.
     None이면 프롬프트와 걸러내기가 예전과 같다.
@@ -65,25 +57,21 @@ def extract_page_graph(text: str, llm=None, concepts: list[dict] | None = None, 
         llm = get_llm_model("local")
     structured = llm.with_structured_output(PageGraph)
     result = structured.invoke([
-        {"role": "system", "content": _system_prompt(concepts, known)},
+        {"role": "system", "content": _system_prompt(known)},
         {"role": "user", "content": text[:config.GRAPH_EXTRACT_MAX_CHARS]},
     ])
     graph = result if isinstance(result, PageGraph) else PageGraph.model_validate(result or {})
     _add_relation_endpoints(graph)
     _add_registration_numbers(graph, text)
     graph = _keep_grounded(graph, text, {normalize(k["name"]) for k in known or []} - {""})
-    _keep_known_concepts(graph, concepts)
     return graph
 
 
 _KNOWN_TYPE_LABELS = {"product": "제품", "component": "부품"}
 
 
-def _system_prompt(concepts: list[dict] | None, known: list[dict] | None = None) -> str:
+def _system_prompt(known: list[dict] | None = None) -> str:
     prompt = EXTRACT_PROMPT
-    if concepts:
-        lines = "\n".join(f"- {c['name']}: {', '.join(c['members'])}" for c in concepts)
-        prompt += _CONCEPT_GUIDE.format(concepts=lines)
     if known:
         items = []
         for item in known:
@@ -107,15 +95,6 @@ def _add_relation_endpoints(graph: PageGraph) -> None:
             if entity_type and normalize(name) and normalize(name) not in known:
                 graph.entities.append(ExtractedEntity(type=entity_type, name=name))
                 known.add(normalize(name))
-
-
-def _keep_known_concepts(graph: PageGraph, concepts: list[dict] | None) -> None:
-    """상위 개념은 이미 있는 것만 쓴다. LLM이 새로 지어낸 개념이나 인증이 아닌 개체의 개념은 지운다."""
-    names = {normalize(c["name"]): c["name"] for c in concepts or []}
-    for entity in graph.entities:
-        if entity.concept is None:
-            continue
-        entity.concept = names.get(normalize(entity.concept)) if entity.type == "certification" else None
 
 
 def _add_registration_numbers(graph: PageGraph, text: str) -> None:

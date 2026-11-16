@@ -8,7 +8,6 @@ export const ENTITY_META: Record<EntityType, { label: string; color: string; hin
     cert_number: { label: '인증번호', color: '#64748B', hint: '인증서·등록·신고·성적서 번호' },
     organization: { label: '기관', color: '#E19A00', hint: '회사·시험기관·발급기관' },
     standard: { label: '규격', color: '#DB2777', hint: '규격·표준·기준 (예: KN 32)' },
-    concept: { label: '상위 개념', color: '#141C2B', hint: '여러 인증 종류를 묶는 개념 (예: KC 인증)' },
 };
 
 export const ENTITY_TYPES = Object.keys(ENTITY_META) as EntityType[];
@@ -20,8 +19,7 @@ export const ORIGIN_META: Record<RelationOrigin, { label: string; className: str
     spec: { label: '사양 DB', className: 'border-[#7C5CFF]/25 bg-[#F3F0FF] text-[#5B3FD9]', stroke: '#7C5CFF', dash: '2 3' },
 };
 
-/** 노드 반지름: 관계가 많을수록 크게. 상위 개념은 항상 크게 */
+/** 노드 반지름: 관계가 많을수록 크게 */
 export function nodeRadius(node: GraphNode): number {
-    const base = 7 + Math.min(11, Math.sqrt(node.degree) * 2.6);
-    return node.type === 'concept' ? Math.max(base, 15) : base;
+    return 7 + Math.min(11, Math.sqrt(node.degree) * 2.6);
 }

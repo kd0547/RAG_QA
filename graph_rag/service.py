@@ -60,7 +60,7 @@ def index_page(file_id: str, page: int) -> dict:
     rows = page_repo.pages_with_number(file_id, page)
     text = "\n\n".join(r["text"] for r in rows if r["text"])
     names = spec_names()
-    graph = extract_page_graph(text, concepts=graph_repo.list_concepts(), **_known_kwargs(names, text))
+    graph = extract_page_graph(text, **_known_kwargs(names, text))
     result = graph_repo.replace_page(file_id, page, graph, link_specs=names is not None)
     logger.info("그래프 페이지 추출: file_id=%s, page=%s, %s", file_id, page, result)
     return result
@@ -75,13 +75,12 @@ def index_file(file_id: str) -> dict:
             texts[row["page"]].append(row["text"])
 
     graph_repo.delete_file(file_id)
-    concepts = graph_repo.list_concepts()
     names = spec_names()
     entities = relations = failed = 0
     for page, parts in sorted(texts.items()):
         try:
             text = "\n\n".join(parts)
-            graph = extract_page_graph(text, concepts=concepts, **_known_kwargs(names, text))
+            graph = extract_page_graph(text, **_known_kwargs(names, text))
             result = graph_repo.replace_page(file_id, page, graph, link_specs=names is not None)
         except Exception:
             failed += 1
@@ -122,10 +121,10 @@ def _evidence(relation: dict) -> str:
 
 
 def search_graph(query: str, group_id: str | None = None, max_documents: int = MAX_DOCUMENTS) -> dict:
-    """질문에 나온 개체를 찾고, 상위 개념을 펼치고, 관계와 그 개체가 나온 문서 페이지를 돌려준다.
+    """질문에 나온 개체를 찾고, 관계와 그 개체가 나온 문서 페이지를 돌려준다.
 
-    문서는 질문의 개체를 더 많이 담은 순서로 정렬한다. "N5800 KC인증"이면 N5800과 KC 인증 종류가
-    함께 나온 문서가 앞에 온다.
+    문서는 질문에서 찾은 개체를 더 많이 담은 순서로 정렬한다. "N5800 안전확인 신고"면 N5800과 안전확인 신고가
+    함께 나온 문서가 앞에 온다. 인증 묶음 이름(예: KC 인증)을 속한 종류로 펼치지 않는다 (지시서 GR1).
 
     matched에는 사양 DB 대상(ref_type, ref_id)을 싣는다. 모델은 이 값을 get_specs에 그대로 넘길 수 있다.
     파생 모델을 물으면 variant_of로 상위 모델이 나온 문서를 documents 뒤에 **후보로** 더하고 via("상위 모델 ○○")를 표시한다.
@@ -135,13 +134,8 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
     if not matched:
         return {"matched": [], "documents": [], "message": "그래프에서 질문과 맞는 개체를 찾지 못했습니다. search_documents로 검색하세요."}
 
-    concepts = [e for e in matched if e["type"] == "concept"]
-    members = graph_repo.concept_members([c["id"] for c in concepts])
-
-    # 문서 순위는 '질문의 몇 가지 대상을 담았는지'로 매긴다. 상위 개념의 인증 종류들은 그 개념 하나로 센다.
-    term_of: dict[int, int] = {e["id"]: e["id"] for e in matched if e["type"] != "concept"}
-    for member in members:
-        term_of.setdefault(member["id"], member["concept_id"])
+    # 문서 순위는 '질문에서 찾은 개체를 몇 개 담았는지'로 매긴다
+    term_of: dict[int, int] = {e["id"]: e["id"] for e in matched}
     target_ids = list(term_of)
 
     relations = graph_repo.relations_of(target_ids, group_id=group_id, limit=MAX_RELATIONS)
@@ -197,10 +191,6 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
     return {
         "matched": [{"id":e["id"], "name": e["name"], "type": e["type"], "ref_type": e.get("ref_type"), "ref_id": e.get("ref_id")}
                     for e in matched],
-        "expanded": [
-            {"concept": c["name"], "members": [m["name"] for m in members if m["concept_id"] == c["id"]]}
-            for c in concepts
-        ],
         "relations": [
             f'{r["source_name"]} -[{r["type"]}]-> {r["target_name"]} ({_evidence(r)})'
             for r in relations
