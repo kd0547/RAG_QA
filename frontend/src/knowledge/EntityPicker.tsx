@@ -26,6 +26,7 @@ export function EntityPicker({
     disabled = false,
     onlyType,
     onPick,
+    onPickAll,
 }: {
     label: string;
     placeholder?: string;
@@ -36,6 +37,8 @@ export function EntityPicker({
     /** 이 종류의 개체만 찾는다 (합치기) */
     onlyType?: EntityType;
     onPick: (picked: PickedEntity) => void;
+    /** 있으면 검색 결과가 둘 이상일 때 목록 맨 위에 "모두 그래프에 보기"가 붙고, Enter도 이것을 실행한다 */
+    onPickAll?: (query: string) => void;
 }) {
     const inputId = useId();
     const { schema } = useGraphSchema();
@@ -74,6 +77,11 @@ export function EntityPicker({
         setResults([]);
         setOpen(false);
     };
+    const canPickAll = !!onPickAll && visible.length >= 2;
+    const pickAll = () => {
+        onPickAll?.(q);
+        setOpen(false);
+    };
 
     return (
         <div
@@ -95,7 +103,10 @@ export function EntityPicker({
                 onFocus={() => setOpen(true)}
                 onKeyDown={(e) => {
                     if (e.key === 'Escape') setOpen(false);
-                    if (e.key === 'Enter' && visible[0]) {
+                    if (e.key === 'Enter' && canPickAll) {
+                        e.preventDefault();
+                        pickAll();
+                    } else if (e.key === 'Enter' && visible[0]) {
                         e.preventDefault();
                         pick({ kind: 'existing', id: visible[0].id, type: visible[0].type, name: visible[0].name, revision: visible[0].revision });
                     }
@@ -107,6 +118,17 @@ export function EntityPicker({
             {open && q && (
                 <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 max-h-72 overflow-y-auto rounded-lg border border-line bg-white py-1 shadow-[0_6px_20px_rgba(20,28,43,0.12)]">
                     {error && <p className="px-3 py-2 text-[12px] text-danger">{error}</p>}
+                    {canPickAll && (
+                        <button
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={pickAll}
+                            className="mb-1 flex w-full items-center gap-2 border-b border-divide px-3 py-2 text-left text-[12.5px] font-semibold text-brand-hover hover:bg-brand-tint"
+                        >
+                            <span className="min-w-0 flex-1 truncate">‘{q}’ 검색 결과 {visible.length >= 12 ? '12개 이상' : `${visible.length}개`} 모두 그래프에 보기</span>
+                            <span className="shrink-0 text-[11px] font-normal text-muted">Enter</span>
+                        </button>
+                    )}
                     {visible.map((r) => (
                         <button
                             key={r.id}

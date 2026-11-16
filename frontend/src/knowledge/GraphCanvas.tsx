@@ -30,6 +30,7 @@ export function GraphCanvas({
     onPick,
     onMoveNode,
     expandedIds = new Set<number>(),
+    highlightIds,
     onToggleExpand,
     connectMode = false,
     onConnect,
@@ -49,6 +50,8 @@ export function GraphCanvas({
     onMoveNode: (nodeId: number, point: Point) => void;
     /** 그래프에서 펼친 노드 (숨은 이웃을 보이는 중) */
     expandedIds?: Set<number>;
+    /** 고리를 둘러 구분할 노드 (개체 찾기 결과). 이름도 늘 보인다 */
+    highlightIds?: Set<number>;
     /** 노드를 두 번 누르거나 +숫자를 누르면 숨은 이웃을 펼치고, 다시 하면 접는다 */
     onToggleExpand?: (nodeId: number) => void;
     /** 선 잇기: 노드를 누르면 선이 포인터를 따라오고, 다른 노드를 누르면 onConnect */
@@ -424,7 +427,8 @@ export function GraphCanvas({
                         const selected = node.id === selectedNodeId;
                         const dim = focus !== null && !focus.nodeIds.has(node.id);
                         // 노드가 많으면 제품군·제품 이름만 늘 보이고, 나머지는 고르거나 마우스를 올리면 보인다
-                        const showLabel = showAllLabels || selected || hovered === node.id
+                        const highlighted = highlightIds?.has(node.id) ?? false;
+                        const showLabel = showAllLabels || selected || highlighted || hovered === node.id
                             || node.type === 'product' || node.type === 'product_line'
                             || (node.type !== 'spec_value' && node.degree >= 4 && nodes.length <= 60)
                             || (focus !== null && focus.nodeIds.has(node.id) && (focus.nodeIds.size <= 40 || node.type !== 'spec_value'));
@@ -448,6 +452,7 @@ export function GraphCanvas({
                                     else onSelect({ kind: 'node', id: node.id });
                                 }}
                             >
+                                {highlighted && !selected && <circle r={r + 5} fill="none" stroke="#141C2B" strokeOpacity={0.55} strokeWidth={1.5} strokeDasharray="3 2.5" />}
                                 {selected && <circle r={r + 5} fill="none" stroke={meta.color} strokeOpacity={0.35} strokeWidth={4} />}
                                 {connectFrom !== null && connectFrom !== node.id && hovered === node.id && (
                                     <circle r={r + 7} fill="none" stroke="#00A4E4" strokeWidth={3} strokeDasharray="4 3" />

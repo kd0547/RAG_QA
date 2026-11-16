@@ -30,6 +30,20 @@ import type { EntityType, GraphEdge, GraphNode, GraphRelation, GraphStats, Graph
 
 const OVERVIEW_LIMIT = 150;
 const FOCUS_LIMIT = 200;
+/** 검색 결과를 노드로 보일 때 최대 개수와, 결과 하나마다 불러올 이웃 수 */
+const SEARCH_VIEW_MAX = 20;
+const SEARCH_NEIGHBOR_LIMIT = 60;
+
+/** 여러 보기를 합친다 (같은 노드·관계는 한 번만) */
+function combineViews(views: GraphView[]): GraphView {
+    const nodes = new Map<number, GraphNode>();
+    const edges = new Map<number, GraphEdge>();
+    for (const view of views) {
+        for (const n of view.nodes) nodes.set(n.id, n);
+        for (const e of view.edges) edges.set(e.id, e);
+    }
+    return { nodes: [...nodes.values()], edges: [...edges.values()], truncated: views.some((v) => v.truncated) };
+}
 
 function readUrl(): { entityId: number | null; depth: number } {
     const params = new URLSearchParams(window.location.search);
@@ -113,6 +127,9 @@ function KnowledgeContent() {
     const { schema } = useGraphSchema();
     const [initial] = useState(readUrl);
     const [focusId, setFocusId] = useState<number | null>(initial.entityId);
+    // 개체 찾기의 "모두 그래프에 보기": 검색된 개체들과 각각의 바로 이웃. total은 검색된 전체 수
+    const [searchView, setSearchView] = useState<{ query: string; ids: number[]; total: number } | null>(null);
+    const [searchError, setSearchError] = useState('');
     const [depth, setDepth] = useState(initial.depth);
     const [types, setTypes] = useState<EntityType[]>([]);
     const [fileId, setFileId] = useState('');
@@ -151,7 +168,7 @@ function KnowledgeContent() {
     const pinnedRef = useRef(new Set<number>());
     const pickCallback = useRef<((node: GraphNode) => void) | null>(null);
     // 보는 범위가 바뀌면 화면을 다시 맞추고, 편집 뒤 다시 불러올 때는 그대로 둔다
-    const queryKey = `${focusId}|${depth}|${types.join(',')}|${fileId}|${valuesNearOnly}|${hideIsolatedSpec}`;
+    const queryKey = `${focusId}|${depth}|${types.join(',')}|${fileId}|${valuesNearOnly}|${hideIsolatedSpec}|${searchView ? `search:${searchView.query}` : ''}`;
     const lastQueryKey = useRef('');
 
     useEffect(() => {
@@ -173,10 +190,14 @@ function KnowledgeContent() {
     useEffect(() => {
         let ignore = false;
         const specOptions = { specValues: valuesNearOnly ? 'neighbors' as const : 'all' as const, hideIsolatedSpec };
-        graphApi.view(focusId !== null
-            ? { entityId: focusId, depth, types, limit: FOCUS_LIMIT, ...specOptions }
-            : { types, fileId: fileId || null, limit: OVERVIEW_LIMIT, ...specOptions },
-        ).then((view) => {
+        const load = searchView
+            // 합치기 등으로 없어진 개체는 빼고 합친다
+            ? Promise.all(searchView.ids.map((id) => graphApi.view({ entityId: id, depth: 1, types, limit: SEARCH_NEIGHBOR_LIMIT, ...specOptions })
+                .catch(() => null))).then((views) => combineViews(views.filter((v): v is GraphView => v !== null)))
+            : graphApi.view(focusId !== null
+                ? { entityId: focusId, depth, types, limit: FOCUS_LIMIT, ...specOptions }
+                : { types, fileId: fileId || null, limit: OVERVIEW_LIMIT, ...specOptions });
+        load.then((view) => {
             if (ignore) return;
             const queryChanged = lastQueryKey.current !== queryKey;
             lastQueryKey.current = queryKey;
@@ -270,6 +291,7 @@ function KnowledgeContent() {
         setMerging(null);
         setConnecting(null);
         setConnectNotice(done.notice);
+        replaceInSearch(done.sourceId, done.targetId);
         if (focusId === done.sourceId) setFocusId(done.targetId);
         setSelection({ kind: 'node', id: done.targetId });
         changed();
@@ -348,9 +370,29 @@ function KnowledgeContent() {
     };
 
     const focus = (id: number | null) => {
+        setSearchView(null);
         setFocusId(id);
         if (id !== null) setSelection({ kind: 'node', id });
     };
+    /** 개체 찾기의 검색 결과를 모두 노드로 보인다 (최대 SEARCH_VIEW_MAX개) */
+    const showSearch = (query: string) => {
+        setSearchError('');
+        graphApi.searchEntities(query, undefined, SEARCH_VIEW_MAX + 1).then((list) => {
+            if (!list.length) return;
+            setFocusId(null);
+            setSelection(null);
+            setSearchView({ query, ids: list.slice(0, SEARCH_VIEW_MAX).map((r) => r.id), total: list.length });
+        }).catch((e: unknown) => setSearchError(errorText(e)));
+    };
+    /** 합친 뒤 검색 결과 보기에서 없어진 개체를 남은 개체로 바꾼다 */
+    const replaceInSearch = (sourceId: number, targetId: number) => {
+        setSearchView((current) => {
+            if (!current || !current.ids.includes(sourceId)) return current;
+            const ids = current.ids.map((id) => (id === sourceId ? targetId : id)).filter((id) => id > 0);
+            return { ...current, ids: [...new Set(ids)] };
+        });
+    };
+    const searchIds = useMemo(() => new Set(searchView?.ids ?? []), [searchView]);
 
     const toRelation = useCallback((edge: GraphEdge): GraphRelation | null => {
         const source = nodeById.get(edge.source);
@@ -405,9 +447,21 @@ function KnowledgeContent() {
                     {/* 도구 모음 */}
                     <div className="absolute left-3 right-3 top-3 z-10 flex flex-wrap items-start gap-2 pointer-events-none">
                         <div className="pointer-events-auto w-full sm:w-64">
-                            <EntityPicker label="개체 찾기" placeholder="개체 찾기 (예: N5800, KC 인증)" onPick={(p) => { if (p.kind === 'existing') focus(p.id); }} />
+                            <EntityPicker label="개체 찾기" placeholder="개체 찾기 (예: N5800, KC 인증)" onPick={(p) => { if (p.kind === 'existing') focus(p.id); }}
+                                onPickAll={showSearch} />
+                            {searchError && <p role="alert" className="mt-1 rounded bg-white px-2 py-1 text-[11.5px] text-danger">{searchError}</p>}
                         </div>
-                        {focusId !== null ? (
+                        {searchView ? (
+                            <div className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-lg border border-brand/25 bg-white pl-2.5 pr-1 shadow-[0_1px_3px_rgba(20,28,43,0.06)]">
+                                <span className="max-w-[220px] truncate text-[12px] font-semibold">
+                                    ‘{searchView.query}’ 검색 결과 {searchView.ids.length}개
+                                </span>
+                                {searchView.total > SEARCH_VIEW_MAX && <span className="text-[11px] text-muted">({SEARCH_VIEW_MAX}개 넘게 찾아 앞 {SEARCH_VIEW_MAX}개만)</span>}
+                                <button type="button" onClick={() => setSearchView(null)} className="h-7 rounded-md px-2 text-[11.5px] font-semibold text-muted hover:bg-chip hover:text-ink">
+                                    전체 보기
+                                </button>
+                            </div>
+                        ) : focusId !== null ? (
                             <div className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-lg border border-brand/25 bg-white pl-2.5 pr-1 shadow-[0_1px_3px_rgba(20,28,43,0.06)]">
                                 <span className="max-w-[160px] truncate text-[12px] font-semibold">
                                     {focusNode ? focusNode.name : `#${focusId}`} 중심
@@ -577,6 +631,7 @@ function KnowledgeContent() {
                                 if (node && callback) callback(node);
                             }}
                             expandedIds={expandedIds}
+                            highlightIds={searchIds}
                             onToggleExpand={toggleExpand}
                             connectMode={connectMode}
                             onConnect={(fromId, toId, clientX, clientY) => {
@@ -623,6 +678,7 @@ function KnowledgeContent() {
                             onFocus={focus}
                             onChanged={changed}
                             onMerged={(sourceId, targetId, notice) => {
+                                replaceInSearch(sourceId, targetId);
                                 if (focusId === sourceId) setFocusId(targetId || null);
                                 setSelection(targetId ? { kind: 'node', id: targetId } : null);
                                 if (notice) setConnectNotice(notice);
