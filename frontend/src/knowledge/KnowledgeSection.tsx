@@ -297,18 +297,28 @@ function KnowledgeContent() {
         if (id !== null) setSelection({ kind: 'node', id });
     };
 
-    const selectedEdge: GraphRelation | null = useMemo(() => {
-        if (selection?.kind !== 'edge' || !data) return null;
-        const edge = data.edges.find((e) => e.id === selection.id);
-        const source = edge && nodeById.get(edge.source);
-        const target = edge && nodeById.get(edge.target);
-        if (!edge || !source || !target) return null;
+    const toRelation = useCallback((edge: GraphEdge): GraphRelation | null => {
+        const source = nodeById.get(edge.source);
+        const target = nodeById.get(edge.target);
+        if (!source || !target) return null;
         return {
             id: edge.id, revision: edge.revision, type: edge.type, origin: edge.origin, page: edge.page, file_id: edge.file_id, original_name: edge.original_name,
             source_id: source.id, source_type: source.type, source_name: source.name,
             target_id: target.id, target_type: target.type, target_name: target.name,
         };
-    }, [selection, data, nodeById]);
+    }, [nodeById]);
+    const selectedEdge: GraphRelation | null = useMemo(() => {
+        if (selection?.kind !== 'edge' || !data) return null;
+        const edge = data.edges.find((e) => e.id === selection.id);
+        return edge ? toRelation(edge) : null;
+    }, [selection, data, toRelation]);
+    // 고른 선과 같은 관계(출발·종류·도착)의 다른 출처 행
+    const selectedSiblings: GraphRelation[] = useMemo(() => {
+        if (!selectedEdge || !data) return [];
+        return data.edges
+            .filter((e) => e.id !== selectedEdge.id && e.source === selectedEdge.source_id && e.target === selectedEdge.target_id && e.type === selectedEdge.type)
+            .map(toRelation).filter((r): r is GraphRelation => r !== null);
+    }, [selectedEdge, data, toRelation]);
 
     const toggleType = (type: EntityType) => {
         setTypes((list) => (list.includes(type) ? list.filter((t) => t !== type) : [...list, type].sort()));
@@ -515,6 +525,7 @@ function KnowledgeContent() {
                     ) : selectedEdge ? (
                         <EdgePanel
                             relation={selectedEdge}
+                            siblings={selectedSiblings}
                             onOpenEntity={(id) => setSelection({ kind: 'node', id })}
                             onReplaced={(r) => {
                                 setSelection({ kind: 'edge', id: r.id });

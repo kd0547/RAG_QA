@@ -276,3 +276,19 @@ def test_query_tokens_add_particle_stripped_candidates():
     assert {"n5800", "n5800의", "kc인증", "kc인증을", "보내줘"} <= set(tokens)
     # 3자 미만은 접두 일치에 쓰지 않는다
     assert "사양" not in tokens
+
+
+def test_same_relation_from_many_pages_is_one_search_line(env):
+    """문서 관계는 근거 페이지마다 한 행이지만, graph_search는 같은 관계(출발·종류·도착)를 한 줄로 묶는다."""
+    _, _, graph, add_file = env
+    cert, guide = add_file("cert.pdf"), add_file("guide.pdf")
+    page = PageGraph(entities=[_entity("product", "A600"), _entity("organization", "주식회사 삼보컴퓨터")],
+                     relations=[ExtractedRelation(source="A600", type="made_by", target="주식회사 삼보컴퓨터")])
+    for number in (3, 5, 7):
+        graph.replace_page(cert.file_id, number, page)
+    graph.replace_page(guide.file_id, 2, page)
+
+    result = service.search_graph("A600 제조사")
+
+    made_by = [r for r in result["relations"] if "-[made_by]->" in r]
+    assert made_by == ["A600 -[made_by]-> 주식회사 삼보컴퓨터 (cert.pdf p3, p5, p7; guide.pdf p2)"]

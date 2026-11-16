@@ -5,6 +5,7 @@ import { bounds, type Point } from './layout';
 import { ORIGIN_META, nodeRadius } from './meta';
 import { entityMeta, relationLabel, useGraphSchema } from './schemaContext';
 import type { GraphEdge, GraphNode, RelationOrigin } from './types';
+import { groupRelations } from './relationGroups';
 
 export type Selection = { kind: 'node'; id: number } | { kind: 'edge'; id: number } | null;
 
@@ -200,9 +201,15 @@ export function GraphCanvas({
     }, [selection, edges]);
 
     // 같은 두 노드 사이의 여러 관계는 휘어서 겹치지 않게 그린다
+    // 같은 관계(출발·종류·도착)는 선 하나로 그리고 출처 수를 붙인다 (문서 관계는 근거 페이지마다 한 행이다)
+    const sourceCount = useMemo(() => {
+        const counts = new Map<number, number>();
+        for (const list of groupRelations(edges)) counts.set(list[0].id, list.length);
+        return counts;
+    }, [edges]);
     const edgeShapes = useMemo(() => {
         const groups = new Map<string, GraphEdge[]>();
-        for (const e of edges) {
+        for (const e of edges.filter((edge) => sourceCount.has(edge.id))) {
             const key = e.source < e.target ? `${e.source}-${e.target}` : `${e.target}-${e.source}`;
             const list = groups.get(key) ?? [];
             list.push(e);
@@ -241,7 +248,7 @@ export function GraphCanvas({
             });
         }
         return shapes;
-    }, [edges, positions, nodeById]);
+    }, [edges, positions, nodeById, sourceCount]);
 
     const showAllLabels = nodes.length <= LABEL_ALL_LIMIT;
     const selectedNodeId = selection?.kind === 'node' ? selection.id : null;
@@ -328,7 +335,7 @@ export function GraphCanvas({
                                 paintOrder="stroke"
                                 pointerEvents="none"
                             >
-                                {relationLabel(schema, edge.type)}
+                                {relationLabel(schema, edge.type)}{(sourceCount.get(edge.id) ?? 1) > 1 ? ` · 출처 ${sourceCount.get(edge.id)}` : ''}
                             </text>
                         );
                     })}

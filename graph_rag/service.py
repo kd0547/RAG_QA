@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 MAX_DOCUMENTS = 8
 MAX_RELATIONS = 30
+# 관계 행을 이만큼까지 읽어 같은 관계(출발·종류·도착)를 한 줄로 묶는다. 문서 관계는 근거 페이지마다 한 행이다
+MAX_RELATION_ROWS = 300
 
 
 # ------------------------------------------------------------ 만들기
@@ -125,6 +127,37 @@ def _evidence(relation: dict) -> str:
     return "담당자 확인"
 
 
+def _evidence_group(rows: list[dict]) -> str:
+    """같은 관계의 여러 출처를 한 근거 문장으로: 문서는 파일별로 페이지를 모은다 (예: "인증서.pdf p3, p5; 사양 DB")."""
+    parts: list[str] = []
+    pages: dict[str, list[str]] = {}
+    for row in rows:
+        if row.get("origin") not in ("spec", "manual") and row.get("file_id") and row.get("original_name"):
+            name = row["original_name"]
+            if name not in pages:
+                pages[name] = []
+                parts.append(f"\x00{name}")
+            if row.get("page") is not None and f'p{row["page"]}' not in pages[name]:
+                pages[name].append(f'p{row["page"]}')
+        else:
+            text = _evidence(row)
+            if text not in parts:
+                parts.append(text)
+    return "; ".join(
+        (f"{part[1:]} {', '.join(pages[part[1:]])}".rstrip() if part.startswith("\x00") else part) for part in parts
+    )
+
+
+def relation_lines(relations: list[dict], limit: int = MAX_RELATIONS) -> list[str]:
+    """같은 관계(출발·종류·도착)를 한 줄로 묶은 "출발 -[종류]-> 도착 (근거)" 목록. 처음 나온 순서, 최대 limit줄."""
+    groups: dict[tuple, list[dict]] = {}
+    for relation in relations:
+        groups.setdefault((relation["source_id"], relation["type"], relation["target_id"]), []).append(relation)
+    lines = [f'{rows[0]["source_name"]} -[{rows[0]["type"]}]-> {rows[0]["target_name"]} ({_evidence_group(rows)})'
+             for rows in groups.values()]
+    return lines[:limit]
+
+
 def search_graph(query: str, group_id: str | None = None, max_documents: int = MAX_DOCUMENTS) -> dict:
     """질문에 나온 개체를 찾고, 관계와 그 개체가 나온 문서 페이지를 돌려준다.
 
@@ -146,11 +179,11 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
     # 사양 값 관계(has_spec)는 질문이 사양 값 노드일 때만 싣는다. 나머지는 개수만 (문서·부품·인증 관계를 밀어내지 않게, GR4-9)
     value_ids = [e["id"] for e in matched if e["type"] == "spec_value"]
     other_ids = [e["id"] for e in matched if e["type"] != "spec_value"]
-    relations = graph_repo.relations_of(other_ids, group_id=group_id, limit=MAX_RELATIONS, exclude_types=("has_spec",))
+    relations = graph_repo.relations_of(other_ids, group_id=group_id, limit=MAX_RELATION_ROWS, exclude_types=("has_spec",))
     if value_ids:
         known = {r["id"] for r in relations}
-        relations += [r for r in graph_repo.relations_of(value_ids, group_id=group_id, limit=MAX_RELATIONS) if r["id"] not in known]
-        relations = relations[:MAX_RELATIONS]
+        relations += [r for r in graph_repo.relations_of(value_ids, group_id=group_id, limit=MAX_RELATION_ROWS)
+                      if r["id"] not in known]
     spec_values = graph_repo.count_relations(other_ids, "has_spec")
 
     documents: dict[str, dict] = {}
@@ -204,10 +237,7 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
     return {
         "matched": [{"id":e["id"], "name": e["name"], "type": e["type"], "ref_type": e.get("ref_type"), "ref_id": e.get("ref_id")}
                     for e in matched],
-        "relations": [
-            f'{r["source_name"]} -[{r["type"]}]-> {r["target_name"]} ({_evidence(r)})'
-            for r in relations
-        ],
+        "relations": relation_lines(relations),
         "spec_values": spec_values,
         "documents": [
             {

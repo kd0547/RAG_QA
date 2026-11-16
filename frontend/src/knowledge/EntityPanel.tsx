@@ -11,6 +11,7 @@ import { entityMeta, relationLabel, ruleWarning, useGraphSchema } from './schema
 import { SpecDiffBox, TypeChanger } from './EntityEditExtras';
 import { EntityProperties } from './GraphEditing';
 import { ModelHierarchy, SpecAttributeSection, SpecValuesSection } from './SpecPanels';
+import { groupRelations } from './relationGroups';
 import type { GraphEntityDetail, GraphNode, GraphRelation, RelationType } from './types';
 
 /** "그래프에서 고르기": 부모가 다음 노드 클릭을 이 콜백으로 넘긴다 */
@@ -36,8 +37,11 @@ export function RelationRow({
     onOpenEntity,
     onReplaced,
     onDeleted,
+    siblings = [],
 }: {
     relation: GraphRelation;
+    /** 같은 관계(출발·종류·도착)의 다른 출처 행. 함께 근거로 보인다 */
+    siblings?: GraphRelation[];
     /** 이 개체 입장에서 보여준다 (상대 개체를 크게). 없으면 출발 → 도착 */
     perspectiveId?: number;
     onOpenEntity: (id: number) => void;
@@ -150,7 +154,19 @@ export function RelationRow({
             {confirming && relation.origin !== 'manual' && <select aria-label="자동 관계 제외 범위" value={deleteScope} onChange={(e) => setDeleteScope(e.target.value)} className="mt-1 w-full rounded border border-line text-xs">
                 <option value="all">이 논리 관계의 모든 출처 제외</option><option value="source">선택한 출처 주장만 제외</option>
             </select>}
-            {evidence && (
+            {siblings.length > 0 && (
+                <div className="mt-1 text-[11px] text-muted">
+                    <p className="font-semibold">근거 {siblings.length + 1}곳</p>
+                    <ul className="mt-0.5 space-y-0.5">
+                        {[relation, ...siblings].map((r) => {
+                            const text = evidenceText(r) ?? (r.origin === 'spec' ? '사양 DB' : r.origin === 'manual' ? '사용자 입력' : '근거 없음');
+                            return <li key={r.id} className="truncate">· {r.file_id
+                                ? <a {...linkProps(reviewPath(r.file_id))} className="hover:text-brand-hover hover:underline">{text}</a> : text}</li>;
+                        })}
+                    </ul>
+                </div>
+            )}
+            {evidence && siblings.length === 0 && (
                 relation.file_id ? (
                     <a {...linkProps(reviewPath(relation.file_id))} className="mt-1 block truncate text-[11px] text-muted hover:text-brand-hover hover:underline">
                         근거: {evidence}
@@ -445,13 +461,14 @@ export function EntityPanel({
             <SpecValuesSection entity={entity} />
             <SpecAttributeSection entity={entity} onOpenEntity={onOpenEntity} />
             <EntityProperties key={entity.id} entity={entity} changed={changed} removed={() => onMerged(entity.id, 0)} />
-            <Section title="관계" count={mainRelations.length}>
+            <Section title="관계" count={groupRelations(mainRelations).length}>
                 {mainRelations.length === 0 && <p className="mb-2 text-[12px] text-muted">연결된 관계가 없습니다.</p>}
                 <ul className="space-y-1.5">
-                    {mainRelations.map((r) => (
+                    {groupRelations(mainRelations).map(([r, ...others]) => (
                         <RelationRow
                             key={r.id}
                             relation={r}
+                            siblings={others}
                             perspectiveId={entity.id}
                             onOpenEntity={onOpenEntity}
                             onReplaced={changed}
@@ -514,11 +531,14 @@ export function EntityPanel({
 /** 엣지를 눌렀을 때: 관계 하나 편집 */
 export function EdgePanel({
     relation,
+    siblings = [],
     onOpenEntity,
     onReplaced,
     onDeleted,
 }: {
     relation: GraphRelation;
+    /** 같은 관계의 다른 출처 행 */
+    siblings?: GraphRelation[];
     onOpenEntity: (id: number) => void;
     onReplaced: (relation: GraphRelation) => void;
     onDeleted: () => void;
@@ -530,7 +550,7 @@ export function EdgePanel({
             <h2 className="mt-1 text-[15px] font-bold">{relationLabel(schema, relation.type)}</h2>
             <p className="mt-0.5 text-[11.5px] text-muted">{schema.relation_types.find((r) => r.key === relation.type)?.description}</p>
             <ul className="mt-3">
-                <RelationRow key={relation.id} relation={relation} onOpenEntity={onOpenEntity} onReplaced={onReplaced} onDeleted={onDeleted} />
+                <RelationRow key={relation.id} relation={relation} siblings={siblings} onOpenEntity={onOpenEntity} onReplaced={onReplaced} onDeleted={onDeleted} />
             </ul>
             <p className="mt-3 text-[11.5px] leading-5 text-muted">
                 문서에서 뽑은 관계를 고치거나 지우면, 그 문서를 다시 추출해도 원래 관계로 돌아가지 않습니다.
