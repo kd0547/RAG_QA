@@ -73,6 +73,8 @@ export interface SpecValueInput {
     note: string;
     source_page: number | null;
     source_note: string;
+    /** 출처 문서 (제품 복사 때 원본 값의 출처를 그대로 넘긴다) */
+    source_file_id?: string | null;
 }
 
 export interface Product {

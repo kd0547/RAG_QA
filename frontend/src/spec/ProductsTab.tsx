@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronIcon, TrashIcon } from '../components/icons';
 import { specApi, type Component, type Product, type ProductDetail, type ProductInput, type SpecAttribute, type SpecMeta } from './api';
+import { CopyProductDialog, type CopyDone } from './CopyProduct';
 import { SpecValuesEditor } from './SpecValuesEditor';
 import { btnDanger, btnGhost, btnPrimary, btnTiny, errorMessage, formatDate, inputCls, labelOf, selectCls, smallInputCls } from './styles';
 import { Card, Field, ListItem, Notice, Pill } from './ui';
@@ -66,6 +67,7 @@ export function ProductsTab({
     const [notice, setNotice] = useState('');
     const [error, setError] = useState('');
     const [link, setLink] = useState({ component_id: '', is_option: false, note: '' });
+    const [copying, setCopying] = useState(false);
 
     const loadList = useCallback(async () => {
         try {
@@ -204,6 +206,19 @@ export function ProductsTab({
         } finally {
             setBusy(false);
         }
+    }
+
+    /** 복사가 끝나면 새 제품을 연다 */
+    async function afterCopy({ product, message }: CopyDone) {
+        setCopying(false);
+        await loadList();
+        setDetail(product);
+        setDraft(toInput(product));
+        setActiveId(product.id);
+        reveal(product.ancestors.map((a) => a.id));
+        setError('');
+        setNotice(message);
+        onComponentsChanged();
     }
 
     async function addLink() {
@@ -364,6 +379,17 @@ export function ProductsTab({
                                                 <TrashIcon />삭제
                                             </button>
                                         )}
+                                        {!isNew && detail && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { if (confirmLeave()) { clear(); setCopying(true); } }}
+                                                disabled={busy}
+                                                title="사양 값과 부품 연결까지 그대로 옮긴 새 모델을 만듭니다"
+                                                className={btnGhost}
+                                            >
+                                                복사
+                                            </button>
+                                        )}
                                         <button type="button" onClick={() => void save()} disabled={!canSave} className={btnPrimary}>
                                             {busy ? '저장 중…' : isNew ? '등록' : '저장'}
                                         </button>
@@ -517,6 +543,9 @@ export function ProductsTab({
                     )}
                 </div>
             </main>
+            {copying && detail && (
+                <CopyProductDialog source={detail} products={products ?? []} onDone={(done) => void afterCopy(done)} onCancel={() => setCopying(false)} />
+            )}
         </div>
     );
 }
