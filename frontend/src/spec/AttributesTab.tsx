@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { TrashIcon } from '../components/icons';
-import { specApi, type AttributeInput, type DataType, type SpecAttribute, type SpecMeta } from './api';
+import { specApi, type AttributeInput, type DataType, type GraphMode, type SpecAttribute, type SpecMeta } from './api';
+import { GraphModeCell, type GraphChoices } from './GraphModeCell';
 import { btnGhost, btnPrimary, btnTiny, errorMessage, labelOf, smallInputCls } from './styles';
 import { Notice } from './ui';
 
@@ -67,6 +68,14 @@ export function AttributesTab({
             return '저장했습니다.';
         }, '속성을 저장하지 못했습니다.');
         if (ok) setEditingKey(null);
+    };
+
+    const changeGraph = async (a: SpecAttribute, choice: GraphChoices) => {
+        await run(async () => {
+            await specApi.updateAttribute(a.key, choice);
+            const label: Record<GraphMode, string> = { value_node: '사양 값 노드', entity: '대상 노드', none: '만들지 않음' };
+            return `'${a.name}': 그래프 방식을 '${label[choice.graph_mode]}'(으)로 바꿨습니다. 그래프를 다시 만들었습니다.`;
+        }, '그래프 방식을 저장하지 못했습니다.');
     };
 
     const toggleInherit = async (a: SpecAttribute, inheritable: boolean) => {
@@ -165,6 +174,7 @@ export function AttributesTab({
                                         <th className="px-3 py-2.5 font-semibold">단위</th>
                                         <th className="px-3 py-2.5 font-semibold">설명</th>
                                         <th className="px-3 py-2.5 font-semibold whitespace-nowrap">상위 모델 값 물려받기</th>
+                                        <th className="px-3 py-2.5 font-semibold whitespace-nowrap" title="지식 그래프에 이 속성의 값을 어떻게 넣을지">그래프</th>
                                         <th className="px-3 py-2.5 font-semibold text-right">사용</th>
                                         <th className="px-3 py-2.5 w-[96px]" />
                                     </tr>
@@ -185,6 +195,7 @@ export function AttributesTab({
                                             onCancel={() => setEditingKey(null)}
                                             onRemove={(a) => void remove(a)}
                                             onToggleInherit={(a, value) => void toggleInherit(a, value)}
+                                            onChangeGraph={(a, choice) => void changeGraph(a, choice)}
                                         />
                                     ))}
                                 </tbody>
@@ -210,6 +221,7 @@ function AttributeGroup({
     onCancel,
     onRemove,
     onToggleInherit,
+    onChangeGraph,
 }: {
     title: string;
     rows: SpecAttribute[];
@@ -223,17 +235,21 @@ function AttributeGroup({
     onCancel: () => void;
     onRemove: (a: SpecAttribute) => void;
     onToggleInherit: (a: SpecAttribute, inheritable: boolean) => void;
+    onChangeGraph: (a: SpecAttribute, choice: GraphChoices) => void;
 }) {
     const categories = Object.entries(meta?.attribute_categories ?? {});
     const dataTypes = Object.entries(meta?.data_types ?? {}) as [DataType, string][];
     return (
         <>
             <tr className="border-t border-divide">
-                <td colSpan={8} className="px-4 pt-3 pb-1 text-[11px] font-bold text-muted">{title}</td>
+                <td colSpan={9} className="px-4 pt-3 pb-1 text-[11px] font-bold text-muted">{title}</td>
             </tr>
             {rows.map((a) => {
                 const editing = editingKey === a.key;
-                const inheritCell = <InheritCell attribute={a} busy={busy || editing} onToggle={onToggleInherit} />;
+                const inheritCell = <>
+                    <InheritCell attribute={a} busy={busy || editing} onToggle={onToggleInherit} />
+                    <GraphModeCell attribute={a} busy={busy || editing} onChange={onChangeGraph} />
+                </>;
                 return (
                     <tr key={a.key} className="border-t border-divide align-top">
                         <td className="px-4 py-2 font-mono text-[11.5px] text-muted whitespace-nowrap">{a.key}</td>

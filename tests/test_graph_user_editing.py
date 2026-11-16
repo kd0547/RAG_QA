@@ -59,7 +59,7 @@ def test_isolated_entity_survives_restart_reextract_and_tombstone(env):
     assert graph.find_entities('Alpha')[0]['id']==e['id']
     deleted = edit.execute('delete_entity',e['id'],{'expected_revision':1})
     graph.replace_page('f1',1,page)
-    graph.seed_specs()
+    graph.project_specs()
     assert graph.find_entities('Alpha')==[]
     assert graph.view()['nodes']==[]
     with pytest.raises(GraphConflictError):
@@ -305,18 +305,18 @@ def test_spec_exclusion_preserves_source_and_different_refs_cannot_merge(env):
     spec=SpecRepository(db)
     a=spec.create_product(model='Model AA',name='AA',category='other')
     b=spec.create_product(model='Model BB',name='BB',category='other',parent_id=a['id'])
-    graph.seed_specs()
+    graph.project_specs()
     ea=next(e for e in graph.find_entities('Model AA') if e['ref_id']==a['id'])
     eb=next(e for e in graph.find_entities('Model BB') if e['ref_id']==b['id'])
     r=graph.get_entity(eb['id'])['relations'][0]
     edit.execute('delete_relation',r['id'],{'expected_revision':1})
-    graph.seed_specs()
+    graph.project_specs()
     assert graph.get_entity(eb['id'])['relations']==[]
     assert spec.get_product(b['id'])['parent_id']==a['id']
-    with pytest.raises(GraphConflictError):
+    with pytest.raises(GraphEditError):  # 제품군·제품이고 사양 대상도 달라 합치지 않는다
         edit.execute('merge_entity',ea['id'],{'target_id':eb['id'],'expected_revision':1,'target_revision':1})
     edit.execute('update_entity',ea['id'],{'expected_revision':1,'name':'화면 표시용'})
-    graph.seed_specs()
+    graph.project_specs()
     actual=graph.get_entity(ea['id'])
     assert actual['ref_id']==a['id'] and actual['name']=='화면 표시용'
     assert spec.get_product(a['id'])['model']=='Model AA'

@@ -11,7 +11,11 @@ export interface SpecMeta {
     product_categories: Record<string, string>;
     product_statuses: Record<string, string>;
     component_kinds: Record<string, string>;
+    /** 속성의 그래프 방식 (지시서 GR4-5): value_node | entity | none */
+    graph_modes?: Record<GraphMode, string>;
 }
+
+export type GraphMode = 'value_node' | 'entity' | 'none';
 
 export interface SpecAttribute {
     key: string;
@@ -23,6 +27,10 @@ export interface SpecAttribute {
     sort_order: number;
     /** 1이면 파생 모델에 자기 값이 없을 때 상위 모델 값을 물려받는다. 인증(cert) 분류는 켤 수 없다 (서버 400) */
     inheritable: number;
+    /** 그래프 방식. entity면 graph_relation_type·graph_entity_type */
+    graph_mode: GraphMode;
+    graph_relation_type: string | null;
+    graph_entity_type: string | null;
     usage_count: number;
     created_at: string;
     updated_at: string;
@@ -241,7 +249,9 @@ export const specApi = {
     createAttribute(input: AttributeInput): Promise<SpecAttribute> {
         return request<SpecAttribute>('/specs/attributes', json('POST', input));
     },
-    updateAttribute(key: string, patch: Partial<Omit<AttributeInput, 'key'> & { inheritable: boolean }>): Promise<SpecAttribute> {
+    updateAttribute(key: string, patch: Partial<Omit<AttributeInput, 'key'> & {
+        inheritable: boolean; graph_mode: GraphMode; graph_relation_type: string | null; graph_entity_type: string | null;
+    }>): Promise<SpecAttribute> {
         return request<SpecAttribute>(`/specs/attributes/${enc(key)}`, json('PUT', patch));
     },
     deleteAttribute(key: string): Promise<void> {

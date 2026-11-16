@@ -1,6 +1,8 @@
 """문서 그래프(Graph RAG) 조회·편집·재추출 API. 그래프 화면(frontend/src/knowledge)이 쓴다."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query, Request
 from urllib.parse import unquote
 
@@ -11,6 +13,7 @@ from graph_rag.edit_service import EffectiveGraphService, GraphEditService, Grap
 import config
 
 router = APIRouter(prefix="/graph", tags=["graph"])
+logger = logging.getLogger(__name__)
 
 
 def _run(fn, *args, **kwargs):
@@ -46,13 +49,16 @@ def graph_view(
     types: str | None = Query(None, description="쉼표로 구분한 개체 종류"),
     file_id: str | None = Query(None, description="이 문서에 나온 개체만"),
     limit: int = Query(150, ge=1, le=500),
+    spec_values: str = Query("neighbors", pattern="^(neighbors|all)$", description="사양 값 노드: 고른 노드의 이웃만 / 모두"),
+    hide_isolated_spec: bool = Query(True, description="관계 없는 사양 노드 숨기기"),
 ) -> dict:
     """그래프 화면용 노드·엣지."""
     type_list = [t for t in (types or "").split(",") if t]
     unknown = [t for t in type_list if t not in graph_repo.entity_type_keys()]
     if unknown:
         raise HTTPException(status_code=400, detail=f"없는 개체 종류입니다: {', '.join(unknown)}")
-    return _run(graph_repo.view, entity_id=entity_id, depth=depth, types=type_list, file_id=file_id, limit=limit)
+    return _run(graph_repo.view, entity_id=entity_id, depth=depth, types=type_list, file_id=file_id, limit=limit,
+                spec_values=spec_values, hide_isolated_spec=hide_isolated_spec)
 
 
 @router.get("/entities")
@@ -74,7 +80,20 @@ def get_entity(entity_id: int) -> dict:
     entity = graph_repo.get_entity(entity_id)
     if entity is None:
         raise HTTPException(status_code=404, detail="개체를 찾을 수 없습니다.")
+    entity["spec"] = _spec_of(entity)
     return entity
+
+
+def _spec_of(entity: dict) -> dict | None:
+    """사양 DB 제품·부품 노드의 그때 사양 값 (GR4-7, agent.spec_service.effective_specs). 읽지 못하면 None."""
+    if entity.get("ref_type") not in ("product", "component") or not entity.get("ref_id"):
+        return None
+    try:
+        from agent.spec_service import effective_specs
+        return effective_specs(entity["ref_type"], entity["ref_id"])
+    except Exception:
+        logger.warning("그래프 개체의 사양 값을 읽지 못함: %s", entity.get("id"), exc_info=True)
+        return None
 
 
 @router.get("/search")

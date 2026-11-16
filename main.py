@@ -120,9 +120,9 @@ async def lifespan(app: FastAPI):
     # 사양 DB의 제품·상위 모델·제품-부품 연결을 문서 그래프에 심는다 (spec 관계만 다시 넣는다). 실패해도 서버는 뜬다
     if config.GRAPH_SPEC_SEED_ENABLED:
         try:
-            logger.info("문서 그래프 사양 DB 심기: %s", graph_repo.seed_specs())
+            graph_repo.project_specs()  # 요약·걸린 시간은 저장소가 로그에 남긴다
         except Exception:
-            logger.exception("문서 그래프 사양 DB 심기 실패")
+            logger.exception("문서 그래프 사양 DB 투영 실패")
     else:
         logger.info("문서 그래프 사양 DB 심기 꺼짐 (GRAPH_SPEC_SEED_ENABLED=0)")
 

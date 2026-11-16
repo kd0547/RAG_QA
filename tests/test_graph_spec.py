@@ -173,12 +173,13 @@ def _relations(db, origin=None):
     return [tuple(r) for r in rows]
 
 
-def test_seed_products_variants_and_linked_components_only(g):
-    summary = g.graph.seed_specs()
+def test_project_products_variants_and_all_components(g):
+    summary = g.graph.project_specs()
 
     entities = _entities(g.db)
-    assert {"A650", "A650-GA70-PU02", "N5800", "Samsung 980 500GB", "Samsung 990 PRO 1TB"} == set(entities)
-    assert "WD SN770 1TB" not in entities  # 연결되지 않은 부품은 심지 않는다
+    # 부품은 연결 여부와 관계없이 모두 노드다 (GR4-1)
+    assert {"A650", "A650-GA70-PU02", "N5800", "Samsung 980 500GB", "Samsung 990 PRO 1TB", "WD SN770 1TB"} == set(entities)
+    assert entities["A650"]["type"] == "product_line" and entities["A650-GA70-PU02"]["type"] == "product"
     assert entities["A650"]["ref_type"] == "product" and entities["A650"]["ref_id"] == g.a650["id"]
     assert entities["Samsung 980 500GB"]["ref_type"] == "component"
     assert _relations(g.db) == [
@@ -186,7 +187,9 @@ def test_seed_products_variants_and_linked_components_only(g):
         ("A650", "has_component", "Samsung 990 PRO 1TB", "spec", 1),
         ("A650-GA70-PU02", "variant_of", "A650", "spec", 0),
     ]
-    assert summary == {"products": 3, "components": 2, "variant_of": 1, "has_component": 2, "blocked": 0}
+    assert {k: v for k, v in summary.items() if k != "seconds"} == {
+        "product_lines": 1, "products": 2, "components": 3, "value_nodes": 0, "variant_of": 1, "has_component": 2,
+        "has_spec": 0, "entity_relations": 0, "skipped": 0, "blocked": 0}
     # 모델명을 담은 제품 이름만 별칭이 된다 ("Pro"는 아무 질문에나 걸린다)
     assert [e["name"] for e in g.graph.find_entities("N5800 14세대 노트북 무게")] == ["N5800"]
     assert g.graph.find_entities("Windows 11 Pro 지원") == []
@@ -197,8 +200,8 @@ def test_seed_reuses_extracted_entity_and_is_idempotent(g):
     g.graph.replace_page(file_id, 1, PageGraph(entities=[ExtractedEntity(type="product", name="N5800")]))
     before = _entities(g.db)["N5800"]["id"]
 
-    g.graph.seed_specs()
-    g.graph.seed_specs()
+    g.graph.project_specs()
+    g.graph.project_specs()
 
     entities = _entities(g.db)
     assert entities["N5800"]["id"] == before and entities["N5800"]["ref_id"] == g.n5800["id"]
@@ -206,7 +209,7 @@ def test_seed_reuses_extracted_entity_and_is_idempotent(g):
 
 
 def test_reextract_keeps_spec_relations_and_unlink_removes_them(g):
-    g.graph.seed_specs()
+    g.graph.project_specs()
     file_id = g.add_file("a650.pdf", ["A650 SSD Samsung 980 500GB"])
     g.graph.replace_page(file_id, 1, PageGraph(
         entities=[ExtractedEntity(type="product", name="A650"), ExtractedEntity(type="component", name="Samsung 980 500GB")],
@@ -219,27 +222,27 @@ def test_reextract_keeps_spec_relations_and_unlink_removes_them(g):
     assert _entities(g.db)["A650"]["ref_id"] == g.a650["id"]
 
     g.spec.unlink_component(g.a650["id"], g.ssd["id"])
-    g.graph.seed_specs()
+    g.graph.project_specs()
     assert ("A650", "has_component", "Samsung 980 500GB", "spec", 0) not in _relations(g.db)
     # 문서에도 안 나오지만 사양 DB 대상을 가리키므로 개체는 남는다
     assert "Samsung 980 500GB" in _entities(g.db)
 
 
 def test_deleted_spec_relation_is_not_reseeded(g):
-    g.graph.seed_specs()
+    g.graph.project_specs()
     with g.db.get_conn() as conn:
         relation_id = conn.execute("select id from graph_relation where type = 'variant_of'").fetchone()[0]
     g.graph.delete_relation(relation_id)
 
-    summary = g.graph.seed_specs()
+    summary = g.graph.project_specs()
 
     assert all(r[1] != "variant_of" for r in _relations(g.db)) and summary["blocked"] == 1
 
 
 def test_deleted_product_ref_is_cleared(g):
-    g.graph.seed_specs()
+    g.graph.project_specs()
     g.spec.delete_product(g.n5800["id"])
-    g.graph.seed_specs()
+    g.graph.project_specs()
     assert "N5800" not in _entities(g.db)  # 문서에도 안 나오고 관계도 없으면 정리된다
 
 
@@ -297,7 +300,7 @@ def _mentions(db, name):
 
 
 def test_two_documents_with_different_notations_attach_to_one_entity(g, monkeypatch):
-    g.graph.seed_specs()
+    g.graph.project_specs()
     llm = FakeLLM({
         "A650 Pro": PageGraph(entities=[ExtractedEntity(type="product", name="A650-GA70-PU02", aliases=["A650 Pro"])]),
         "A650-GA70-PU02 KC": PageGraph(entities=[ExtractedEntity(type="product", name="A650-GA70-PU02")]),
@@ -378,13 +381,14 @@ def docs(g):
     variant_doc = g.add_file("pu02_quote.pdf", ["N5800-GB70-PU02 견적"])
     g.graph.replace_page(variant_doc, 1, PageGraph(entities=[ExtractedEntity(type="product", name="N5800-GB70-PU02")]),
                          link_specs=True)
-    g.graph.seed_specs()
+    g.graph.project_specs()
     return g
 
 
 def test_graph_search_matched_has_spec_ref(docs):
     result = service.search_graph("N5800 무게")
-    assert result["matched"] == [{"id":docs.graph.find_entities('N5800')[0]['id'], "name": "N5800", "type": "product", "ref_type": "product", "ref_id": docs.n5800["id"]}]
+    # 하위 모델(N5800-GB70-PU02)이 있으므로 N5800은 제품군이다 (GR4-2)
+    assert result["matched"] == [{"id":docs.graph.find_entities('N5800')[0]['id'], "name": "N5800", "type": "product_line", "ref_type": "product", "ref_id": docs.n5800["id"]}]
 
 
 def test_n5800_and_variant_are_different_entities(docs):

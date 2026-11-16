@@ -29,6 +29,10 @@ def _migrate(conn):
             "display_name": "TEXT", "revision": "INTEGER NOT NULL DEFAULT 1",
             "updated_at": "TEXT", "deleted_at": "TEXT",
             "merged_into_id": "INTEGER REFERENCES graph_entity(id)",
+            # 사람이 종류를 바꾼 노드 (사양 투영이 종류를 되돌리지 않는다, GR4-2)
+            "type_locked": "INTEGER NOT NULL DEFAULT 0",
+            # 사양 값 노드의 값 키 (ref_type='spec_attribute', ref_id=속성 키와 함께 노드를 가리킨다, GR4-4)
+            "ref_value": "TEXT",
         },
         "graph_relation": {
             "source_key": "TEXT NOT NULL DEFAULT ''",
@@ -120,9 +124,11 @@ def _migrate(conn):
       JOIN graph_entity d ON d.type=b.dst_type AND d.norm=b.dst_norm""")
     conn.execute("""UPDATE graph_entity SET manual_retained=1 WHERE id IN
       (SELECT src_id FROM graph_exclusion UNION SELECT dst_id FROM graph_exclusion)""")
-    conn.execute("""CREATE VIEW IF NOT EXISTS effective_graph_entity AS SELECT
-      id,type,coalesce(display_name,name) AS name,norm,created_at,ref_type,ref_id,creation_origin,
-      lifecycle_state,manual_retained,display_name,revision,updated_at,deleted_at,merged_into_id
+    conn.execute("DROP VIEW IF EXISTS effective_graph_relation")
+    conn.execute("DROP VIEW IF EXISTS effective_graph_entity")
+    conn.execute("""CREATE VIEW effective_graph_entity AS SELECT
+      id,type,coalesce(display_name,name) AS name,norm,created_at,ref_type,ref_id,ref_value,creation_origin,
+      lifecycle_state,manual_retained,display_name,revision,updated_at,deleted_at,merged_into_id,type_locked
       FROM graph_entity WHERE lifecycle_state='active'""")
     conn.execute('DROP VIEW IF EXISTS effective_graph_relation')
     conn.execute("""CREATE VIEW effective_graph_relation AS SELECT r.* FROM graph_relation r

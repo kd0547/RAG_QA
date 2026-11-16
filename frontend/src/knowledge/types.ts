@@ -53,7 +53,20 @@ export interface GraphRelation {
     target_name: string;
 }
 
+/** 사양 DB 값 하나 (agent.spec_service.effective_specs) */
+export interface SpecValueItem {
+    spec_value_id: number; attribute_key: string; attribute_name: string; category: string; data_type: string; unit: string;
+    value_text: string; value_num: number | null; is_option: number | boolean; inherited_from: string | null; via_component: string | null;
+}
+export interface HierarchyItem { id: number; name: string; type: EntityType }
+
 export interface GraphEntityDetail {
+    /** 모델 계층 (variant_of): 상위 경로(루트부터)와 바로 아래 하위 모델 */
+    hierarchy?: { ancestors: HierarchyItem[]; children: HierarchyItem[] };
+    /** 사양 DB 제품·부품 노드의 그때 값. 읽지 못하면 null */
+    spec?: { values: SpecValueItem[] } | null;
+    /** 사양 값 노드의 속성 정보 */
+    spec_attribute?: { key: string; name: string; unit: string; data_type: string; category: string; value_key: string | null; value_num: number | null } | null;
     revision: number;
     ref_type: string | null;
     ref_id: string | null;

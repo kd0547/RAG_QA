@@ -32,7 +32,7 @@ def spec_names() -> dict | None:
 def known_names(names: dict | None, text: str) -> list[dict] | None:
     """추출 프롬프트에 넘길 정식 이름 (지시서 H3). 제품은 전부, 부품은 그 페이지에 정규화 문자열로 나오는 것만.
 
-    제품 이름은 모델명을 담을 때만 다른 표기로 넣는다 (seed_specs의 별칭 규칙과 같다).
+    제품 이름은 모델명을 담을 때만 다른 표기로 넣는다 (project_specs의 별칭 규칙과 같다).
     """
     if names is None:
         return None
@@ -143,7 +143,15 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
     term_of: dict[int, int] = {e["id"]: e["id"] for e in matched}
     target_ids = list(term_of)
 
-    relations = graph_repo.relations_of(target_ids, group_id=group_id, limit=MAX_RELATIONS)
+    # 사양 값 관계(has_spec)는 질문이 사양 값 노드일 때만 싣는다. 나머지는 개수만 (문서·부품·인증 관계를 밀어내지 않게, GR4-9)
+    value_ids = [e["id"] for e in matched if e["type"] == "spec_value"]
+    other_ids = [e["id"] for e in matched if e["type"] != "spec_value"]
+    relations = graph_repo.relations_of(other_ids, group_id=group_id, limit=MAX_RELATIONS, exclude_types=("has_spec",))
+    if value_ids:
+        known = {r["id"] for r in relations}
+        relations += [r for r in graph_repo.relations_of(value_ids, group_id=group_id, limit=MAX_RELATIONS) if r["id"] not in known]
+        relations = relations[:MAX_RELATIONS]
+    spec_values = graph_repo.count_relations(other_ids, "has_spec")
 
     documents: dict[str, dict] = {}
 
@@ -200,6 +208,7 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
             f'{r["source_name"]} -[{r["type"]}]-> {r["target_name"]} ({_evidence(r)})'
             for r in relations
         ],
+        "spec_values": spec_values,
         "documents": [
             {
                 "file_id": d["file_id"],

@@ -11,12 +11,15 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 
 from graph_rag.rules import DEFAULT_VENDOR_PREFIXES, spec_match_keys
 from graph_rag.types import PageGraph, normalize
 from repository.repo_connect import Database
+
+logger = logging.getLogger(__name__)
 
 # 이보다 짧은 표기는 검색어 안에 우연히 들어 있을 수 있어 개체로 쓰지 않는다 (예: "PC", "KC"는 2자라 허용)
 MIN_NORM_LEN = 2
@@ -70,71 +73,20 @@ class GraphRepository:
 
     # ------------------------------------------------------------ 추출 결과 쓰기
 
-    def seed_specs(self) -> dict:
-        """사양 DB의 제품과 제품-부품 연결을 그래프에 심는다 (지시서 H2). 서버 시작 때와 제품·연결이 바뀔 때 부른다.
+    def project_specs(self) -> dict:
+        """사양 DB를 그래프로 투영한다 (지시서 GR4, repository/graph_projection.py). 한 트랜잭션.
 
-        - 제품은 전부: product.model → product 개체(ref_type='product'), 제품 이름은 모델명을 담을 때만 별칭으로.
-          parent_id → variant_of(파생 모델 → 상위 모델).
-        - 부품은 제품에 연결된 것만: product_component → has_component(옵션 여부는 is_option). 연결되지 않은 부품은 심지 않는다.
-        - 심은 관계의 origin은 spec. 매번 spec 관계만 지우고 다시 넣는다. 문서에서 뽑은 관계·사람이 넣은 관계는 건드리지 않고,
-          화면에서 지운 관계(graph_relation_block)는 되살리지 않는다.
-        - 같은 이름(정규화)의 개체가 이미 있으면 새로 만들지 않고 그 개체에 ref_type·ref_id를 단다.
-        - 사양 DB에서 사라진 대상을 가리키는 ref는 지운다 (문서에도 안 나오고 관계도 없으면 개체가 정리된다).
-        넣은 개수를 돌려준다.
+        서버 시작과 사양 저장 API 전부가 부른다. spec 관계만 지우고 다시 넣는다. 요약을 돌려주고 로그에 남긴다.
         """
-        summary = {"products": 0, "components": 0, "variant_of": 0, "has_component": 0, "blocked": 0}
+        import config
+        from repository.graph_projection import project_specs
+
         with self.db.transaction() as conn:
-            conn.execute("DELETE FROM graph_relation WHERE origin = 'spec'")
-            conn.execute("""UPDATE graph_entity SET ref_type = NULL, ref_id = NULL
-                            WHERE ref_type = 'product' AND ref_id NOT IN (SELECT id FROM product)""")
-            conn.execute("""UPDATE graph_entity SET ref_type = NULL, ref_id = NULL
-                            WHERE ref_type = 'component' AND ref_id NOT IN (SELECT id FROM component)""")
-
-            products = conn.execute("SELECT id, model, name, parent_id FROM product ORDER BY model").fetchall()
-            product_entities: dict[str, int] = {}
-            for product in products:
-                entity_id = _link_spec_entity(conn, "product", product["model"], "product", product["id"])
-                if entity_id is None:
-                    continue
-                product_entities[product["id"]] = entity_id
-                summary["products"] += 1
-                name = (product["name"] or "").strip()
-                # 제품 이름은 모델명을 담을 때만 별칭으로 쓴다 ("Home", "Pro" 같은 이름은 아무 질문에나 걸린다)
-                if name and normalize(product["model"]) in normalize(name):
-                    _add_alias(conn, entity_id, name)
-
-            def put(src: int, dst: int, rel_type: str, is_option: bool = False) -> None:
-                if src == dst:
-                    return
-                if _is_blocked(conn, src, dst, rel_type):
-                    summary["blocked"] += 1
-                    return
-                cur = conn.execute(
-                    "INSERT OR IGNORE INTO graph_relation (src_id, dst_id, type, origin, is_option) VALUES (?, ?, ?, 'spec', ?)",
-                    (src, dst, rel_type, int(is_option)),
-                )
-                summary[rel_type] += cur.rowcount
-
-            for product in products:
-                if product["parent_id"] and product["id"] in product_entities and product["parent_id"] in product_entities:
-                    put(product_entities[product["id"]], product_entities[product["parent_id"]], "variant_of")
-
-            links = conn.execute(
-                """SELECT pc.product_id, pc.is_option, c.id AS component_id, c.model
-                   FROM product_component pc JOIN component c ON c.id = pc.component_id
-                   ORDER BY c.model"""
-            ).fetchall()
-            linked_components: set[str] = set()
-            for link in links:
-                if link["product_id"] not in product_entities:
-                    continue
-                component_entity = _link_spec_entity(conn, "component", link["model"], "component", link["component_id"])
-                if component_entity is None:
-                    continue
-                linked_components.add(link["component_id"])
-                put(product_entities[link["product_id"]], component_entity, "has_component", bool(link["is_option"]))
-            summary["components"] = len(linked_components)
+            summary = project_specs(conn, config.GRAPH_VENDOR_PREFIXES)
             _prune_orphans(conn)
+        logger.info("사양 DB 그래프 투영: %s", summary)
+        if summary["seconds"] > 2:
+            logger.warning("사양 DB 그래프 투영이 %.1f초 걸렸습니다", summary["seconds"])
         return summary
 
     def extraction_schema(self):
@@ -346,6 +298,7 @@ class GraphRepository:
                 rest = rest.replace(other_alias, "\x00")
             if alias not in rest:
                 best.pop(entity_id, None)
+        _keep_matching_value_nodes(self.db, best, query_norm)
         ranked = sorted(best.values(), key=lambda item: (-item[0], item[1]["id"]))
         result = [{"id": r["id"], "type": r["type"], "name": r["name"], "ref_type": r["ref_type"], "ref_id": r["ref_id"]}
                   for _, r in ranked[:limit]]
@@ -376,8 +329,9 @@ class GraphRepository:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def relations_of(self, entity_ids: list[int], group_id: str | None = None, limit: int = 40) -> list[dict]:
-        """개체에 붙은 관계 (양방향).
+    def relations_of(self, entity_ids: list[int], group_id: str | None = None, limit: int = 40,
+                     exclude_types: tuple[str, ...] = ()) -> list[dict]:
+        """개체에 붙은 관계 (양방향). exclude_types의 관계는 뺀다 (graph_search가 has_spec을 뺀다, GR4-9).
 
         group_id를 주면 그 그룹 문서를 근거로 한 관계와 근거 문서 없이 사람이 넣은 관계만 본다.
         """
@@ -388,6 +342,9 @@ class GraphRepository:
         params: list = [*entity_ids, *entity_ids]
         if group_id:
             params.append(group_id)
+        if exclude_types:
+            group_sql += f" AND r.type NOT IN ({','.join('?' * len(exclude_types))})"
+            params.extend(exclude_types)
         with self.db.get_conn() as conn:
             rows = conn.execute(
                 f"""SELECT {_RELATION_COLUMNS} {_RELATION_JOINS}
@@ -397,6 +354,36 @@ class GraphRepository:
                 (*params, limit),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def count_relations(self, entity_ids: list[int], rel_type: str) -> int:
+        """개체에서 나가는 rel_type 관계 수 (graph_search의 spec_values 개수)."""
+        if not entity_ids:
+            return 0
+        marks = ",".join("?" * len(entity_ids))
+        with self.db.get_conn() as conn:
+            return conn.execute(f"SELECT count(*) FROM effective_graph_relation WHERE type=? AND src_id IN ({marks})",
+                                (rel_type, *entity_ids)).fetchone()[0]
+
+    def hierarchy(self, entity_id: int) -> dict:
+        """모델 계층 (GR4-2): 위로 가는 상위 경로(루트부터)와 바로 아래 하위 모델."""
+        with self.db.get_conn() as conn:
+            ancestors: list[dict] = []
+            seen, current = {entity_id}, entity_id
+            for _ in range(10):
+                row = conn.execute("""SELECT p.id, p.name, p.type FROM effective_graph_relation r
+                                      JOIN effective_graph_entity p ON p.id = r.dst_id
+                                      WHERE r.type = 'variant_of' AND r.src_id = ? ORDER BY p.name LIMIT 1""",
+                                   (current,)).fetchone()
+                if row is None or row["id"] in seen:
+                    break
+                ancestors.insert(0, dict(row))
+                seen.add(row["id"])
+                current = row["id"]
+            children = [dict(r) for r in conn.execute(
+                """SELECT DISTINCT c.id, c.name, c.type FROM effective_graph_relation r
+                   JOIN effective_graph_entity c ON c.id = r.src_id
+                   WHERE r.type = 'variant_of' AND r.dst_id = ? ORDER BY c.name""", (entity_id,))]
+        return {"ancestors": ancestors, "children": children}
 
     def mentions_of(self, entity_ids: list[int], group_id: str | None = None) -> list[dict]:
         """개체가 나온 페이지와 그 파일 정보."""
@@ -467,6 +454,16 @@ class GraphRepository:
         entity["mentions"] = [
             {k: m[k] for k in ("file_id", "page", "original_name")} for m in self.mentions_of([entity_id])
         ]
+        entity["hierarchy"] = self.hierarchy(entity_id)
+        if entity.get("ref_type") == "spec_attribute":
+            with self.db.get_conn() as conn:
+                attribute = conn.execute("SELECT key, name, unit, data_type, category FROM spec_attribute WHERE key = ?",
+                                         (entity["ref_id"],)).fetchone()
+                sample = conn.execute("""SELECT v.value_num FROM effective_graph_relation r
+                    JOIN spec_value v ON 'spec:value:' || v.id = r.source_key
+                    WHERE r.dst_id = ? AND r.type = 'has_spec' LIMIT 1""", (entity_id,)).fetchone()
+            entity["spec_attribute"] = {**dict(attribute), "value_key": entity.get("ref_value"),
+                                        "value_num": sample["value_num"] if sample else None} if attribute else None
         from graph_rag.edit_service import EffectiveGraphService
         service = EffectiveGraphService(self.db)
         entity['properties'] = service.properties(entity_id)
@@ -482,14 +479,20 @@ class GraphRepository:
         types: list[str] | None = None,
         file_id: str | None = None,
         limit: int = 150,
+        spec_values: str = "neighbors",
+        hide_isolated_spec: bool = True,
     ) -> dict:
         """그래프 화면용 노드·엣지.
 
         - entity_id가 있으면 그 개체에서 depth 단계까지 이어진 개체 (중심 개체는 종류 필터와 상관없이 넣는다)
         - 없으면 관계가 많은 개체부터 limit개. file_id를 주면 그 문서에 나오거나 그 문서를 근거로 한 개체만
+        - spec_values='neighbors'(기본): 사양 값 노드는 고른 노드의 바로 이웃으로만 보이고 거기서 더 펼치지 않는다.
+          전체 보기에는 넣지 않는다 (종류 필터로 사양 값을 고르면 넣는다). 'all'이면 다른 노드와 같다 (GR4-8)
+        - hide_isolated_spec: 전체 보기에서 관계·등장 위치가 없는 사양 노드를 뺀다
         엣지는 고른 노드끼리의 관계만 돌려준다.
         """
         type_set = set(types or []) or None
+        values_near = spec_values != "all"
         with self.db.get_conn() as conn:
             truncated = False
             if entity_id is not None:
@@ -498,7 +501,8 @@ class GraphRepository:
                 ids: list[int] = [entity_id]
                 seen = {entity_id}
                 frontier = [entity_id]
-                for _ in range(max(1, depth)):
+                center_is_value = conn.execute("SELECT type FROM graph_entity WHERE id=?", (entity_id,)).fetchone()[0] == "spec_value"
+                for step in range(max(1, depth)):
                     if not frontier or len(ids) >= limit:
                         break
                     marks = ",".join("?" * len(frontier))
@@ -515,12 +519,15 @@ class GraphRepository:
                         for other, other_type in ((row["src_id"], row["src_type"]), (row["dst_id"], row["dst_type"])):
                             if other in seen or (type_set and other_type not in type_set):
                                 continue
+                            if values_near and other_type == "spec_value" and step > 0:
+                                continue  # 사양 값 노드는 중심 개체의 바로 이웃으로만
                             if len(ids) >= limit:
                                 truncated = True
                                 break
                             seen.add(other)
                             ids.append(other)
-                            next_frontier.append(other)
+                            if not (values_near and other_type == "spec_value") or center_is_value:
+                                next_frontier.append(other)
                     frontier = next_frontier
             else:
                 conditions, params = [], []
@@ -534,6 +541,12 @@ class GraphRepository:
                             OR e.id IN (SELECT dst_id FROM effective_graph_relation WHERE file_id = ?))"""
                     )
                     params.extend([file_id] * 3)
+                if values_near and not (type_set and "spec_value" in type_set):
+                    conditions.append("e.type != 'spec_value'")
+                if hide_isolated_spec:
+                    conditions.append("""(e.ref_id IS NULL
+                        OR EXISTS (SELECT 1 FROM effective_graph_relation r WHERE r.src_id = e.id OR r.dst_id = e.id)
+                        OR EXISTS (SELECT 1 FROM graph_mention m WHERE m.entity_id = e.id))""")
                 where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
                 rows = conn.execute(
                     f"""SELECT e.id,
@@ -582,6 +595,32 @@ class GraphRepository:
 
 
 # ------------------------------------------------------------ 내부 함수
+
+def _keep_matching_value_nodes(db, best: dict, query_norm: str) -> None:
+    """사양 값 노드 후보는 값 표기와 속성 이름(한 어절 이상)이 질문에 있을 때만 남긴다 (GR4-9).
+
+    "메모리 64GB" → "메모리 용량 64GB"는 남고 "메모리 용량 16GB"·"SSD 용량 64GB"는 빠진다.
+    노드 이름 전체가 질문에 들어 있으면 그대로 남긴다.
+    """
+    value_ids = [entity_id for entity_id, (_, row) in best.items() if row["type"] == "spec_value"]
+    if not value_ids:
+        return
+    marks = ",".join("?" * len(value_ids))
+    with db.get_conn() as conn:
+        info = {r["id"]: r for r in conn.execute(
+            f"""SELECT e.id, e.ref_value, a.name AS attribute_name FROM graph_entity e
+                LEFT JOIN spec_attribute a ON e.ref_type = 'spec_attribute' AND a.key = e.ref_id
+                WHERE e.id IN ({marks})""", value_ids)}
+    for entity_id in value_ids:
+        _, row = best[entity_id]
+        if row["alias_norm"] in query_norm:
+            continue
+        item = info.get(entity_id)
+        words = [normalize(w) for w in re.split(r"[\s/()]+", (item["attribute_name"] or "") if item else "") if len(normalize(w)) >= 2]
+        value = (item["ref_value"] or "") if item else ""
+        if not (value and value in query_norm and any(w in query_norm for w in words)):
+            best.pop(entity_id, None)
+
 
 def _entity_row(conn: sqlite3.Connection, entity_id: int | None) -> sqlite3.Row:
     row = None if entity_id is None else conn.execute(
@@ -701,30 +740,6 @@ def _spec_node_index(conn: sqlite3.Connection, vendors=DEFAULT_VENDOR_PREFIXES):
                                WHERE ref_id IS NOT NULL AND lifecycle_state = 'active' ORDER BY id"""):
         index.add(row["id"], row["type"], row["name"], [row["name"], *aliases.get(row["id"], [])], vendors)
     return index
-
-
-def _link_spec_entity(conn: sqlite3.Connection, entity_type: str, name: str, ref_type: str, ref_id: str) -> int | None:
-    """사양 DB 대상 하나를 가리키는 개체 id. 그 대상을 이미 가리키는 개체 → 같은 이름의 개체 → 새 개체 순서로 찾는다.
-
-    모델명이 바뀌었으면 새 모델명을 별칭으로 더한다. 같은 이름의 개체가 이미 다른 대상을 가리키면 바꾸지 않는다.
-    """
-    row = conn.execute(
-        "SELECT id FROM graph_entity WHERE type = ? AND ref_type = ? AND ref_id = ? AND lifecycle_state!='merged' ORDER BY id LIMIT 1",
-        (entity_type, ref_type, ref_id),
-    ).fetchone()
-    if row is not None:
-        _add_alias(conn, row[0], name)
-        return row[0]
-    entity_id = _upsert_entity(conn, entity_type, name)
-    if entity_id is None:
-        return None
-    existing = conn.execute('SELECT ref_type,ref_id FROM graph_entity WHERE id=?',(entity_id,)).fetchone()
-    if existing['ref_id'] is not None and (existing['ref_type'],existing['ref_id']) != (ref_type,ref_id):
-        return None
-    conn.execute(
-        "UPDATE graph_entity SET ref_type = ?, ref_id = ?, creation_origin=CASE WHEN creation_origin='extract' THEN 'spec' ELSE creation_origin END WHERE id = ? AND ref_id IS NULL", (ref_type, ref_id, entity_id)
-    )
-    return entity_id
 
 
 def _prune_orphans(conn: sqlite3.Connection) -> int:

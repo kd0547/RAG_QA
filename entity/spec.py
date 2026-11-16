@@ -184,3 +184,15 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     SpecAttribute("royalty", "로열티", "other", "text", "", "예: Windows 11, NEC", aliases=("royalty", "royalties")),
     SpecAttribute("warranty_years", "보증 기간", "other", "number", "년", aliases=("보증", "보증기간", "보증기한", "보증 기한", "warranty", "warranty period", "a/s")),
 )
+
+
+# ---------- 그래프 투영 (지시서 GR4-5) ----------
+
+# 속성의 그래프 방식: 사양 값 노드 / 대상 노드 / 만들지 않음
+GRAPH_MODES: dict[str, str] = {"value_node": "사양 값 노드", "entity": "대상 노드", "none": "만들지 않음"}
+# 기본으로 대상 노드(부품)를 가리키는 속성
+GRAPH_ENTITY_ATTRIBUTES: tuple[str, ...] = ("cpu_model", "gpu_model", "chipset", "wifi")
+# 이보다 긴 텍스트 값이 있는 속성은 기본으로 노드를 만들지 않는다 (기존 DB는 마이그레이션이 값을 보고 정한다)
+GRAPH_TEXT_NODE_MAX = 40
+# 값이 아직 없는 새 DB에서 기본 속성을 넣을 때 노드를 만들지 않을 서술형 속성 (로컬 사양 DB에서 40자를 넘는 값이 있던 것)
+GRAPH_NONE_ATTRIBUTES: tuple[str, ...] = ("io_ports", "audio", "software", "accessory", "keyboard", "m2_slots", "webcam")

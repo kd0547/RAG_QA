@@ -9,6 +9,7 @@ import { errorText } from './errors';
 import { ORIGIN_META } from './meta';
 import { entityMeta, relationLabel, useGraphSchema } from './schemaContext';
 import { EntityProperties } from './GraphEditing';
+import { ModelHierarchy, SpecAttributeSection, SpecValuesSection } from './SpecPanels';
 import type { GraphEntityDetail, GraphNode, GraphRelation, RelationType } from './types';
 
 /** "그래프에서 고르기": 부모가 다음 노드 클릭을 이 콜백으로 넘긴다 */
@@ -354,6 +355,9 @@ export function EntityPanel({
     if (!entity || entity.id !== entityId) return <p className="p-4 text-[12.5px] text-muted">불러오는 중…</p>;
 
     const meta = entityMeta(schema, entity.type);
+    // 사양 값 노드가 아닌 개체에서는 사양 값 관계(has_spec)를 따로 접어 둔다 (수백 개라 다른 관계를 가린다)
+    const specRelations = entity.type === 'spec_value' ? [] : entity.relations.filter((r) => r.type === 'has_spec');
+    const mainRelations = entity.type === 'spec_value' ? entity.relations : entity.relations.filter((r) => r.type !== 'has_spec');
     const otherAliases = entity.aliases.filter((a) => a !== entity.name);
 
     const rename = async () => {
@@ -429,11 +433,14 @@ export function EntityPanel({
                 </button>
             </div>
 
+            <ModelHierarchy entity={entity} onOpenEntity={onOpenEntity} />
+            <SpecValuesSection entity={entity} />
+            <SpecAttributeSection entity={entity} onOpenEntity={onOpenEntity} />
             <EntityProperties key={entity.id} entity={entity} changed={changed} removed={() => onMerged(entity.id, 0)} />
-            <Section title="관계" count={entity.relations.length}>
-                {entity.relations.length === 0 && <p className="mb-2 text-[12px] text-muted">연결된 관계가 없습니다.</p>}
+            <Section title="관계" count={mainRelations.length}>
+                {mainRelations.length === 0 && <p className="mb-2 text-[12px] text-muted">연결된 관계가 없습니다.</p>}
                 <ul className="space-y-1.5">
-                    {entity.relations.map((r) => (
+                    {mainRelations.map((r) => (
                         <RelationRow
                             key={r.id}
                             relation={r}
@@ -444,6 +451,16 @@ export function EntityPanel({
                         />
                     ))}
                 </ul>
+                {specRelations.length > 0 && (
+                    <details className="mt-2 rounded border border-line">
+                        <summary className="cursor-pointer px-2 py-1 text-[12px] font-semibold">사양 값 관계 <span className="text-muted">{specRelations.length}</span></summary>
+                        <ul className="space-y-1.5 p-2">
+                            {specRelations.map((r) => (
+                                <RelationRow key={r.id} relation={r} perspectiveId={entity.id} onOpenEntity={onOpenEntity} onReplaced={changed} onDeleted={changed} />
+                            ))}
+                        </ul>
+                    </details>
+                )}
                 <div className="mt-2.5">
                     {schema.editing_enabled && <AddRelationForm key={entity.id} entity={entity} onCreated={changed} requestPick={requestPick} />}
                 </div>

@@ -9,7 +9,7 @@ import { EntityPicker, TypeDot } from './EntityPicker';
 import { EdgePanel, EntityPanel, type RequestPick } from './EntityPanel';
 import { errorText } from './errors';
 import { GraphCanvas, type Selection } from './GraphCanvas';
-import { layoutGraph, type Point } from './layout';
+import { layoutGraph, layoutHierarchy, type Point } from './layout';
 import { GraphSchemaProvider } from './schema';
 import { GraphEditingToolbar } from './GraphEditing';
 import { ORIGIN_META } from './meta';
@@ -68,12 +68,17 @@ function KnowledgeContent() {
     const [stats, setStats] = useState<GraphStats | null>(null);
     const [picking, setPicking] = useState(false);
     const [rebuildState, setRebuildState] = useState<'idle' | 'confirm' | 'sent'>('idle');
+    // 사양 값 노드는 고른 노드의 이웃으로만, 관계 없는 사양 노드 숨기기 (둘 다 기본 켬, 지시서 GR4-8)
+    const [valuesNearOnly, setValuesNearOnly] = useState(true);
+    const [hideIsolatedSpec, setHideIsolatedSpec] = useState(true);
+    // 계층 보기: null이면 자동 (중심 개체가 제품군이면 켬)
+    const [treeChoice, setTreeChoice] = useState<boolean | null>(null);
 
     const positionsRef = useRef(positions);
     const pinnedRef = useRef(new Set<number>());
     const pickCallback = useRef<((node: GraphNode) => void) | null>(null);
     // 보는 범위가 바뀌면 화면을 다시 맞추고, 편집 뒤 다시 불러올 때는 그대로 둔다
-    const queryKey = `${focusId}|${depth}|${types.join(',')}|${fileId}`;
+    const queryKey = `${focusId}|${depth}|${types.join(',')}|${fileId}|${valuesNearOnly}|${hideIsolatedSpec}`;
     const lastQueryKey = useRef('');
 
     useEffect(() => {
@@ -94,9 +99,10 @@ function KnowledgeContent() {
 
     useEffect(() => {
         let ignore = false;
+        const specOptions = { specValues: valuesNearOnly ? 'neighbors' as const : 'all' as const, hideIsolatedSpec };
         graphApi.view(focusId !== null
-            ? { entityId: focusId, depth, types, limit: FOCUS_LIMIT }
-            : { types, fileId: fileId || null, limit: OVERVIEW_LIMIT },
+            ? { entityId: focusId, depth, types, limit: FOCUS_LIMIT, ...specOptions }
+            : { types, fileId: fileId || null, limit: OVERVIEW_LIMIT, ...specOptions },
         ).then((view) => {
             if (ignore) return;
             const queryChanged = lastQueryKey.current !== queryKey;
@@ -104,7 +110,10 @@ function KnowledgeContent() {
             const ids = view.nodes.map((n) => n.id);
             const previous = queryChanged ? new Map<number, Point>() : positionsRef.current;
             if (queryChanged) pinnedRef.current = new Set();
-            setPositions(layoutGraph(ids, view.edges, previous, pinnedRef.current));
+            const base = layoutGraph(ids, view.edges, previous, pinnedRef.current);
+            const center = view.nodes.find((n) => n.id === focusId);
+            const tree = treeChoice ?? center?.type === 'product_line';
+            setPositions(tree && queryChanged ? layoutHierarchy(ids, view.edges, base, pinnedRef.current) : base);
             setData(view);
             setLoadError('');
             if (queryChanged) setFitKey((k) => k + 1);
@@ -147,6 +156,16 @@ function KnowledgeContent() {
     }, []);
 
     const nodeById = useMemo(() => new Map((data?.nodes ?? []).map((n) => [n.id, n])), [data]);
+    const treeOn = treeChoice ?? (focusId !== null && nodeById.get(focusId)?.type === 'product_line');
+    const hasTree = (data?.edges ?? []).some((e) => e.type === 'variant_of');
+    const toggleTree = () => {
+        const next = !treeOn;
+        setTreeChoice(next);
+        if (!data) return;
+        const ids = data.nodes.map((n) => n.id);
+        setPositions((prev) => (next ? layoutHierarchy(ids, data.edges, prev, pinnedRef.current) : layoutGraph(ids, data.edges, new Map(), pinnedRef.current)));
+        setFitKey((k) => k + 1);
+    };
 
     const focus = (id: number | null) => {
         setFocusId(id);
@@ -226,6 +245,12 @@ function KnowledgeContent() {
                                 {files.map((f) => <option key={f.file_id} value={f.file_id}>{f.original_name}</option>)}
                             </select>
                         )}
+                        <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-lg border border-line bg-white px-2 py-1 text-[11.5px]">
+                            {hasTree && <button type="button" aria-pressed={treeOn} onClick={toggleTree}
+                                className={`h-6 rounded-md px-2 font-semibold ${treeOn ? 'bg-ink text-white' : 'hover:bg-chip'}`}>계층 보기</button>}
+                            <label className="flex items-center gap-1"><input type="checkbox" checked={valuesNearOnly} onChange={(e) => setValuesNearOnly(e.target.checked)} /> 사양 값은 이웃만</label>
+                            <label className="flex items-center gap-1"><input type="checkbox" checked={hideIsolatedSpec} onChange={(e) => setHideIsolatedSpec(e.target.checked)} /> 관계 없는 사양 노드 숨기기</label>
+                        </div>
                         <div role="group" aria-label="개체 종류 거르기" className="pointer-events-auto flex flex-wrap gap-1">
                             {typeKeys(schema, true).map((t) => {
                                 const active = types.includes(t);
@@ -322,7 +347,7 @@ function KnowledgeContent() {
                     {/* 범례 */}
                     {data && !isEmpty && (
                         <div className="pointer-events-none absolute bottom-3 left-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-divide bg-white/90 px-2.5 py-1.5 text-[11px] text-muted">
-                            {(Object.keys(ORIGIN_META) as RelationOrigin[]).map((origin) => (
+                            {(Object.keys(ORIGIN_META) as RelationOrigin[]).filter((o) => o !== 'seed').map((origin) => (
                                 <span key={origin} className="flex items-center gap-1.5">
                                     <svg width="22" height="6" aria-hidden>
                                         <line x1="0" y1="3" x2="22" y2="3" stroke={ORIGIN_META[origin].stroke} strokeWidth="2" strokeDasharray={ORIGIN_META[origin].dash} />

@@ -59,6 +59,16 @@ def _strip(name: str) -> str:
             return text
 
 
+def strip_trailing_parens(name: str) -> str:
+    """끝 괄호 내용을 뗀다: "NVIDIA GeForce RTX 5070 (105W)" → "NVIDIA GeForce RTX 5070"."""
+    text = (name or "").strip()
+    while True:
+        stripped = _TRAILING_PAREN.sub("", text).strip()
+        if stripped == text or not stripped:
+            return text
+        text = stripped
+
+
 def without_vendor(name: str, vendors=DEFAULT_VENDOR_PREFIXES) -> str | None:
     """첫 단어(또는 두 단어)가 제조사 이름이면 그것을 뺀 이름. 아니면 None."""
     text = (name or "").strip()

@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 
 import config
 import repository
-from entity.spec import ATTRIBUTE_CATEGORIES, COMPONENT_KINDS, DATA_TYPES, PRODUCT_CATEGORIES, PRODUCT_STATUSES
+from entity.spec import (
+    ATTRIBUTE_CATEGORIES, COMPONENT_KINDS, DATA_TYPES, GRAPH_MODES, PRODUCT_CATEGORIES, PRODUCT_STATUSES,
+)
 from repository import spec_repo
 from repository.spec_repository import SpecConflictError, SpecNotFoundError
 
@@ -35,16 +37,16 @@ def _run(action, *args, **kwargs):
 
 
 def reseed_spec_graph(reason: str) -> None:
-    """제품·상위 모델·제품-부품 연결이 바뀌면 문서 그래프의 spec 관계를 다시 심는다 (지시서 H2).
+    """사양이 바뀌면 사양 DB를 그래프로 다시 투영한다 (지시서 GR4-6). 사양 저장 API 전부가 부른다.
 
-    실패해도 사양 저장은 이미 끝났으므로 요청은 성공으로 둔다 (서버를 다시 시작하면 다시 심는다).
+    실패해도 사양 저장은 이미 끝났으므로 요청은 성공으로 둔다 (서버를 다시 시작하면 다시 투영한다).
     """
     if not config.GRAPH_SPEC_SEED_ENABLED:
         return
     try:
-        logger.info("사양 변경(%s) 뒤 문서 그래프 다시 심기: %s", reason, repository.graph_repo.seed_specs())
+        logger.info("사양 변경(%s) 뒤 그래프 다시 투영: %s", reason, repository.graph_repo.project_specs())
     except Exception:
-        logger.exception("사양 변경(%s) 뒤 문서 그래프 다시 심기 실패", reason)
+        logger.exception("사양 변경(%s) 뒤 그래프 다시 투영 실패", reason)
 
 
 # ---------- 메타 ----------
@@ -58,6 +60,7 @@ def get_meta() -> dict:
         "product_categories": PRODUCT_CATEGORIES,
         "product_statuses": PRODUCT_STATUSES,
         "component_kinds": COMPONENT_KINDS,
+        "graph_modes": GRAPH_MODES,
     }
 
 
@@ -82,6 +85,10 @@ class AttributeUpdate(BaseModel):
     sort_order: int | None = None
     # 파생 모델이 상위 모델 값을 물려받아도 되는지. 인증(cert) 분류는 켤 수 없다 (400)
     inheritable: bool | None = None
+    # 그래프 방식 (지시서 GR4-5): value_node | entity | none. entity면 관계 종류·도착 노드 종류
+    graph_mode: str | None = None
+    graph_relation_type: str | None = None
+    graph_entity_type: str | None = None
 
 
 @router.get("/attributes")
@@ -93,6 +100,7 @@ def list_attributes() -> list[dict]:
 def create_attribute(body: AttributeCreate) -> dict:
     attribute = _run(spec_repo.create_attribute, **body.model_dump())
     logger.info("사양 속성 추가: %s", attribute["key"])
+    reseed_spec_graph("속성 추가")
     return attribute
 
 
@@ -100,18 +108,22 @@ def create_attribute(body: AttributeCreate) -> dict:
 def add_default_attributes() -> dict:
     added = spec_repo.add_default_attributes()
     logger.info("기본 사양 속성 추가: %d개", added)
+    reseed_spec_graph("기본 속성 추가")
     return {"added": added}
 
 
 @router.put("/attributes/{key}")
 def update_attribute(key: str, body: AttributeUpdate) -> dict:
-    return _run(spec_repo.update_attribute, key, **body.model_dump(exclude_unset=True))
+    attribute = _run(spec_repo.update_attribute, key, **body.model_dump(exclude_unset=True))
+    reseed_spec_graph("속성 수정")
+    return attribute
 
 
 @router.delete("/attributes/{key}", status_code=204)
 def delete_attribute(key: str) -> None:
     _run(spec_repo.delete_attribute, key)
     logger.info("사양 속성 삭제: %s", key)
+    reseed_spec_graph("속성 삭제")
 
 
 # ---------- 제품 ----------
@@ -215,6 +227,7 @@ def list_components(kind: str | None = None) -> list[dict]:
 def create_component(body: ComponentCreate) -> dict:
     component = _run(spec_repo.create_component, **body.model_dump())
     logger.info("부품 등록: %s %s (%s)", component["kind"], component["model"], component["id"])
+    reseed_spec_graph("부품 등록")
     return component
 
 
@@ -229,8 +242,7 @@ def get_component(component_id: str) -> dict:
 @router.put("/components/{component_id}")
 def update_component(component_id: str, body: ComponentUpdate) -> dict:
     component = _run(spec_repo.update_component, component_id, **body.model_dump(exclude_unset=True))
-    if component.get("product_count"):
-        reseed_spec_graph("연결된 부품 수정")
+    reseed_spec_graph("부품 수정")  # 부품은 연결과 관계없이 모두 노드다 (GR4-1)
     return component
 
 
@@ -267,14 +279,19 @@ class SpecValueUpdate(BaseModel):
 
 @router.post("/values", status_code=201)
 def add_spec_value(body: SpecValueCreate) -> dict:
-    return _run(spec_repo.add_spec, **body.model_dump())
+    value = _run(spec_repo.add_spec, **body.model_dump())
+    reseed_spec_graph("사양 값 추가")
+    return value
 
 
 @router.put("/values/{spec_id}")
 def update_spec_value(spec_id: int, body: SpecValueUpdate) -> dict:
-    return _run(spec_repo.update_spec, spec_id, **body.model_dump(exclude_unset=True))
+    value = _run(spec_repo.update_spec, spec_id, **body.model_dump(exclude_unset=True))
+    reseed_spec_graph("사양 값 수정")
+    return value
 
 
 @router.delete("/values/{spec_id}", status_code=204)
 def delete_spec_value(spec_id: int) -> None:
     _run(spec_repo.delete_spec, spec_id)
+    reseed_spec_graph("사양 값 삭제")

@@ -18,6 +18,9 @@ from entity.spec import (
     COMPONENT_KINDS,
     DATA_TYPES,
     DEFAULT_ATTRIBUTES,
+    GRAPH_ENTITY_ATTRIBUTES,
+    GRAPH_MODES,
+    GRAPH_NONE_ATTRIBUTES,
     PRODUCT_CATEGORIES,
     PRODUCT_STATUSES,
 )
@@ -163,6 +166,7 @@ class SpecRepository:
         values = _attribute_values(key, name, category, data_type, unit, description, sort_order)
         with self.db.transaction() as conn:
             _insert_attribute(conn, values)
+            _default_graph_mode(conn, [values[0]])
         return {**self.get_attribute(values[0]), "usage_count": 0}
 
     def update_attribute(self, key: str, **fields) -> dict:
@@ -184,8 +188,20 @@ class SpecRepository:
         inheritable = int(bool(merged.get("inheritable") or 0))
         if inheritable and category == "cert":
             raise ValueError("인증·규격(cert) 속성은 상위 모델 값을 물려받을 수 없습니다. 인증은 모델마다 따로 받습니다.")
+        graph_mode = merged.get("graph_mode") or "value_node"
+        if graph_mode not in GRAPH_MODES:
+            raise ValueError(f"그래프 방식이 올바르지 않습니다: {graph_mode} (가능: {', '.join(GRAPH_MODES)})")
+        graph_relation_type = graph_entity_type = None
+        if graph_mode == "entity":
+            graph_relation_type = (merged.get("graph_relation_type") or "has_component").strip()
+            graph_entity_type = (merged.get("graph_entity_type") or "component").strip()
 
         with self.db.transaction() as conn:
+            if graph_mode == "entity":
+                if not conn.execute("SELECT 1 FROM graph_relation_type WHERE key = ?", (graph_relation_type,)).fetchone():
+                    raise ValueError(f"그래프 관계 종류가 없습니다: {graph_relation_type}")
+                if not conn.execute("SELECT 1 FROM graph_entity_type WHERE key = ?", (graph_entity_type,)).fetchone():
+                    raise ValueError(f"그래프 개체 종류가 없습니다: {graph_entity_type}")
             if data_type != current["data_type"]:
                 rows = conn.execute("SELECT id, value_text FROM spec_value WHERE attribute_key = ?", (key,)).fetchall()
                 for row in rows:
@@ -198,10 +214,11 @@ class SpecRepository:
                 """
                 UPDATE spec_attribute
                 SET name = ?, category = ?, data_type = ?, unit = ?, description = ?, sort_order = ?, inheritable = ?,
-                    updated_at = ?
+                    graph_mode = ?, graph_relation_type = ?, graph_entity_type = ?, updated_at = ?
                 WHERE key = ?
                 """,
-                (name, category, data_type, unit, description, sort_order, inheritable, _now(), key),
+                (name, category, data_type, unit, description, sort_order, inheritable,
+                 graph_mode, graph_relation_type, graph_entity_type, _now(), key),
             )
             usage = conn.execute("SELECT COUNT(*) FROM spec_value WHERE attribute_key = ?", (key,)).fetchone()[0]
         return {**self.get_attribute(key), "usage_count": usage}
@@ -229,6 +246,7 @@ class SpecRepository:
                      attribute.unit, attribute.description, index),
                 )
                 inserted += cursor.rowcount
+            _default_graph_mode(conn, [a.key for a in DEFAULT_ATTRIBUTES])
         return inserted
 
     # ---------- 제품 ----------
@@ -728,6 +746,23 @@ class SpecRepository:
 
         summary["owners"] = [oid for oid in owner_ids if oid]
         return summary
+
+
+def _default_graph_mode(conn: sqlite3.Connection, keys: list[str]) -> None:
+    """새로 넣은 속성의 기본 그래프 방식 (지시서 GR4-5). cpu_model 등은 entity, 서술형 속성(io_ports 등)은 none.
+
+    값이 없는 새 속성만 바꾼다 (이미 쓰던 속성의 방식은 R&D가 정한 값을 둔다).
+    """
+    for key in keys:
+        if key in GRAPH_NONE_ATTRIBUTES:
+            conn.execute("""UPDATE spec_attribute SET graph_mode='none'
+                            WHERE key=? AND graph_mode='value_node' AND graph_relation_type IS NULL
+                              AND NOT EXISTS (SELECT 1 FROM spec_value v WHERE v.attribute_key=spec_attribute.key)""", (key,))
+        if key in GRAPH_ENTITY_ATTRIBUTES:
+            conn.execute("""UPDATE spec_attribute SET graph_mode='entity', graph_relation_type='has_component',
+                            graph_entity_type='component'
+                            WHERE key=? AND graph_mode='value_node' AND graph_relation_type IS NULL
+                              AND NOT EXISTS (SELECT 1 FROM spec_value v WHERE v.attribute_key=spec_attribute.key)""", (key,))
 
 
 def _check_parent(conn: sqlite3.Connection, product_id: str | None, parent_id: str | None) -> None:

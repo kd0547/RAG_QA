@@ -143,3 +143,52 @@ export function bounds(points: Iterable<Point>, padding = 60): { minX: number; m
         height: Math.max(maxY - minY + padding * 2, 160),
     };
 }
+
+/**
+ * 계층 보기 (지시서 GR4-2): variant_of(하위 → 상위)를 위→아래 트리로 놓는다. 다른 노드는 기본 배치를 트리 아래로 옮긴다.
+ * 고정(pinned)한 노드는 그대로 둔다.
+ */
+export function layoutHierarchy(
+    nodeIds: number[],
+    edges: (LayoutEdge & { type: string })[],
+    base: Map<number, Point>,
+    pinned: Set<number> = new Set(),
+): Map<number, Point> {
+    const present = new Set(nodeIds);
+    const parentOf = new Map<number, number>();
+    const childrenOf = new Map<number, number[]>();
+    for (const e of edges) {
+        if (e.type !== 'variant_of' || !present.has(e.source) || !present.has(e.target) || e.source === e.target) continue;
+        if (parentOf.has(e.source)) continue;
+        parentOf.set(e.source, e.target);
+        childrenOf.set(e.target, [...(childrenOf.get(e.target) ?? []), e.source]);
+    }
+    const inTree = new Set([...parentOf.keys(), ...parentOf.values()]);
+    if (inTree.size === 0) return base;
+    const roots = [...inTree].filter((id) => !parentOf.has(id)).sort((a, b) => a - b);
+    const levels: number[][] = [];
+    const seen = new Set<number>();
+    let current = roots;
+    while (current.length) {
+        levels.push(current);
+        current.forEach((id) => seen.add(id));
+        current = current.flatMap((id) => (childrenOf.get(id) ?? []).filter((c) => !seen.has(c)).sort((a, b) => a - b));
+    }
+    const result = new Map(base);
+    const LEVEL_GAP = 130;
+    const SIBLING_GAP = 160;
+    levels.forEach((row, level) => {
+        row.forEach((id, i) => {
+            if (pinned.has(id)) return;
+            result.set(id, { x: (i - (row.length - 1) / 2) * SIBLING_GAP, y: level * LEVEL_GAP });
+        });
+    });
+    const treeBottom = (levels.length - 1) * LEVEL_GAP;
+    const others = nodeIds.filter((id) => !seen.has(id) && !pinned.has(id));
+    const minY = Math.min(...others.map((id) => base.get(id)?.y ?? 0));
+    for (const id of others) {
+        const p = base.get(id);
+        if (p) result.set(id, { x: p.x, y: p.y - minY + treeBottom + LEVEL_GAP * 1.5 });
+    }
+    return result;
+}

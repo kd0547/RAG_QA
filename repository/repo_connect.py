@@ -65,6 +65,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     attribute_columns = {row["name"] for row in conn.execute("PRAGMA table_info(spec_attribute)")}
     if attribute_columns and "inheritable" not in attribute_columns:
         conn.execute("ALTER TABLE spec_attribute ADD COLUMN inheritable INTEGER NOT NULL DEFAULT 0")
+    _migrate_spec_graph_mode(conn, attribute_columns)
     _migrate_task_reviews_action(conn)
     # 초안의 근거 검증 결과 (agent/validation.py)
     task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
@@ -89,6 +90,29 @@ def _migrate(conn: sqlite3.Connection) -> None:
     from repository.graph_migration import migrate_graph_editing
     migrate_graph_editing(conn)
     conn.commit()
+
+
+def _migrate_spec_graph_mode(conn: sqlite3.Connection, attribute_columns: set[str]) -> None:
+    """속성마다 그래프 방식 (지시서 GR4-5). 열이 새로 생길 때만 기본값을 넣는다 (R&D가 바꾼 값을 덮지 않는다).
+
+    graph_mode: value_node(사양 값 노드) | entity(대상 노드) | none(만들지 않음)
+    기본: cpu_model·gpu_model·chipset·wifi → entity(has_component → component), 숫자·예/아니오 → value_node,
+    텍스트 중 40자를 넘는 값이 있는 것 → none, 나머지 텍스트 → value_node
+    """
+    if not attribute_columns or "graph_mode" in attribute_columns:
+        return
+    from entity.spec import GRAPH_ENTITY_ATTRIBUTES, GRAPH_TEXT_NODE_MAX
+
+    conn.execute("ALTER TABLE spec_attribute ADD COLUMN graph_mode TEXT NOT NULL DEFAULT 'value_node'")
+    conn.execute("ALTER TABLE spec_attribute ADD COLUMN graph_relation_type TEXT")
+    conn.execute("ALTER TABLE spec_attribute ADD COLUMN graph_entity_type TEXT")
+    marks = ",".join("?" * len(GRAPH_ENTITY_ATTRIBUTES))
+    conn.execute(f"""UPDATE spec_attribute SET graph_mode='entity', graph_relation_type='has_component',
+                     graph_entity_type='component' WHERE key IN ({marks})""", tuple(GRAPH_ENTITY_ATTRIBUTES))
+    conn.execute(f"""UPDATE spec_attribute SET graph_mode='none'
+                     WHERE data_type='text' AND key NOT IN ({marks})
+                       AND EXISTS (SELECT 1 FROM spec_value v WHERE v.attribute_key=spec_attribute.key
+                                   AND length(trim(v.value_text)) > ?)""", (*GRAPH_ENTITY_ATTRIBUTES, GRAPH_TEXT_NODE_MAX))
 
 
 # task_reviews.action에 허용하는 값 (schema.sql의 CHECK와 같아야 한다)

@@ -18,6 +18,10 @@ export interface ViewQuery {
     types?: EntityType[];
     fileId?: string | null;
     limit?: number;
+    /** 사양 값 노드: 고른 노드의 이웃만(기본) / 모두 (지시서 GR4-8) */
+    specValues?: 'neighbors' | 'all';
+    /** 관계 없는 사양 노드 숨기기 (기본 켬) */
+    hideIsolatedSpec?: boolean;
 }
 
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -41,6 +45,8 @@ export const graphApi = {
             types: q.types?.length ? q.types.join(',') : undefined,
             file_id: q.fileId,
             limit: q.limit,
+            spec_values: q.specValues,
+            hide_isolated_spec: q.hideIsolatedSpec === undefined ? undefined : String(q.hideIsolatedSpec),
         })}`);
     },
 
