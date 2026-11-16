@@ -14,7 +14,7 @@ import { GraphSchemaProvider } from './schema';
 import { GraphEditingToolbar } from './GraphEditing';
 import { ORIGIN_META } from './meta';
 import { entityMeta, typeKeys, useGraphSchema } from './schemaContext';
-import type { EntityType, GraphNode, GraphRelation, GraphStats, GraphView, RelationOrigin } from './types';
+import type { EntityType, GraphEdge, GraphNode, GraphRelation, GraphStats, GraphView, RelationOrigin } from './types';
 
 /**
  * 지식 그래프 (/knowledge?entity=…&depth=…)
@@ -45,6 +45,60 @@ function writeUrl(entityId: number | null, depth: number) {
     window.history.replaceState(null, '', `/knowledge${search ? `?${search}` : ''}`);
 }
 
+/** 노드 하나를 펼칠 때 부르는 보기: 바로 이웃 전부 (사양 값 노드 포함, 노드마다 최대 300개) */
+function expandQuery(id: number) {
+    return { entityId: id, depth: 1, limit: 300, specValues: 'all' as const, hideIsolatedSpec: false };
+}
+
+/** 한 번 펼칠 때 더하는 이웃 수. "더 보기"마다 이만큼 늘린다 */
+const EXPAND_STEP = 20;
+
+interface Expansion { view: GraphView; shown: number }
+
+/** 펼친 노드의 이웃 순서: 이미 보이는 노드 → 사양 값이 아닌 관계(부품·인증·문서 등) → 사양 값. 같은 순위는 이름순 */
+function orderedNeighbors(centerId: number, view: GraphView, visible: Set<number>): GraphNode[] {
+    const viaSpec = new Set(view.edges.filter((e) => e.type === 'has_spec').flatMap((e) => [e.source, e.target]));
+    const rank = (n: GraphNode) => (visible.has(n.id) ? 0 : n.type === 'spec_value' || viaSpec.has(n.id) ? 2 : 1);
+    return view.nodes.filter((n) => n.id !== centerId)
+        .sort((x, y) => rank(x) - rank(y) || x.name.localeCompare(y.name, 'ko'));
+}
+
+/** 기본 보기와 펼친 노드의 이웃을 합친다 (펼친 노드마다 shown개까지). 같은 노드·관계는 한 번만 */
+function mergeViews(base: GraphView | null, expansions: Map<number, Expansion>): GraphView | null {
+    if (!base || expansions.size === 0) return base;
+    const nodes = new Map(base.nodes.map((n) => [n.id, n]));
+    const pool = new Map<number, GraphEdge>(base.edges.map((e) => [e.id, e]));
+    for (const [centerId, { view, shown }] of expansions) {
+        const center = view.nodes.find((n) => n.id === centerId);
+        if (center && !nodes.has(centerId)) nodes.set(centerId, center);
+        for (const n of orderedNeighbors(centerId, view, new Set(nodes.keys())).slice(0, shown)) {
+            if (!nodes.has(n.id)) nodes.set(n.id, n);
+        }
+        for (const e of view.edges) pool.set(e.id, e);
+    }
+    const edges = [...pool.values()].filter((e) => nodes.has(e.source) && nodes.has(e.target));
+    return { nodes: [...nodes.values()], edges, truncated: base.truncated };
+}
+
+/** 펼쳐서 새로 나온 노드를 펼친 노드 둘레에 원형으로 놓는다 (덩어리로 섞이지 않게). 많으면 바깥 원을 더 쓴다 */
+function ringPositions(center: Point, ids: number[], start: number): Map<number, Point> {
+    const result = new Map<number, Point>();
+    let placed = 0;
+    let ring = 0;
+    while (placed < ids.length) {
+        const capacity = 10 + ring * 8;
+        const count = Math.min(capacity, ids.length - placed);
+        const radius = 120 + ring * 70;
+        for (let i = 0; i < count; i++) {
+            const angle = start + (i / count) * Math.PI * 2 + ring * 0.3;
+            result.set(ids[placed + i], { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius });
+        }
+        placed += count;
+        ring += 1;
+    }
+    return result;
+}
+
 export function KnowledgeSection() {
     return <GraphSchemaProvider><KnowledgeContent /></GraphSchemaProvider>;
 }
@@ -58,7 +112,13 @@ function KnowledgeContent() {
     const [fileId, setFileId] = useState('');
     const [files, setFiles] = useState<FileSummary[]>([]);
 
-    const [data, setData] = useState<GraphView | null>(null);
+    const [baseData, setData] = useState<GraphView | null>(null);
+    // 그래프에서 펼친 노드: 노드 id → 그 노드의 이웃 (GET /graph/view?entity_id=…&depth=1, 사양 값 포함)과 보이는 수
+    const [expansions, setExpansions] = useState<Map<number, Expansion>>(new Map());
+    const expansionsRef = useRef(expansions);
+    useEffect(() => { expansionsRef.current = expansions; }, [expansions]);
+    // 화면에 그리는 그래프 = 기본 보기 + 펼친 노드의 이웃
+    const data = useMemo(() => mergeViews(baseData, expansions), [baseData, expansions]);
     const [loadError, setLoadError] = useState('');
     const [positions, setPositions] = useState<Map<number, Point>>(new Map());
     const [fitKey, setFitKey] = useState(0);
@@ -109,7 +169,10 @@ function KnowledgeContent() {
             lastQueryKey.current = queryKey;
             const ids = view.nodes.map((n) => n.id);
             const previous = queryChanged ? new Map<number, Point>() : positionsRef.current;
-            if (queryChanged) pinnedRef.current = new Set();
+            if (queryChanged) {
+                pinnedRef.current = new Set();
+                setExpansions(new Map());
+            }
             const base = layoutGraph(ids, view.edges, previous, pinnedRef.current);
             const center = view.nodes.find((n) => n.id === focusId);
             const tree = treeChoice ?? center?.type === 'product_line';
@@ -156,6 +219,68 @@ function KnowledgeContent() {
     }, []);
 
     const nodeById = useMemo(() => new Map((data?.nodes ?? []).map((n) => [n.id, n])), [data]);
+
+    // 펼쳐서 새로 나온 노드만 자리를 잡는다: 펼친 노드 둘레 원형. 이미 있는 노드는 움직이지 않는다
+    useEffect(() => {
+        if (!data) return;
+        const current = positionsRef.current;
+        const missing = new Set(data.nodes.filter((n) => !current.has(n.id)).map((n) => n.id));
+        if (!missing.size) return;
+        const next = new Map(current);
+        for (const [centerId, { view }] of expansionsRef.current) {
+            const center = next.get(centerId);
+            if (!center) continue;
+            const ids = view.nodes.map((n) => n.id).filter((id) => missing.has(id));
+            const placedAround = view.nodes.filter((n) => n.id !== centerId && next.has(n.id)).length;
+            ringPositions(center, ids, placedAround * 0.4).forEach((p, id) => { next.set(id, p); missing.delete(id); });
+        }
+        if (missing.size) {
+            const fixed = new Set([...pinnedRef.current, ...next.keys()]);
+            setPositions(layoutGraph(data.nodes.map((n) => n.id), data.edges, next, fixed));
+        } else {
+            setPositions(next);
+        }
+        setFitKey((k) => k + 1); // 펼친 이웃까지 보이게 화면을 맞춘다
+    }, [data]);
+
+    // 편집 뒤 다시 불러올 때 펼친 노드의 이웃도 새로 읽는다
+    useEffect(() => {
+        const ids = [...expansionsRef.current.keys()];
+        if (!ids.length) return;
+        let ignore = false;
+        Promise.all(ids.map((id) => graphApi.view(expandQuery(id))
+            .then((view) => [id, { view, shown: expansionsRef.current.get(id)?.shown ?? EXPAND_STEP }] as const).catch(() => null)))
+            .then((results) => {
+                if (ignore) return;
+                setExpansions(new Map(results.filter((r): r is readonly [number, Expansion] => r !== null)));
+            });
+        return () => { ignore = true; };
+    }, [reloadKey]);
+
+    const [expandError, setExpandError] = useState('');
+    const toggleExpand = useCallback((id: number) => {
+        setExpandError('');
+        if (expansionsRef.current.has(id)) {
+            setExpansions((prev) => {
+                const next = new Map(prev);
+                next.delete(id);
+                return next;
+            });
+            return;
+        }
+        graphApi.view(expandQuery(id))
+            .then((view) => setExpansions((prev) => new Map(prev).set(id, { view, shown: EXPAND_STEP })))
+            .catch((e: unknown) => setExpandError(errorText(e)));
+    }, []);
+    const showMore = (id: number) => setExpansions((prev) => {
+        const item = prev.get(id);
+        return item ? new Map(prev).set(id, { ...item, shown: item.shown + EXPAND_STEP }) : prev;
+    });
+    const expandedIds = useMemo(() => new Set(expansions.keys()), [expansions]);
+    // 다 보이지 않은 펼친 노드: 이름, 전체 이웃 수, 보이는 이웃 수
+    const partialExpansions = [...expansions].map(([id, { view, shown }]) => ({
+        id, name: view.nodes.find((n) => n.id === id)?.name ?? `#${id}`, total: view.nodes.length - 1, shown,
+    })).filter((x) => x.total > x.shown);
     const treeOn = treeChoice ?? (focusId !== null && nodeById.get(focusId)?.type === 'product_line');
     const hasTree = (data?.edges ?? []).some((e) => e.type === 'variant_of');
     const toggleTree = () => {
@@ -246,6 +371,15 @@ function KnowledgeContent() {
                             </select>
                         )}
                         <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-lg border border-line bg-white px-2 py-1 text-[11.5px]">
+                            {expansions.size > 0 && <button type="button" onClick={() => setExpansions(new Map())}
+                                className="h-6 rounded-md px-2 font-semibold hover:bg-chip">펼친 것 모두 접기 ({expansions.size})</button>}
+                            {expandError && <span role="alert" className="text-danger">{expandError}</span>}
+                            {partialExpansions.map((x) => (
+                                <span key={x.id} className="flex items-center gap-1 text-muted">
+                                    {x.name}: 이웃 {x.total}개 중 {x.shown}개
+                                    <button type="button" onClick={() => showMore(x.id)} className="h-6 rounded-md px-1.5 font-semibold text-ink hover:bg-chip">{EXPAND_STEP}개 더</button>
+                                </span>
+                            ))}
                             {hasTree && <button type="button" aria-pressed={treeOn} onClick={toggleTree}
                                 className={`h-6 rounded-md px-2 font-semibold ${treeOn ? 'bg-ink text-white' : 'hover:bg-chip'}`}>계층 보기</button>}
                             <label className="flex items-center gap-1"><input type="checkbox" checked={valuesNearOnly} onChange={(e) => setValuesNearOnly(e.target.checked)} /> 사양 값은 이웃만</label>
@@ -337,6 +471,8 @@ function KnowledgeContent() {
                                 setPicking(false);
                                 if (node && callback) callback(node);
                             }}
+                            expandedIds={expandedIds}
+                            onToggleExpand={toggleExpand}
                             onMoveNode={(id, p) => {
                                 pinnedRef.current.add(id);
                                 setPositions((prev) => new Map(prev).set(id, p));
@@ -356,6 +492,7 @@ function KnowledgeContent() {
                                 </span>
                             ))}
                             <span>· 개체 {data.nodes.length} · 관계 {data.edges.length}{data.truncated && ' (일부만 표시)'}</span>
+                            <span>· 노드를 두 번 누르거나 +숫자를 누르면 숨은 이웃을 펼칩니다</span>
                         </div>
                     )}
                 </main>

@@ -27,6 +27,8 @@ export function GraphCanvas({
     onSelect,
     onPick,
     onMoveNode,
+    expandedIds = new Set<number>(),
+    onToggleExpand,
 }: {
     nodes: GraphNode[];
     edges: GraphEdge[];
@@ -39,6 +41,10 @@ export function GraphCanvas({
     onSelect: (selection: Selection) => void;
     onPick: (nodeId: number) => void;
     onMoveNode: (nodeId: number, point: Point) => void;
+    /** 그래프에서 펼친 노드 (숨은 이웃을 보이는 중) */
+    expandedIds?: Set<number>;
+    /** 노드를 두 번 누르거나 +숫자를 누르면 숨은 이웃을 펼치고, 다시 하면 접는다 */
+    onToggleExpand?: (nodeId: number) => void;
 }) {
     const { schema } = useGraphSchema();
     const svgRef = useRef<SVGSVGElement>(null);
@@ -135,7 +141,8 @@ export function GraphCanvas({
         const scale = Math.max(d.view.w / rect.width, d.view.h / rect.height);
         setView({ ...d.view, x: d.view.x - (e.clientX - d.startX) * scale, y: d.view.y - (e.clientY - d.startY) * scale });
     };
-    const onPointerUp = () => {
+    const lastNodeClick = useRef<{ id: number; at: number } | null>(null);
+    const onPointerUp = (e: ReactPointerEvent<SVGSVGElement>) => {
         const d = drag.current;
         drag.current = null;
         if (!d || d.moved) return;
@@ -144,11 +151,28 @@ export function GraphCanvas({
         } else if (picking) {
             onPick(d.id);
         } else {
+            const now = e.timeStamp;
+            const last = lastNodeClick.current;
+            if (last && last.id === d.id && now - last.at < 350 && onToggleExpand) {
+                lastNodeClick.current = null;
+                onToggleExpand(d.id); // 두 번 누르면 펼치기·접기
+                return;
+            }
+            lastNodeClick.current = { id: d.id, at: now };
             onSelect({ kind: 'node', id: d.id });
         }
     };
 
     const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+    // 노드마다 화면에 안 보이는 관계 수 (전체 관계 수 - 보이는 관계 수)
+    const hiddenCount = useMemo(() => {
+        const visible = new Map<number, number>();
+        for (const e of edges) {
+            visible.set(e.source, (visible.get(e.source) ?? 0) + 1);
+            if (e.target !== e.source) visible.set(e.target, (visible.get(e.target) ?? 0) + 1);
+        }
+        return new Map(nodes.map((n) => [n.id, Math.max(0, n.degree - (visible.get(n.id) ?? 0))]));
+    }, [nodes, edges]);
 
     // 선택한 노드와 바로 이어진 노드·엣지만 진하게 보인다
     const focus = useMemo(() => {
@@ -253,8 +277,10 @@ export function GraphCanvas({
                         const meta = ORIGIN_META[edge.origin];
                         const selected = edge.id === selectedEdgeId;
                         const dim = focus !== null && !focus.edgeIds.has(edge.id);
+                        // 사양 값 관계는 옅게 (고른 노드의 관계면 진하게)
+                        const faint = edge.type === 'has_spec' && !selected && !(focus !== null && focus.edgeIds.has(edge.id));
                         return (
-                            <g key={edge.id} opacity={dim ? 0.12 : 1}>
+                            <g key={edge.id} opacity={dim ? (faint ? 0.06 : 0.12) : faint ? 0.3 : 1}>
                                 {/* 클릭하기 쉽게 투명한 굵은 선을 깐다 */}
                                 <path
                                     d={d}
@@ -316,8 +342,11 @@ export function GraphCanvas({
                         const meta = entityMeta(schema, node.type);
                         const selected = node.id === selectedNodeId;
                         const dim = focus !== null && !focus.nodeIds.has(node.id);
-                        const showLabel = showAllLabels || selected || hovered === node.id || node.degree >= 4
-                            || (focus !== null && focus.nodeIds.has(node.id));
+                        // 노드가 많으면 제품군·제품 이름만 늘 보이고, 나머지는 고르거나 마우스를 올리면 보인다
+                        const showLabel = showAllLabels || selected || hovered === node.id
+                            || node.type === 'product' || node.type === 'product_line'
+                            || (node.type !== 'spec_value' && node.degree >= 4 && nodes.length <= 60)
+                            || (focus !== null && focus.nodeIds.has(node.id) && (focus.nodeIds.size <= 40 || node.type !== 'spec_value'));
                         return (
                             <g
                                 key={node.id}
@@ -342,10 +371,29 @@ export function GraphCanvas({
                                 <circle
                                     r={r}
                                     fill={meta.color}
-                                    fillOpacity={0.92}
+                                    fillOpacity={node.type === 'spec_value' ? 0.6 : 0.92}
                                     stroke="#fff"
                                     strokeWidth={2}
                                 />
+                                {onToggleExpand && (expandedIds.has(node.id)
+                                    || ((selected || hovered === node.id) && (hiddenCount.get(node.id) ?? 0) > 0)) && (
+                                    <g
+                                        transform={`translate(${r * 0.75},${-r * 0.75})`}
+                                        role="button"
+                                        aria-label={expandedIds.has(node.id) ? `${node.name} 접기` : `${node.name}의 숨은 관계 ${hiddenCount.get(node.id)}개 펼치기`}
+                                        className="cursor-pointer"
+                                        onPointerDown={(e) => { e.stopPropagation(); }}
+                                        onClick={(e) => { e.stopPropagation(); onToggleExpand(node.id); }}
+                                    >
+                                        <title>{expandedIds.has(node.id) ? '펼친 이웃 접기' : `숨은 관계 ${hiddenCount.get(node.id)}개 펼치기`}</title>
+                                        <rect x={-2} y={-7} rx={7} height={14}
+                                            width={expandedIds.has(node.id) ? 16 : 10 + String(hiddenCount.get(node.id)).length * 6.5}
+                                            fill={expandedIds.has(node.id) ? '#141C2B' : '#fff'} stroke="#141C2B" strokeOpacity={0.35} />
+                                        <text x={expandedIds.has(node.id) ? 6 : 3} y={3.5} className="text-[9.5px] font-bold" fill={expandedIds.has(node.id) ? '#fff' : '#141C2B'} pointerEvents="none">
+                                            {expandedIds.has(node.id) ? '−' : `+${hiddenCount.get(node.id)}`}
+                                        </text>
+                                    </g>
+                                )}
                                 {showLabel && (
                                     <text
                                         y={r + 12}

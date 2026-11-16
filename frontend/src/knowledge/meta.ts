@@ -8,7 +8,8 @@ export const ORIGIN_META: Record<RelationOrigin, { label: string; className: str
     spec: { label: '사양 DB', className: 'border-[#7C5CFF]/25 bg-[#F3F0FF] text-[#5B3FD9]', stroke: '#7C5CFF', dash: '2 3' },
 };
 
-/** 노드 반지름: 관계가 많을수록 크게 */
+/** 노드 반지름: 관계가 많을수록 크게. 사양 값 노드는 작게 (여러 제품이 공유해 관계가 많아도 크게 보이지 않게) */
 export function nodeRadius(node: GraphNode): number {
+    if (node.type === 'spec_value') return 5;
     return 7 + Math.min(11, Math.sqrt(node.degree) * 2.6);
 }
