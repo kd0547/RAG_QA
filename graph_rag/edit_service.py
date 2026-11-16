@@ -6,6 +6,7 @@ import json
 import math
 import re
 import uuid
+from collections import Counter
 from datetime import date
 
 import config
@@ -18,6 +19,14 @@ class GraphConflictError(GraphEditError):
     pass
 
 
+class GraphValueConversionError(GraphEditError):
+    """속성 정의의 자료형을 바꿀 때 새 자료형으로 읽을 수 없는 기존 값이 있다 (저장하지 않는다, 지시서 GR5)."""
+
+    def __init__(self, message, values):
+        super().__init__(message)
+        self.values = values
+
+
 def packed(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
@@ -28,6 +37,43 @@ def decoded(row):
         if key in result:
             result[key] = json.loads(result[key])
     return result
+
+
+def _convert(value, old, new, choices):
+    """속성 값 하나를 새 자료형 열 값으로. 읽을 수 없으면 None."""
+    empty = dict(value_text=None,value_number=None,value_boolean=None,value_date=None)
+    if new in ('text','enum'):
+        if old == 'number':
+            text = str(int(value)) if float(value).is_integer() else str(value)
+        elif old == 'boolean':
+            text = 'true' if value else 'false'
+        else:
+            text = str(value)
+        if new == 'enum' and text not in choices:
+            return None
+        return {**empty, 'value_text': text}
+    if new == 'number':
+        if old == 'boolean':
+            return {**empty, 'value_number': float(value)}
+        try:
+            number = float(str(value).replace(',','').strip())
+        except ValueError:
+            return None
+        return {**empty, 'value_number': number} if math.isfinite(number) else None
+    if new == 'boolean':
+        words = {'true': 1, 'false': 0, '1': 1, '0': 0, '예': 1, '아니오': 0, 'yes': 1, 'no': 0}
+        if old == 'number':
+            return {**empty, 'value_boolean': int(value)} if value in (0, 1) else None
+        key = str(value).strip().lower()
+        return {**empty, 'value_boolean': words[key]} if key in words else None
+    text = str(value).strip()
+    try:
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', text):
+            return None
+        date.fromisoformat(text)
+    except ValueError:
+        return None
+    return {**empty, 'value_date': text}
 
 
 class EffectiveGraphService:
@@ -124,6 +170,50 @@ class EffectiveGraphService:
             return {table: [dict(r) for r in conn.execute(
                 f"SELECT * FROM graph_{table} WHERE lifecycle_state='deleted' ORDER BY id LIMIT ? OFFSET ?", (limit,offset))]
                 for table in ('entity','relation')}
+
+    def rule_warnings(self, limit=500):
+        """규칙 위반 목록 (지시서 GR5): 허용 종류를 어기는 관계, 식별자 규칙을 어기는 개체. 출처별 개수.
+
+        규칙은 문서 자동 추출만 거른다. 사람이 의도한 것이면 그대로 둔다 (지우지 않는다).
+        """
+        from graph_rag.rules import has_identifier
+        with self.db.get_conn() as conn:
+            rules = {r['key']: (set(json.loads(r['source_entity_types'])), set(json.loads(r['target_entity_types'])), r['label'])
+                     for r in conn.execute('SELECT * FROM graph_relation_type')}
+            relations = []
+            for r in conn.execute("""SELECT r.id, r.type, r.origin, r.page, f.original_name, s.id AS source_id, s.type AS source_type,
+                s.name AS source_name, d.id AS target_id, d.type AS target_type, d.name AS target_name
+                FROM effective_graph_relation r JOIN effective_graph_entity s ON s.id=r.src_id
+                JOIN effective_graph_entity d ON d.id=r.dst_id LEFT JOIN file f ON f.file_id=r.file_id ORDER BY r.id"""):
+                rule = rules.get(r['type'])
+                if rule is None or r['source_type'] not in rule[0] or r['target_type'] not in rule[1]:
+                    relations.append({**dict(r), 'label': rule[2] if rule else r['type'],
+                                      'reason': '등록되지 않은 관계 종류' if rule is None else '허용 종류가 아님'})
+            needs = {r['key'] for r in conn.execute('SELECT key FROM graph_entity_type WHERE requires_identifier=1')}
+            aliases = {}
+            for row in conn.execute('SELECT entity_id, alias FROM graph_alias'):
+                aliases.setdefault(row['entity_id'], []).append(row['alias'])
+            entities = [dict(e) for e in conn.execute(
+                'SELECT id, type, name, creation_origin, ref_type FROM effective_graph_entity ORDER BY type, name')
+                if e['type'] in needs and not has_identifier([e['name'], *aliases.get(e['id'], [])])]
+        count = lambda items, key: dict(sorted(Counter(i[key] for i in items).items()))  # noqa: E731
+        return {'relations': relations[:limit], 'entities': entities[:limit],
+                'counts': {'relations': len(relations), 'entities': len(entities),
+                           'relations_by_origin': count(relations, 'origin'), 'entities_by_origin': count(entities, 'creation_origin')}}
+
+    def spec_diff(self, entity_id):
+        """사양 DB와 다른 점 (지시서 GR5): 사람이 지운 관계, 종류를 바꾼 사양 노드, 이름을 바꾼 사양 노드. 사양 노드가 아니면 None."""
+        with self.db.get_conn() as conn:
+            row = conn.execute('SELECT * FROM graph_entity WHERE id=?', (entity_id,)).fetchone()
+            if row is None or not row['ref_id']:
+                return None
+            excluded = [dict(r) for r in conn.execute("""SELECT x.type, x.source_key, s.id AS source_id,
+                coalesce(s.display_name,s.name) AS source_name, d.id AS target_id, coalesce(d.display_name,d.name) AS target_name
+                FROM graph_exclusion x JOIN graph_entity s ON s.id=x.src_id JOIN graph_entity d ON d.id=x.dst_id
+                WHERE x.src_id=? OR x.dst_id=? ORDER BY x.type""", (entity_id, entity_id))]
+        result = {'excluded_relations': excluded, 'type_changed': bool(row['type_locked']), 'renamed': row['display_name'] is not None}
+        result['differs'] = bool(excluded) or result['type_changed'] or result['renamed']
+        return result
 
     def impact(self, entity_id):
         with self.db.get_conn() as conn:
@@ -233,8 +323,8 @@ class GraphEditService(EffectiveGraphService):
         if not isinstance(kind,str) or kind not in self._type_keys() or len(normalize(name)) < 2:
             raise GraphEditError('객체 종류와 이름(기호 제외 2자 이상)을 확인하세요.')
         ref_type, ref_id = data.get('ref_type'), data.get('ref_id')
-        if bool(ref_type) != bool(ref_id) or (ref_type and (ref_type not in ('product','component') or ref_type != kind)):
-            raise GraphEditError('사양 참조 종류가 객체와 맞지 않습니다.')
+        if bool(ref_type) != bool(ref_id) or (ref_type and ref_type not in ('product','component')):
+            raise GraphEditError('사양 참조 종류는 product 또는 component여야 합니다.')
         if ref_id:
             ref = self._row(ref_type,'id',ref_id)
             name = ref['model']
@@ -269,6 +359,23 @@ class GraphEditService(EffectiveGraphService):
         row = self._entity(identity)
         self._revision(row,data)
         changes = {'manual_retained':1}
+        warnings = []
+        new_type = data.get('type')
+        if new_type is not None and new_type != row['type']:
+            if new_type not in self._type_keys():
+                raise GraphEditError(f'없는 개체 종류입니다: {new_type}')
+            same = self.conn.execute("""SELECT id, coalesce(display_name,name) AS name FROM graph_entity
+              WHERE type=? AND norm=? AND id!=? AND lifecycle_state!='merged'""",(new_type,row['norm'],identity)).fetchone()
+            if same:
+                raise GraphConflictError(f"같은 종류에 같은 이름의 객체가 있습니다: #{same['id']} {same['name']}. 종류를 바꾼 뒤 합치려면 '다른 개체와 합치기'를 쓰세요.")
+            # 사람이 정한 종류는 사양 투영이 되돌리지 않는다 (GR4-2)
+            changes.update({'type':new_type,'type_locked':1})
+            definition = self._row('graph_entity_type','key',new_type)
+            if definition['requires_identifier']:
+                from graph_rag.rules import has_identifier
+                names = [row['name'], row.get('display_name') or '', *row['aliases']]
+                if not has_identifier(names):
+                    warnings.append(f"'{definition['label']}' 종류는 문서 추출 때 이름에 식별자(숫자가 든 모델명·번호)를 요구합니다. 사람의 편집은 그대로 둡니다.")
         name = data.get('display_name',data.get('name'))
         if name is not None:
             name = self._text(name,'name')
@@ -284,7 +391,37 @@ class GraphEditService(EffectiveGraphService):
                 raise GraphEditError('현재 이름은 별칭 목록에서 숨길 수 없습니다.')
             # Historical identity remains searchable by extraction; only its displayed alias is removed.
             self.conn.execute('UPDATE graph_alias SET hidden=1 WHERE entity_id=? AND alias_norm=?',(identity,normalize(alias)))
-        return self._update('graph_entity','id',identity,changes,'entity',row)
+        result = self._update('graph_entity','id',identity,changes,'entity',row)
+        result['warnings'] = warnings
+        return result
+
+    def _reset_spec_entity(self, identity, data):
+        """사양 DB 기준으로 되돌리기 (GR5): 이 사양 노드에 대한 사람의 편집(지운 관계, 종류·이름 바꾸기, 사양 관계를 바꿔 넣은
+        수동 관계)을 지운다. 호출부가 다시 투영한다. 사양 DB는 바뀌지 않는다."""
+        row = self._entity(identity)
+        self._revision(row,data)
+        if not row['ref_id']:
+            raise GraphEditError('사양 DB 노드가 아닙니다.')
+        excluded = self.conn.execute('DELETE FROM graph_exclusion WHERE src_id=? OR dst_id=?',(identity,identity)).rowcount
+        excluded += self.conn.execute("""DELETE FROM graph_relation_block WHERE (src_type=? AND src_norm=?) OR (dst_type=? AND dst_norm=?)""",
+                                      (row['type'],row['norm'],row['type'],row['norm'])).rowcount
+        replaced = 0
+        for event in self.conn.execute("""SELECT correlation_id, before_json FROM graph_edit_event
+          WHERE target_kind='relation' AND action='replace'""").fetchall():
+            before = json.loads(event['before_json'] or '{}')
+            if before.get('origin')!='spec' or identity not in (before.get('src_id'),before.get('dst_id')):
+                continue
+            for created in self.conn.execute("""SELECT target_id FROM graph_edit_event WHERE correlation_id=?
+              AND target_kind='relation' AND action='create'""",(event['correlation_id'],)).fetchall():
+                relation = self.conn.execute("SELECT * FROM graph_relation WHERE id=? AND origin='manual' AND lifecycle_state='active'",
+                                             (int(created['target_id']),)).fetchone()
+                if relation:
+                    self._update('graph_relation','id',relation['id'],{'lifecycle_state':'deleted'},'relation',dict(relation),'delete')
+                    replaced += 1
+        result = self._update('graph_entity','id',identity,{'type_locked':0,'display_name':None,'manual_retained':0},
+                              'entity',row,'reset_spec')
+        result.update(cleared_exclusions=excluded, removed_replacements=replaced)
+        return result
 
     def _entity_state(self, identity, data, state):
         row = self._row('graph_entity','id',identity)
@@ -476,13 +613,24 @@ class GraphEditService(EffectiveGraphService):
         return decoded(row)
 
     def _definition_update(self, table, key, identity, data, kind):
+        """관계 종류·속성 정의 수정. 기본 관계 종류도 이름·설명·허용 출발·도착 종류·추출 여부·활성을 모두 고친다 (지시서 GR5)."""
         row = self._row(table,key,identity)
         self._revision(row,data)
-        if row.get('builtin'):
-            raise GraphEditError('시스템 관계의 의미와 정의는 고정입니다.')
-        if set(data)-{'label','description','active','extract','expected_revision'}:
-            raise GraphConflictError('자료형·단위·연결 규칙 변경은 새 정의를 등록해 이관하세요.')
+        if table == 'graph_relation_type':
+            allowed = {'label','description','active','extract','source_entity_types','target_entity_types','allow_self','expected_revision'}
+        else:
+            allowed = {'label','active','value_type','unit','allowed_values','allowed_entity_types','multiple','expected_revision'}
+        if set(data)-allowed:
+            raise GraphEditError('바꿀 수 없는 필드입니다: ' + ', '.join(sorted(set(data)-allowed)))
         changes = {}
+        if table == 'graph_relation_type':
+            for column in ('source_entity_types','target_entity_types'):
+                if column in data:
+                    changes[column] = self._types(data[column])
+            if 'allow_self' in data:
+                changes['allow_self'] = int(data['allow_self'])
+        else:
+            changes.update(self._definition_shape(row, data))
         if 'label' in data:
             changes['label'] = self._text(data['label'],'label')
             if self.conn.execute(f'SELECT 1 FROM {table} WHERE lower(label)=lower(?) AND {key}!=?',(changes['label'],identity)).fetchone():
@@ -498,6 +646,58 @@ class GraphEditService(EffectiveGraphService):
         if not changes:
             raise GraphEditError('변경할 필드가 없습니다.')
         return self._update(table,key,identity,changes,kind,row)
+
+    def _definition_shape(self, row, data):
+        """속성 정의의 자료형·단위·선택지·적용 종류·복수 여부 변경. 기존 값을 새 자료형으로 읽을 수 없으면 저장하지 않는다."""
+        changes = {}
+        value_type = data.get('value_type', row['value_type'])
+        if value_type not in ('text','number','boolean','date','enum'):
+            raise GraphEditError('value_type: text/number/boolean/date/enum 중 하나여야 합니다.')
+        unit = data.get('unit', row['unit'])
+        if unit is not None and unit != '':
+            unit = self._text(unit,'unit')
+        else:
+            unit = None
+        choices = data.get('allowed_values', json.loads(row['allowed_values']))
+        if value_type != 'enum' and 'allowed_values' not in data:
+            choices = []
+        if not isinstance(choices,list) or len(choices)>100 or (value_type=='enum' and not choices) or (value_type!='enum' and choices):
+            raise GraphEditError('allowed_values: enum에만 1~100개 선택지를 지정하세요.')
+        choices = [self._text(v,'allowed_values') for v in choices]
+        if 'allowed_entity_types' in data:
+            changes['allowed_entity_types'] = self._types(data['allowed_entity_types'])
+        if 'multiple' in data:
+            if not data['multiple']:
+                many = self.conn.execute("""SELECT entity_id FROM graph_property_value WHERE property_id=? AND lifecycle_state='active'
+                  GROUP BY entity_id HAVING count(*)>1 LIMIT 5""",(row['property_id'],)).fetchall()
+                if many:
+                    raise GraphConflictError('값이 여러 개인 객체가 있어 단일 값으로 바꿀 수 없습니다: ' + ', '.join(f"#{r[0]}" for r in many))
+            changes['multiple'] = int(data['multiple'])
+        if value_type != row['value_type'] or packed(choices) != packed(json.loads(row['allowed_values'])):
+            self._convert_values(row, value_type, choices)
+        changes.update(value_type=value_type, unit=unit if value_type=='number' else None, allowed_values=packed(choices))
+        return {k: v for k, v in changes.items() if v != row.get(k)}
+
+    def _convert_values(self, definition, value_type, choices):
+        """기존 값을 새 자료형으로 바꾼다. 하나라도 읽을 수 없으면 목록과 함께 GraphValueConversionError (아무것도 바꾸지 않는다)."""
+        old = 'text' if definition['value_type'] in ('text','enum') else definition['value_type']
+        rows = self.conn.execute("SELECT * FROM graph_property_value WHERE property_id=? AND lifecycle_state='active'",
+                                 (definition['property_id'],)).fetchall()
+        converted, failed = [], []
+        for row in rows:
+            value = row['value_' + old]
+            if value is None:
+                converted.append((row, dict(value_text=None,value_number=None,value_boolean=None,value_date=None)))
+                continue
+            result = _convert(value, old, value_type, choices)
+            if result is None:
+                failed.append({'value_id': row['value_id'], 'entity_id': row['entity_id'], 'value': value})
+            else:
+                converted.append((row, result))
+        if failed:
+            raise GraphValueConversionError(f'새 자료형({value_type})으로 읽을 수 없는 값이 {len(failed)}개 있습니다. 값을 먼저 고치세요.', failed)
+        for row, values in converted:
+            self._update('graph_property_value','value_id',row['value_id'],values,'property',dict(row),'convert')
 
     def _update_relation_type(self, identity, data):
         return self._definition_update('graph_relation_type','key',identity,data,'relation_type')
@@ -612,14 +812,21 @@ class GraphEditService(EffectiveGraphService):
         return self._update('graph_property_value','value_id',identity,{'lifecycle_state':'deleted'},'property',row,'delete')
 
     def _validate_relation(self, src, dst, kind):
+        """사람이 넣는 관계는 막지 않는다 (지시서 GR5). 규칙과 다르면 경고 목록을 돌려준다. 없는 관계 종류·객체만 오류다."""
         source, target = self._entity(src), self._entity(dst)
         definition = self._row('graph_relation_type','key',kind)
-        if not definition['active'] or (src==dst and not definition['allow_self']):
-            raise GraphEditError('비활성 관계 종류 또는 허용되지 않는 자기 연결입니다.')
-        if source['type'] not in json.loads(definition['source_entity_types']) or target['type'] not in json.loads(definition['target_entity_types']):
-            raise GraphEditError('관계 방향과 출발·도착 객체 종류를 확인하세요.')
-        if kind=='variant_of' or (kind=='has_component' and source['ref_id']):
-            raise GraphEditError('사양 DB가 관리하는 연결입니다. 사양 화면에서 구성 또는 상위 모델을 변경하세요.')
+        warnings = []
+        if not definition['active']:
+            warnings.append(f"사용 중지된 관계 종류입니다: {definition['label']}")
+        if src==dst and not definition['allow_self']:
+            warnings.append('자기 자신을 가리키는 관계입니다.')
+        sources, targets = json.loads(definition['source_entity_types']), json.loads(definition['target_entity_types'])
+        if source['type'] not in sources or target['type'] not in targets:
+            labels = {r['key']: r['label'] for r in self.conn.execute('SELECT key,label FROM graph_entity_type')}
+            name = lambda keys: ', '.join(labels.get(k,k) for k in keys)  # noqa: E731
+            warnings.append(f"허용 종류가 아닙니다: {definition['label']} ({labels.get(source['type'],source['type'])} → "
+                            f"{labels.get(target['type'],target['type'])}). 허용: {name(sources)} → {name(targets)}")
+        return warnings
 
     def _relation_result(self, identity):
         row = self._row('graph_relation','id',identity)
@@ -639,7 +846,7 @@ class GraphEditService(EffectiveGraphService):
             dst = self._create_entity(None,target)['id']
         if data.get('reverse'):
             src,dst = dst,src
-        self._validate_relation(src,dst,kind)
+        warnings = self._validate_relation(src,dst,kind)
         identity = self.conn.execute("""INSERT INTO graph_relation (src_id,dst_id,type,origin,source_key)
           VALUES (?,?,?,'manual',?)""",(src,dst,kind,'manual:'+uuid.uuid4().hex)).lastrowid
         self.conn.execute('UPDATE graph_entity SET manual_retained=1 WHERE id IN (?,?)',(src,dst))
@@ -648,7 +855,7 @@ class GraphEditService(EffectiveGraphService):
         self._event('relation',identity,'create',None,row)
         if clear_exclusion:
             self._clear_exclusion(row)
-        return self._relation_result(identity)
+        return {**self._relation_result(identity), 'warnings': warnings}
 
     def _exclude(self, row, scope):
         if scope not in ('source','all'):
@@ -676,10 +883,10 @@ class GraphEditService(EffectiveGraphService):
         self._revision(row,data)
         if row['origin']!='manual':
             raise GraphEditError('자동 관계는 출처 동기화에서 관리됩니다. 수동 관계만 복구할 수 있습니다.')
-        self._validate_relation(row['src_id'],row['dst_id'],row['type'])
+        warnings = self._validate_relation(row['src_id'],row['dst_id'],row['type'])
         self._clear_exclusion(row)
         self._update('graph_relation','id',identity,{'lifecycle_state':'active'},'relation',row,'restore')
-        return self._relation_result(identity)
+        return {**self._relation_result(identity), 'warnings': warnings}
 
     def _update_relation(self, identity, data):
         row = self._row('graph_relation','id',identity)
@@ -690,7 +897,7 @@ class GraphEditService(EffectiveGraphService):
         if data.get('reverse'):
             src,dst = dst,src
         kind = data.get('type') or row['type']
-        self._validate_relation(src,dst,kind)
+        warnings = self._validate_relation(src,dst,kind)
         if row['origin']!='manual':
             self._exclude(row,data.get('scope','all'))
             self._update('graph_relation','id',identity,{'lifecycle_state':'deleted'},'relation',row,'replace')
@@ -698,7 +905,7 @@ class GraphEditService(EffectiveGraphService):
                 'file_id':row['file_id'],'page':row['page'],'source':data.get('source')}, clear_exclusion=False)
         self._update('graph_relation','id',identity,{'src_id':src,'dst_id':dst,'type':kind},'relation',row)
         self._source('relation',identity,data)
-        return self._relation_result(identity)
+        return {**self._relation_result(identity), 'warnings': warnings}
 
     def _merge_entity(self, identity, data, allow_type_change=False):
         source,target = self._entity(identity),self._entity(data.get('target_id'))

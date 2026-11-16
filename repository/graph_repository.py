@@ -467,6 +467,7 @@ class GraphRepository:
         from graph_rag.edit_service import EffectiveGraphService
         service = EffectiveGraphService(self.db)
         entity['properties'] = service.properties(entity_id)
+        entity['spec_diff'] = service.spec_diff(entity_id)
         with self.db.get_conn() as conn:
             for relation in entity['relations']:
                 relation['sources'] = service.sources(conn, 'relation', relation['id'])

@@ -7,7 +7,8 @@ import { graphApi } from './api';
 import { EntityPicker, TypeDot, type PickedEntity } from './EntityPicker';
 import { errorText } from './errors';
 import { ORIGIN_META } from './meta';
-import { entityMeta, relationLabel, useGraphSchema } from './schemaContext';
+import { entityMeta, relationLabel, ruleWarning, useGraphSchema } from './schemaContext';
+import { SpecDiffBox, TypeChanger } from './EntityEditExtras';
 import { EntityProperties } from './GraphEditing';
 import { ModelHierarchy, SpecAttributeSection, SpecValuesSection } from './SpecPanels';
 import type { GraphEntityDetail, GraphNode, GraphRelation, RelationType } from './types';
@@ -54,6 +55,7 @@ export function RelationRow({
         ? { id: relation.target_id, type: relation.target_type, name: relation.target_name }
         : { id: relation.source_id, type: relation.source_type, name: relation.source_name };
     const evidence = evidenceText(relation);
+    const warning = ruleWarning(schema, relation.type, relation.source_type, relation.target_type);
 
     const run = async (action: () => Promise<void>) => {
         setBusy(true);
@@ -89,6 +91,7 @@ export function RelationRow({
                 )}
                 <OriginBadge relation={relation} />
             </div>
+            {warning && <p className="mt-1 rounded bg-warn-soft/60 px-1.5 py-0.5 text-[11px] text-ink/80" title="규칙은 문서 자동 추출만 거릅니다. 의도한 관계면 그대로 두세요">⚠ {warning}</p>}
             {!schema.editing_enabled && <p className="mt-1.5 text-xs">{relationLabel(schema, relation.type)}</p>}
             <div hidden={!schema.editing_enabled} className="mt-1.5 flex-wrap items-center gap-1.5">
                 <select
@@ -178,6 +181,7 @@ function AddRelationForm({
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [reason, setReason] = useState('');
+    const [notice, setNotice] = useState('');
     const [fileId, setFileId] = useState('');
     const [page, setPage] = useState('');
 
@@ -201,6 +205,7 @@ function AddRelationForm({
                 }
             }
             setTarget(null);
+            setNotice(relation.warnings?.length ? `만들었습니다. ${relation.warnings.join(' ')}` : '');
             onCreated(relation);
         } catch (e) {
             setError(errorText(e));
@@ -276,6 +281,7 @@ function AddRelationForm({
                 <label className="block">페이지<input type="number" min={1} className="w-full rounded border border-line p-1" value={page} onChange={(e) => setPage(e.target.value)} /></label>
                 <p>파일 선택만으로 내용이 검증되지는 않습니다.</p>
             </details>
+            {notice && <p className="mt-2 rounded bg-warn-soft/60 px-2 py-1 text-[11.5px] text-ink/80">{notice}</p>}
             {error && <p role="alert" className="mt-2 text-[11.5px] text-danger">{error}</p>}
             <div className="mt-2.5 flex justify-end">
                 <button
@@ -424,6 +430,7 @@ export function EntityPanel({
                     </p>
                 )}
                 {actionError && <p role="alert" className="mt-2 text-[11.5px] text-danger">{actionError}</p>}
+                <TypeChanger entity={entity} changed={changed} />
                 <button
                     type="button"
                     onClick={() => onFocus(entity.id)}
@@ -433,6 +440,7 @@ export function EntityPanel({
                 </button>
             </div>
 
+            <SpecDiffBox entity={entity} changed={changed} />
             <ModelHierarchy entity={entity} onOpenEntity={onOpenEntity} />
             <SpecValuesSection entity={entity} />
             <SpecAttributeSection entity={entity} onOpenEntity={onOpenEntity} />

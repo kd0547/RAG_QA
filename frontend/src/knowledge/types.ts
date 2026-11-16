@@ -37,6 +37,8 @@ export interface GraphView {
 }
 
 export interface GraphRelation {
+    /** 규칙(허용 종류 등)과 다르면 서버가 주는 경고 (만들기·바꾸기 응답에만) */
+    warnings?: string[];
     revision: number;
     sources?: FactSource[];
     id: number;
@@ -67,6 +69,15 @@ export interface GraphEntityDetail {
     spec?: { values: SpecValueItem[] } | null;
     /** 사양 값 노드의 속성 정보 */
     spec_attribute?: { key: string; name: string; unit: string; data_type: string; category: string; value_key: string | null; value_num: number | null } | null;
+    /** 사람이 종류를 바꾼 노드 (사양 투영이 되돌리지 않는다) */
+    type_locked?: number;
+    /** 사양 DB와 다른 점 (사양 노드만) */
+    spec_diff?: {
+        differs: boolean; type_changed: boolean; renamed: boolean;
+        excluded_relations: { type: string; source_key: string; source_id: number; source_name: string; target_id: number; target_name: string }[];
+    } | null;
+    /** 수정 응답의 경고 */
+    warnings?: string[];
     revision: number;
     ref_type: string | null;
     ref_id: string | null;

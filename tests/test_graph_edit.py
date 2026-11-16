@@ -141,8 +141,9 @@ def test_part_of_relation_type_is_gone(env):
     graph.replace_page(file.file_id, 1, A650_PAGE)
     with pytest.raises(LookupError):
         graph.add_relation(_id(graph, "product", "A650"), "part_of", target_id=_id(graph, "component", "RTX 5070"))
-    with pytest.raises(GraphEditError):
-        graph.add_relation(_id(graph, "product", "A650"), "has_component", target_id=_id(graph, "product", "A650"))
+    # 규칙과 다른 관계(자기 자신, 허용 종류 아님)도 사람은 넣을 수 있고 경고만 받는다 (GR5)
+    created = graph.add_relation(_id(graph, "product", "A650"), "has_component", target_id=_id(graph, "product", "A650"))
+    assert any("허용 종류가 아닙니다" in w for w in created["warnings"]) and any("자기 자신" in w for w in created["warnings"])
 
 
 def test_rename_keeps_old_name_as_alias(env):
@@ -245,7 +246,8 @@ def test_api_create_update_delete(env, monkeypatch):
         assert (relation["target_name"], relation["origin"]) == ("KC 적합등록", "manual")
 
         assert client.patch(f"/graph/relations/{relation['id']}", json={"reverse": True}).status_code == 409
-        assert client.patch(f"/graph/relations/{relation['id']}", json={"reverse": True,"expected_revision":1}).status_code == 400
+        reversed_ = client.patch(f"/graph/relations/{relation['id']}", json={"reverse": True,"expected_revision":1})
+        assert reversed_.status_code == 200 and reversed_.json()["warnings"]  # 허용 종류가 아니어도 바뀌고 경고 (GR5)
         bad = client.post("/graph/relations", json={"source_id": a650, "type": "part_of", "target_id": a650})
         assert bad.status_code == 404  # part_of 관계 종류가 없다 (GR1)
         assert client.delete("/graph/relations/999999").status_code == 404

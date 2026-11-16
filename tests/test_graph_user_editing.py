@@ -144,13 +144,15 @@ def test_dynamic_relations_property_definition_disable_and_source_deletion(env):
     edit.execute('update_property_definition',p['property_id'],{'active':False,'expected_revision':1})
     assert read.properties(a['id'])[0]['value_id']==value['value_id']
     assert len(graph.view()['edges'])==1
-    with pytest.raises(GraphEditError):
-        edit.execute('create_relation',data={'source_id':a['id'],'target_id':b['id'],'type':t['key']})
+    # 사용 중지된 관계 종류도 사람은 넣고 복구할 수 있다. 경고만 받는다 (GR5)
+    created = edit.execute('create_relation',data={'source_id':a['id'],'target_id':b['id'],'type':t['key']})
+    assert any('사용 중지' in w for w in created['warnings'])
     assert client.get('/graph/schema').json()['relation_types'][-1]['key']
     deleted = edit.execute('delete_relation',relation['id'],{'expected_revision':1})
+    edit.execute('delete_relation',created['id'],{'expected_revision':1})
     assert graph.get_entity(a['id'])['relations']==[]
-    with pytest.raises(GraphEditError):
-        edit.execute('restore_relation',relation['id'],{'expected_revision':deleted['revision']})
+    restored = edit.execute('restore_relation',relation['id'],{'expected_revision':deleted['revision']})
+    assert restored['warnings'] and restored['lifecycle_state']=='active'
 
 
 def test_single_multiple_limits_and_uncertain(env,monkeypatch):

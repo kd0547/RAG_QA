@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { request } from '../lib/http';
 import { linkProps } from '../lib/router';
 import { EntityTypeManager } from './EntityTypes';
+import { DefinitionList } from './DefinitionEditors';
+import { RuleWarnings } from './EntityEditExtras';
 import { entityMeta, typeKeys, useGraphSchema } from './schemaContext';
 import type { PropertyDefinition } from './schemaContext';
 import type { EntityType, GraphEntityDetail, PropertyValue } from './types';
@@ -102,15 +104,16 @@ export function GraphEditingToolbar({ onChanged, onSelect }: { onChanged: () => 
         <div className="flex flex-wrap gap-2">
             {schema.editing_enabled && [['entity', '객체 추가'], ['types', '개체 종류'], ['property', '속성 정의'], ['relation', '관계 종류']].map(([m, label]) =>
                 <button key={m} className={button} onClick={() => { setMode(m); setError(''); setSourceTypes(typeKeys(schema)); setTargetTypes(typeKeys(schema)); }}>{label}</button>)}
+            <button className={button} onClick={() => setMode('warnings')}>규칙 위반 목록</button>
             <button className={button} onClick={() => setMode('history')}>변경 이력</button>
             <button className={button} onClick={() => setMode('deleted')}>삭제된 항목</button>
             {!schema.editing_enabled && <span className="text-xs text-muted">읽기 전용</span>}
         </div>
         {mode && <div role="dialog" aria-modal="true" aria-label="그래프 관리" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
             <div className="max-h-[85vh] w-full max-w-xl overflow-auto rounded-xl bg-white p-5 shadow-xl">
-                <div className="mb-4 flex items-center justify-between"><h2 className="font-bold">{{ entity: '객체 추가', types: '개체 종류', property: '그래프 추가 정보 정의', relation: '관계 종류 등록', history: '변경 이력', deleted: '삭제된 항목' }[mode]}</h2>
+                <div className="mb-4 flex items-center justify-between"><h2 className="font-bold">{{ entity: '객체 추가', types: '개체 종류', property: '그래프 추가 정보 정의', relation: '관계 종류 등록', warnings: '규칙 위반 목록', history: '변경 이력', deleted: '삭제된 항목' }[mode]}</h2>
                     <button aria-label="관리 창 닫기" className={button} onClick={() => setMode('')}>닫기</button></div>
-                {mode === 'history' ? <History /> : mode === 'types' ? <EntityTypeManager onChanged={onChanged} /> : mode === 'deleted' ? <div className="space-y-2">
+                {mode === 'history' ? <History /> : mode === 'warnings' ? <RuleWarnings onSelect={(id) => { setMode(''); onSelect(id); }} /> : mode === 'types' ? <EntityTypeManager onChanged={onChanged} /> : mode === 'deleted' ? <div className="space-y-2">
                     <p className="text-xs text-muted">삭제된 상대 객체와 비활성 종류는 자동 복구하지 않습니다.</p>
                     {deleted.entity.map((e) => <div key={e.id} className="flex items-center justify-between text-sm">#{e.id} {e.name}
                         {schema.editing_enabled && <button className={button} disabled={busy} onClick={() => void run(async () => {
@@ -151,14 +154,7 @@ export function GraphEditingToolbar({ onChanged, onSelect }: { onChanged: () => 
                         <label className="block text-xs"><input type="checkbox" checked={allowSelf} onChange={(e) => setAllowSelf(e.target.checked)} /> 자기 연결 허용</label>
                         <p className="text-xs text-muted">새 관계는 자동 추론이나 사양 상속 규칙을 만들지 않습니다.</p></>}
                     <button className={primary} disabled={busy}>등록</button>
-                    {(mode === 'property' || mode === 'relation') && <div className="space-y-2 border-t border-line pt-3">
-                        <p className="text-xs font-bold">등록된 정의 · 비활성화해도 기존 값은 보존</p>
-                        {(mode === 'property' ? schema.property_definitions.map((d) => ({ id: d.property_id, ...d, builtin: false })) : schema.relation_types.map((d) => ({ id: d.key, ...d }))).map((d) =>
-                            <div key={d.id} className="flex items-center justify-between gap-2 text-xs">{d.label} · {d.key} · rev {d.revision}
-                                {!d.builtin && <button type="button" className={button} disabled={busy} onClick={() => void run(async () => {
-                                    await graphWrite(`/${mode === 'property' ? 'property-definitions' : 'relation-types'}/${d.id}`, 'PATCH', { active: !d.active, expected_revision: d.revision });
-                                })}>{d.active ? '비활성화' : '활성화'}</button>}</div>)}
-                    </div>}
+                    {(mode === 'property' || mode === 'relation') && <DefinitionList mode={mode} onChanged={onChanged} />}
                 </form>}
                 {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
             </div>

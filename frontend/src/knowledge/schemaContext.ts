@@ -26,6 +26,16 @@ export function entityMeta(schema: GraphSchema, key: EntityType): { label: strin
     const type = schema.entity_types.find((t) => t.key === key);
     return { label: type?.label ?? key, color: type?.color ?? FALLBACK_COLOR, hint: type?.description ?? '' };
 }
+/** 관계가 관계 종류의 규칙(사용 여부·허용 출발·도착 종류)과 다르면 화면에 보일 문장. 맞으면 null (지시서 GR5) */
+export function ruleWarning(schema: GraphSchema, relationType: string, sourceType: EntityType, targetType: EntityType): string | null {
+    const definition = schema.relation_types.find((r) => r.key === relationType);
+    if (!definition) return schema.relation_types.length ? '등록되지 않은 관계 종류' : null;
+    if (!definition.active) return '사용 중지된 관계 종류';
+    if (!definition.source_entity_types.includes(sourceType) || !definition.target_entity_types.includes(targetType)) {
+        return `허용 종류가 아님 (${entityMeta(schema, sourceType).label} → ${entityMeta(schema, targetType).label})`;
+    }
+    return null;
+}
 /** 선택 목록에 보일 종류 key. 기본은 사용 중인 것만, 사용 중지된 종류도 개체가 있으면 넣는다 */
 export function typeKeys(schema: GraphSchema, includeInactiveWithEntities = false): EntityType[] {
     return schema.entity_types.filter((t) => t.active || (includeInactiveWithEntities && t.entity_count > 0)).map((t) => t.key);

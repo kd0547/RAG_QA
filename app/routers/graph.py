@@ -9,7 +9,7 @@ from urllib.parse import unquote
 from graph_rag.service import index_all, index_file, search_graph
 from repository import file_repo, graph_repo, page_repo
 from repository.graph_repository import GraphEditError, GraphNotFoundError
-from graph_rag.edit_service import EffectiveGraphService, GraphEditService, GraphConflictError
+from graph_rag.edit_service import EffectiveGraphService, GraphEditService, GraphConflictError, GraphValueConversionError
 import config
 
 router = APIRouter(prefix="/graph", tags=["graph"])
@@ -24,6 +24,8 @@ def _run(fn, *args, **kwargs):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except GraphConflictError as exc:
         raise HTTPException(status_code=409, detail={"code":"revision_conflict", "message":str(exc)}) from exc
+    except GraphValueConversionError as exc:
+        raise HTTPException(status_code=400, detail={"code":"value_conversion", "message":str(exc), "values":exc.values}) from exc
     except GraphEditError as exc:
         raise HTTPException(status_code=400, detail={"code":"invalid_graph_input", "message":str(exc)}) from exc
 
@@ -120,8 +122,28 @@ def create_entity(request: Request, body: dict = Body(...)):
 
 @router.patch("/entities/{entity_id}")
 def update_entity(entity_id: int, request: Request, body: dict = Body(...)):
-    _edit(request, "update_entity", entity_id, body)
-    return graph_repo.get_entity(entity_id)
+    """이름·별칭·종류(type)를 바꾼다. 종류를 바꾸면 type_locked=1 (사양 투영이 되돌리지 않는다). 규칙과 다르면 warnings."""
+    result = _edit(request, "update_entity", entity_id, body)
+    entity = get_entity(entity_id)
+    entity["warnings"] = result.get("warnings", [])
+    return entity
+
+
+@router.post("/entities/{entity_id}/reset-spec")
+def reset_spec_entity(entity_id: int, request: Request, body: dict = Body(...)):
+    """사양 DB 기준으로 되돌리기: 이 사양 노드에 대한 사람의 편집을 지우고 다시 투영한다. 사양 DB는 바뀌지 않는다."""
+    result = _edit(request, "reset_spec_entity", entity_id, body)
+    if config.GRAPH_SPEC_SEED_ENABLED:
+        graph_repo.project_specs()
+    entity = get_entity(entity_id)
+    entity["reset"] = {k: result.get(k) for k in ("cleared_exclusions", "removed_replacements")}
+    return entity
+
+
+@router.get("/rule-warnings")
+def rule_warnings():
+    """허용 종류를 어기는 관계, 식별자 규칙을 어기는 개체 (출처별). 사람이 의도한 것이면 그대로 둔다."""
+    return EffectiveGraphService(graph_repo.db).rule_warnings()
 
 
 @router.get("/entities/{entity_id}/delete-impact")
