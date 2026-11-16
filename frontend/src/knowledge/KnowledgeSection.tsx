@@ -58,6 +58,9 @@ const EXPAND_STEP = 20;
 
 interface Expansion { view: GraphView; shown: number }
 
+/** 그래프 칸 안에 띄우는 창의 자리 (top이나 bottom 중 하나) */
+interface PopupPos { left: number; top?: number; bottom?: number; maxHeight: number }
+
 /** 펼친 노드의 이웃 순서: 이미 보이는 노드 → 사양 값이 아닌 관계(부품·인증·문서 등) → 사양 값. 같은 순위는 이름순 */
 function orderedNeighbors(centerId: number, view: GraphView, visible: Set<number>): GraphNode[] {
     const viaSpec = new Set(view.edges.filter((e) => e.type === 'has_spec').flatMap((e) => [e.source, e.target]));
@@ -136,10 +139,10 @@ function KnowledgeContent() {
     const [hideIsolatedSpec, setHideIsolatedSpec] = useState(true);
     // 선 잇기: 켜면 노드를 누를 때 선이 포인터를 따라오고, 두 번째 노드를 누르면 관계를 고르는 창이 뜬다
     const [connectMode, setConnectMode] = useState(false);
-    const [connecting, setConnecting] = useState<{ fromId: number; toId: number; x: number; y: number } | null>(null);
+    const [connecting, setConnecting] = useState<{ fromId: number; toId: number; pos: PopupPos } | null>(null);
     const [connectNotice, setConnectNotice] = useState('');
     // 끌어다 놓아 합치기: 끈 노드, 놓은 노드, 확인 창 자리, 끌기 전 위치 (취소하면 되돌린다)
-    const [merging, setMerging] = useState<{ draggedId: number; targetId: number; x: number; y: number; origin?: Point } | null>(null);
+    const [merging, setMerging] = useState<{ draggedId: number; targetId: number; pos: PopupPos; origin?: Point } | null>(null);
     const mainRef = useRef<HTMLElement>(null);
     // 계층 보기: null이면 자동 (중심 개체가 제품군이면 켬)
     const [treeChoice, setTreeChoice] = useState<boolean | null>(null);
@@ -230,15 +233,23 @@ function KnowledgeContent() {
 
     const nodeById = useMemo(() => new Map((data?.nodes ?? []).map((n) => [n.id, n])), [data]);
 
-    /** 그래프 위 확인 창 자리: 누른 곳 근처, 그래프 영역 안 */
-    const popupAt = (clientX: number, clientY: number, height: number) => {
+    /**
+     * 그래프 위 창 자리: 누른 곳 근처, 그래프 칸 안. 아래 공간이 넉넉하면 아래로, 아니면 위로 펼치고
+     * 최대 높이를 남은 공간으로 잡아 창이 길어져도(다른 관계… 등) 칸 밖으로 나가지 않고 창 안에서 스크롤된다.
+     */
+    const popupAt = (clientX: number, clientY: number, preferred: number): PopupPos => {
         const box = mainRef.current?.getBoundingClientRect();
         const width = box?.width ?? 600;
-        const boxHeight = box?.height ?? 600;
-        return {
-            x: Math.min(Math.max((clientX - (box?.left ?? 0)) + 12, 8), Math.max(8, width - 310)),
-            y: Math.min(Math.max((clientY - (box?.top ?? 0)) - 20, 8), Math.max(8, boxHeight - height)),
-        };
+        const height = box?.height ?? 600;
+        const cy = clientY - (box?.top ?? 0);
+        const left = Math.min(Math.max((clientX - (box?.left ?? 0)) + 12, 8), Math.max(8, width - 310));
+        const below = height - cy - 8;
+        if (below >= preferred || below >= cy) {
+            const top = Math.max(8, cy - 20);
+            return { left, top, maxHeight: Math.max(160, height - top - 8) };
+        }
+        const bottom = Math.max(8, height - cy - 20);
+        return { left, bottom, maxHeight: Math.max(160, height - bottom - 8) };
     };
     const canMerge = useCallback((draggedId: number, targetId: number) => (
         schema.editing_enabled && nodeById.get(draggedId)?.type === nodeById.get(targetId)?.type
@@ -472,8 +483,8 @@ function KnowledgeContent() {
                     )}
                     {merging && (
                         <div role="dialog" aria-label="같은 개체로 합치기"
-                            className="absolute z-30 w-[300px] max-h-[70%] overflow-y-auto rounded-xl border border-line bg-white p-3 shadow-xl"
-                            style={{ left: merging.x, top: merging.y }}>
+                            className="absolute z-30 w-[300px] overflow-y-auto rounded-xl border border-line bg-white p-3 shadow-xl"
+                            style={{ ...merging.pos }}>
                             <MergeConfirm key={`${merging.draggedId}-${merging.targetId}`} aId={merging.draggedId} bId={merging.targetId}
                                 onCancel={cancelMerge} onMerged={afterMerge} />
                         </div>
@@ -485,8 +496,8 @@ function KnowledgeContent() {
                         </div>
                     )}
                     {connecting && nodeById.get(connecting.fromId) && nodeById.get(connecting.toId) && (
-                        <div className="absolute z-30 w-[300px] max-h-[70%] overflow-y-auto rounded-xl border border-line bg-white p-3 shadow-xl"
-                            style={{ left: connecting.x, top: connecting.y }}>
+                        <div className="absolute z-30 w-[300px] overflow-y-auto rounded-xl border border-line bg-white p-3 shadow-xl"
+                            style={{ ...connecting.pos }}>
                             <RelationChooser
                                 a={nodeById.get(connecting.fromId)!}
                                 b={nodeById.get(connecting.toId)!}
@@ -570,13 +581,13 @@ function KnowledgeContent() {
                             connectMode={connectMode}
                             onConnect={(fromId, toId, clientX, clientY) => {
                                 setConnectNotice('');
-                                setConnecting({ fromId, toId, ...popupAt(clientX, clientY, 320) });
+                                setConnecting({ fromId, toId, pos: popupAt(clientX, clientY, 320) });
                             }}
                             canMerge={canMerge}
                             onMergeDrop={(draggedId, targetId, clientX, clientY, origin) => {
                                 setConnectNotice('');
                                 setConnecting(null);
-                                setMerging({ draggedId, targetId, origin, ...popupAt(clientX, clientY, 330) });
+                                setMerging({ draggedId, targetId, origin, pos: popupAt(clientX, clientY, 330) });
                             }}
                             onMoveNode={(id, p) => {
                                 pinnedRef.current.add(id);
