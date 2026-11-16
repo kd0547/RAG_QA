@@ -146,3 +146,7 @@
 ```
 
 하지 말 것: 설계 대안 제안, 코드 수정, "아마도"로 끝나는 판정, 평균값만 있는 전후 비교.
+
+### B-GR. 지식 그래프 정비 (2026-11-16)
+
+항목별 통과 조건(GR-1 ~ GR-9)은 [opus_development_instructions_graph_rework.md](opus_development_instructions_graph_rework.md) 10절을 따른다.

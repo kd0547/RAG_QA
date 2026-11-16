@@ -317,6 +317,8 @@ CREATE TABLE IF NOT EXISTS evidence_use (
 
 ## 6. 단계 D~H (개요, 별도 지시 예정)
 
+**2026-11-16 갱신**: 지식 그래프 정비(상위 개념 제거, 개체 종류 DB화, 추출 검사, 사양 DB 투영)는 [opus_development_instructions_graph_rework.md](opus_development_instructions_graph_rework.md). 단계 H의 "연결된 부품만 심는다"는 이 문서의 "부품 전부"로 바뀐다.
+
 **2026-11-13 갱신**: D와 I는 구현됐다. 남은 E·H·G·F와 통합 테스트의 상세 지시는 [opus_development_instructions_remaining.md](opus_development_instructions_remaining.md)에 있다. 아래 표·6-1절과 다르면 그 문서를 따른다.
 
 | 단계 | 핵심 | 설계 참조 |
