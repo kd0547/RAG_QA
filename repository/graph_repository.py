@@ -136,6 +136,16 @@ class GraphRepository:
             _prune_orphans(conn)
         return summary
 
+    def extraction_schema(self):
+        """그때의 개체·관계 종류 (지시서 GR2). 문서 추출 형식과 프롬프트를 만든다."""
+        from graph_rag.schema import load_schema
+        with self.db.get_conn() as conn:
+            return load_schema(conn)
+
+    def entity_type_keys(self) -> list[str]:
+        with self.db.get_conn() as conn:
+            return [r[0] for r in conn.execute("SELECT key FROM graph_entity_type ORDER BY sort_order, key")]
+
     def spec_names(self) -> dict[str, list[dict]]:
         """추출 프롬프트에 넘길 사양 DB의 정식 이름 (지시서 H3). 제품은 전부, 부품은 전부(페이지별로 거르는 것은 호출부).
 

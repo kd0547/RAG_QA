@@ -4,7 +4,7 @@ import hashlib
 import logging
 import uuid
 
-from graph_rag.types import RELATION_TYPES
+from graph_rag.defaults import DEFAULT_ENTITY_TYPES, DEFAULT_RELATION_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -89,20 +89,7 @@ def _migrate(conn):
         conn.execute(sql)
     if 'fact_revision' not in {r['name'] for r in conn.execute('PRAGMA table_info(graph_fact_source)')}:
         conn.execute('ALTER TABLE graph_fact_source ADD COLUMN fact_revision INTEGER NOT NULL DEFAULT 1')
-    endpoints = {
-        'has_component': (['product'], ['component']),
-        'has_certification': (['product'], ['certification']),
-        'has_number': (['product','certification'], ['cert_number']),
-        'issued_by': (['certification','cert_number'], ['organization']),
-        'complies_with': (['product','certification'], ['standard']),
-        'variant_of': (['product'], ['product']),
-    }
-    labels = ['부품', '인증', '번호', '발급 기관', '규격 준수', '상위 모델']
-    for (key, description), label in zip(RELATION_TYPES.items(), labels):
-        src, dst = endpoints[key]
-        conn.execute("""INSERT OR IGNORE INTO graph_relation_type
-          (key,label,description,source_entity_types,target_entity_types,builtin) VALUES (?,?,?,?,?,1)""",
-          (key,label,description,json.dumps(src),json.dumps(dst)))
+    _migrate_types(conn)
     # Drop the old file-based uniqueness BEFORE detaching manual source references.
     conn.execute("DROP INDEX IF EXISTS idx_graph_relation_unique")
     conn.execute("""UPDATE graph_relation SET source_key = CASE WHEN origin='manual' THEN 'manual:' || id
@@ -145,6 +132,42 @@ def _migrate(conn):
       AND NOT EXISTS (SELECT 1 FROM graph_relation_block b WHERE b.src_type=s.type AND b.src_norm=s.norm
       AND b.dst_type=d.type AND b.dst_norm=d.norm AND b.type=r.type)))""")
     remove_system_concepts(conn)
+
+
+def _migrate_types(conn):
+    """개체 종류 테이블(GR2)과 관계 종류의 추출 여부 열. 기본값은 없을 때만 넣고, 사용자가 고친 값을 덮지 않는다."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS graph_entity_type (
+      key                 TEXT PRIMARY KEY,
+      label               TEXT NOT NULL UNIQUE,
+      description         TEXT NOT NULL DEFAULT '',
+      color               TEXT NOT NULL,
+      extract             INTEGER NOT NULL DEFAULT 0,
+      requires_identifier INTEGER NOT NULL DEFAULT 0,
+      builtin             INTEGER NOT NULL DEFAULT 0,
+      active              INTEGER NOT NULL DEFAULT 1,
+      sort_order          INTEGER NOT NULL DEFAULT 0,
+      revision            INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT)""")
+    seeded = conn.execute("SELECT count(*) FROM graph_entity_type").fetchone()[0] > 0
+    for order, item in enumerate(DEFAULT_ENTITY_TYPES):
+        if seeded:
+            break  # 한 번 넣은 뒤에는 사용자가 지운 기본 종류를 되살리지 않는다
+        conn.execute("""INSERT OR IGNORE INTO graph_entity_type
+          (key,label,description,color,extract,requires_identifier,builtin,sort_order) VALUES (?,?,?,?,?,?,1,?)""",
+          (item["key"], item["label"], item["description"], item["color"], item["extract"],
+           item["requires_identifier"], order * 10))
+    relation_columns = {r["name"] for r in conn.execute("PRAGMA table_info(graph_relation_type)")}
+    if "extract" not in relation_columns:
+        conn.execute("ALTER TABLE graph_relation_type ADD COLUMN extract INTEGER NOT NULL DEFAULT 0")
+        # 열이 새로 생길 때만: 기존 기본 관계 중 문서 추출에 쓰던 것은 1 (지금 동작 유지)
+        for item in DEFAULT_RELATION_TYPES:
+            if item["extract"]:
+                conn.execute("UPDATE graph_relation_type SET extract=1 WHERE key=? AND builtin=1", (item["key"],))
+    for item in DEFAULT_RELATION_TYPES:
+        conn.execute("""INSERT OR IGNORE INTO graph_relation_type
+          (key,label,description,source_entity_types,target_entity_types,builtin,extract) VALUES (?,?,?,?,?,1,?)""",
+          (item["key"], item["label"], item["description"], json.dumps(item["source"]), json.dumps(item["target"]),
+           item["extract"]))
 
 
 def remove_system_concepts(conn):

@@ -6,8 +6,8 @@ import { reviewPath } from '../rag/api';
 import { graphApi } from './api';
 import { EntityPicker, TypeDot, type PickedEntity } from './EntityPicker';
 import { errorText } from './errors';
-import { ENTITY_META, ORIGIN_META } from './meta';
-import { relationLabel, useGraphSchema } from './schemaContext';
+import { ORIGIN_META } from './meta';
+import { entityMeta, relationLabel, useGraphSchema } from './schemaContext';
 import { EntityProperties } from './GraphEditing';
 import type { GraphEntityDetail, GraphNode, GraphRelation, RelationType } from './types';
 
@@ -170,7 +170,7 @@ function AddRelationForm({
     requestPick: RequestPick;
 }) {
     const { schema } = useGraphSchema();
-    const [type, setType] = useState<RelationType>(entity.type === 'certification' ? 'part_of' : 'has_component');
+    const [type, setType] = useState<RelationType>(entity.type === 'certification' ? 'issued_by' : 'has_component');
     const [outgoing, setOutgoing] = useState(true);
     const [target, setTarget] = useState<PickedEntity | null>(null);
     const [picking, setPicking] = useState(false);
@@ -239,7 +239,7 @@ function AddRelationForm({
                     <div className="flex min-w-0 items-center gap-1.5 rounded-md border border-line bg-white px-2 py-1">
                         <TypeDot type={target.type} />
                         <span className="min-w-0 flex-1 truncate font-semibold">{target.name}</span>
-                        {target.kind === 'new' && <span className="shrink-0 text-[10.5px] text-brand-hover">새 {ENTITY_META[target.type].label}</span>}
+                        {target.kind === 'new' && <span className="shrink-0 text-[10.5px] text-brand-hover">새 {entityMeta(schema, target.type).label}</span>}
                         <button type="button" onClick={() => setTarget(null)} aria-label="대상 지우기" className="shrink-0 px-1 text-muted hover:text-ink">×</button>
                     </div>
                 ) : (
@@ -353,7 +353,7 @@ export function EntityPanel({
     if (loadError) return <p role="alert" className="p-4 text-[12.5px] text-danger">{loadError}</p>;
     if (!entity || entity.id !== entityId) return <p className="p-4 text-[12.5px] text-muted">불러오는 중…</p>;
 
-    const meta = ENTITY_META[entity.type];
+    const meta = entityMeta(schema, entity.type);
     const otherAliases = entity.aliases.filter((a) => a !== entity.name);
 
     const rename = async () => {

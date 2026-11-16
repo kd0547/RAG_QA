@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { request } from '../lib/http';
 import { linkProps } from '../lib/router';
-import { ENTITY_META, ENTITY_TYPES } from './meta';
-import { useGraphSchema } from './schemaContext';
+import { EntityTypeManager } from './EntityTypes';
+import { entityMeta, typeKeys, useGraphSchema } from './schemaContext';
 import type { PropertyDefinition } from './schemaContext';
 import type { EntityType, GraphEntityDetail, PropertyValue } from './types';
 import { graphWrite } from './write';
@@ -33,10 +33,11 @@ function History({ entityId }: { entityId?: number }) {
     </div>;
 }
 
-function TypeChoices({ label, values, change }: { label: string; values: EntityType[]; change: (v: EntityType[]) => void }) {
+export function TypeChoices({ label, values, change }: { label: string; values: EntityType[]; change: (v: EntityType[]) => void }) {
+    const { schema } = useGraphSchema();
     return <fieldset className="rounded border border-line p-2"><legend className="text-xs">{label}</legend><div className="flex flex-wrap gap-2">
-        {ENTITY_TYPES.map((t) => <label key={t} className="text-xs"><input type="checkbox" checked={values.includes(t)}
-            onChange={() => change(values.includes(t) ? values.filter((v) => v !== t) : [...values, t])} /> {ENTITY_META[t].label}</label>)}
+        {typeKeys(schema).map((t) => <label key={t} className="text-xs"><input type="checkbox" checked={values.includes(t)}
+            onChange={() => change(values.includes(t) ? values.filter((v) => v !== t) : [...values, t])} /> {entityMeta(schema, t).label}</label>)}
     </div></fieldset>;
 }
 
@@ -50,8 +51,8 @@ export function GraphEditingToolbar({ onChanged, onSelect }: { onChanged: () => 
     const [unit, setUnit] = useState('');
     const [choices, setChoices] = useState('');
     const [description, setDescription] = useState('');
-    const [sourceTypes, setSourceTypes] = useState<EntityType[]>([...ENTITY_TYPES]);
-    const [targetTypes, setTargetTypes] = useState<EntityType[]>([...ENTITY_TYPES]);
+    const [sourceTypes, setSourceTypes] = useState<EntityType[]>([]);
+    const [targetTypes, setTargetTypes] = useState<EntityType[]>([]);
     const [multiple, setMultiple] = useState(false);
     const [allowSelf, setAllowSelf] = useState(false);
     const [actor, setActor] = useState(sessionStorage.getItem('graph-edit-actor') ?? '');
@@ -99,17 +100,17 @@ export function GraphEditingToolbar({ onChanged, onSelect }: { onChanged: () => 
     return <div className="border-b border-line bg-white px-3 py-2">
         {schemaError && <p role="alert" className="text-danger">{schemaError}</p>}
         <div className="flex flex-wrap gap-2">
-            {schema.editing_enabled && [['entity', '객체 추가'], ['property', '속성 정의'], ['relation', '관계 종류']].map(([m, label]) =>
-                <button key={m} className={button} onClick={() => { setMode(m); setError(''); }}>{label}</button>)}
+            {schema.editing_enabled && [['entity', '객체 추가'], ['types', '개체 종류'], ['property', '속성 정의'], ['relation', '관계 종류']].map(([m, label]) =>
+                <button key={m} className={button} onClick={() => { setMode(m); setError(''); setSourceTypes(typeKeys(schema)); setTargetTypes(typeKeys(schema)); }}>{label}</button>)}
             <button className={button} onClick={() => setMode('history')}>변경 이력</button>
             <button className={button} onClick={() => setMode('deleted')}>삭제된 항목</button>
             {!schema.editing_enabled && <span className="text-xs text-muted">읽기 전용</span>}
         </div>
         {mode && <div role="dialog" aria-modal="true" aria-label="그래프 관리" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
             <div className="max-h-[85vh] w-full max-w-xl overflow-auto rounded-xl bg-white p-5 shadow-xl">
-                <div className="mb-4 flex items-center justify-between"><h2 className="font-bold">{{ entity: '객체 추가', property: '그래프 추가 정보 정의', relation: '관계 종류 등록', history: '변경 이력', deleted: '삭제된 항목' }[mode]}</h2>
+                <div className="mb-4 flex items-center justify-between"><h2 className="font-bold">{{ entity: '객체 추가', types: '개체 종류', property: '그래프 추가 정보 정의', relation: '관계 종류 등록', history: '변경 이력', deleted: '삭제된 항목' }[mode]}</h2>
                     <button aria-label="관리 창 닫기" className={button} onClick={() => setMode('')}>닫기</button></div>
-                {mode === 'history' ? <History /> : mode === 'deleted' ? <div className="space-y-2">
+                {mode === 'history' ? <History /> : mode === 'types' ? <EntityTypeManager onChanged={onChanged} /> : mode === 'deleted' ? <div className="space-y-2">
                     <p className="text-xs text-muted">삭제된 상대 객체와 비활성 종류는 자동 복구하지 않습니다.</p>
                     {deleted.entity.map((e) => <div key={e.id} className="flex items-center justify-between text-sm">#{e.id} {e.name}
                         {schema.editing_enabled && <button className={button} disabled={busy} onClick={() => void run(async () => {
@@ -129,7 +130,7 @@ export function GraphEditingToolbar({ onChanged, onSelect }: { onChanged: () => 
                 </div> : <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void save(); }}>
                     <label className="block text-xs">담당자 표시 (본인 확인 안 됨)<input className={input} value={actor} onChange={(e) => setActor(e.target.value)} maxLength={100} /></label>
                     {mode === 'entity' && <><label className="block text-xs">객체 종류<select className={input} value={entityType} onChange={(e) => { setEntityType(e.target.value as EntityType); setSpecId(''); }}>
-                        {ENTITY_TYPES.map((t) => <option key={t} value={t}>{ENTITY_META[t].label}</option>)}</select></label>
+                        {typeKeys(schema).map((t) => <option key={t} value={t}>{entityMeta(schema, t).label}</option>)}</select></label>
                         {['product', 'component'].includes(entityType) && <div className="space-y-2 rounded bg-surface p-2">
                             <label className="block text-xs">기존 사양 DB 항목 검색<input className={input} value={specQuery} onChange={(e) => setSpecQuery(e.target.value)} /></label>
                             <select aria-label="사양 DB 연결" className={input} value={specId} onChange={(e) => { setSpecId(e.target.value); const item = specOptions.find((v) => v.id === e.target.value); if (item) setName(item.model); }}>

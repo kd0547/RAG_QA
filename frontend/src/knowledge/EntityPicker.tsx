@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 
 import { graphApi } from './api';
-import { ENTITY_META, ENTITY_TYPES } from './meta';
+import { entityMeta, typeKeys, useGraphSchema } from './schemaContext';
 import type { EntityType, GraphEntitySummary } from './types';
 
 export type PickedEntity =
@@ -9,7 +9,8 @@ export type PickedEntity =
     | { kind: 'new'; type: EntityType; name: string };
 
 export function TypeDot({ type, className = 'w-2 h-2' }: { type: EntityType; className?: string }) {
-    return <span aria-hidden className={`inline-block shrink-0 rounded-full ${className}`} style={{ background: ENTITY_META[type].color }} />;
+    const { schema } = useGraphSchema();
+    return <span aria-hidden className={`inline-block shrink-0 rounded-full ${className}`} style={{ background: entityMeta(schema, type).color }} />;
 }
 
 /**
@@ -34,6 +35,7 @@ export function EntityPicker({
     onPick: (picked: PickedEntity) => void;
 }) {
     const inputId = useId();
+    const { schema } = useGraphSchema();
     const [text, setText] = useState('');
     const [results, setResults] = useState<GraphEntitySummary[]>([]);
     const [open, setOpen] = useState(false);
@@ -112,7 +114,7 @@ export function EntityPicker({
                         >
                             <TypeDot type={r.type} />
                             <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                            <span className="shrink-0 text-[11px] text-muted">{ENTITY_META[r.type].label}</span>
+                            <span className="shrink-0 text-[11px] text-muted">{entityMeta(schema, r.type).label}</span>
                         </button>
                     ))}
                     {!visible.length && !error && <p className="px-3 py-2 text-[12px] text-muted">맞는 개체가 없습니다.</p>}
@@ -126,7 +128,7 @@ export function EntityPicker({
                                     onChange={(e) => setNewType(e.target.value as EntityType)}
                                     className="h-8 rounded-md border border-line bg-white px-1.5 text-[12px]"
                                 >
-                                    {ENTITY_TYPES.map((t) => <option key={t} value={t}>{ENTITY_META[t].label}</option>)}
+                                    {typeKeys(schema).map((t) => <option key={t} value={t}>{entityMeta(schema, t).label}</option>)}
                                 </select>
                                 <button
                                     type="button"

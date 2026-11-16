@@ -60,7 +60,7 @@ def index_page(file_id: str, page: int) -> dict:
     rows = page_repo.pages_with_number(file_id, page)
     text = "\n\n".join(r["text"] for r in rows if r["text"])
     names = spec_names()
-    graph = extract_page_graph(text, **_known_kwargs(names, text))
+    graph = extract_page_graph(text, schema=graph_repo.extraction_schema(), **_known_kwargs(names, text))
     result = graph_repo.replace_page(file_id, page, graph, link_specs=names is not None)
     logger.info("그래프 페이지 추출: file_id=%s, page=%s, %s", file_id, page, result)
     return result
@@ -76,11 +76,12 @@ def index_file(file_id: str) -> dict:
 
     graph_repo.delete_file(file_id)
     names = spec_names()
+    schema = graph_repo.extraction_schema()  # 파일 하나를 뽑는 동안 같은 종류 목록을 쓴다
     entities = relations = failed = 0
     for page, parts in sorted(texts.items()):
         try:
             text = "\n\n".join(parts)
-            graph = extract_page_graph(text, **_known_kwargs(names, text))
+            graph = extract_page_graph(text, schema=schema, **_known_kwargs(names, text))
             result = graph_repo.replace_page(file_id, page, graph, link_specs=names is not None)
         except Exception:
             failed += 1

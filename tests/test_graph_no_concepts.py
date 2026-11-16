@@ -9,7 +9,8 @@ if not hasattr(sys.modules.get("parser"), "__path__"):
 
 from agent.prompt import PROMPT_V2_TEMPLATE, PROMPT_V3_TEMPLATE, render_prompt  # noqa: E402
 from graph_rag import service  # noqa: E402
-from graph_rag.types import ENTITY_TYPES, RELATION_TYPES, ExtractedEntity, PageGraph  # noqa: E402
+from graph_rag.defaults import DEFAULT_ENTITY_TYPES  # noqa: E402
+from graph_rag.types import RELATION_TYPES, ExtractedEntity, PageGraph  # noqa: E402
 from repository.graph_migration import remove_system_concepts  # noqa: E402
 from repository.graph_repository import GraphRepository  # noqa: E402
 from repository.repo_connect import Database  # noqa: E402
@@ -84,7 +85,7 @@ def test_direct_call_twice_reports_zero_second_time(tmp_path):
 
 
 def test_no_concept_type_relation_or_extract_field():
-    assert "concept" not in ENTITY_TYPES and "part_of" not in RELATION_TYPES
+    assert "concept" not in {t["key"] for t in DEFAULT_ENTITY_TYPES} and "part_of" not in RELATION_TYPES
     assert "concept" not in ExtractedEntity.model_fields
     assert not (ROOT / "aliases.yaml").exists()
 

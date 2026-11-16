@@ -4,24 +4,22 @@ from __future__ import annotations
 import logging
 import re
 
+from pydantic import BaseModel
+
 import config
-from graph_rag.types import (
-    ENTITY_TYPES, NON_EXTRACT_RELATIONS, RELATION_ENDPOINT_TYPES, RELATION_TYPES, ExtractedEntity, PageGraph, normalize,
-)
+from graph_rag.schema import ExtractionSchema, default_schema, page_graph_model
+from graph_rag.types import RELATION_ENDPOINT_TYPES, ExtractedEntity, PageGraph, normalize
 
 logger = logging.getLogger(__name__)
 
-_ENTITY_GUIDE = "\n".join(f"- {k}: {v}" for k, v in ENTITY_TYPES.items())
-_RELATION_GUIDE = "\n".join(f"- {k}: {v}" for k, v in RELATION_TYPES.items() if k not in NON_EXTRACT_RELATIONS)
-
-EXTRACT_PROMPT = f"""당신은 사내 문서(제품 제안서, 세일즈 가이드, 인증서, 시험성적서)에서 검색용 지식 그래프를 만드는 추출기입니다.
+_PROMPT_TEMPLATE = """당신은 사내 문서(제품 제안서, 세일즈 가이드, 인증서, 시험성적서)에서 검색용 지식 그래프를 만드는 추출기입니다.
 주어진 페이지에서 아래 종류의 개체와 관계만 뽑으세요.
 
 ## 개체 종류
-{_ENTITY_GUIDE}
+{entity_guide}
 
 ## 관계 종류 (source -> target)
-{_RELATION_GUIDE}
+{relation_guide}
 
 ## 규칙
 - 페이지에 실제로 적힌 표기만 쓰세요. 추측하거나 일반 지식으로 채우지 마세요.
@@ -29,6 +27,29 @@ EXTRACT_PROMPT = f"""당신은 사내 문서(제품 제안서, 세일즈 가이�
 - 같은 대상을 다르게 쓴 표기는 aliases에 넣고 하나의 개체로 뽑으세요.
 - relations의 source와 target은 entities의 name과 똑같이 쓰세요.
 - 뽑을 것이 없으면 빈 목록을 돌려주세요."""
+
+
+
+def _type_label(schema: ExtractionSchema, key: str) -> str:
+    row = schema.all_entity_types.get(key)
+    return f"{key}({row['label']})" if row else key
+
+
+def build_extract_prompt(schema: ExtractionSchema) -> str:
+    """추출 프롬프트. 종류 안내는 테이블의 description, 관계 안내는 description과 허용 출발·도착 종류로 만든다 (GR2)."""
+    entity_guide = "\n".join(f"- {_type_label(schema, t['key'])}: {t['description']}" for t in schema.entity_types) or "- (없음)"
+    allowed = set(schema.entity_keys)
+    lines = []
+    for r in schema.relation_types:
+        sources = [k for k in r["source_entity_types"] if k in allowed]
+        targets = [k for k in r["target_entity_types"] if k in allowed]
+        ends = f" (출발: {', '.join(sources) or '-'} → 도착: {', '.join(targets) or '-'})"
+        lines.append(f"- {r['key']}({r['label']}): {r['description']}{ends}")
+    return _PROMPT_TEMPLATE.format(entity_guide=entity_guide, relation_guide="\n".join(lines) or "- (없음)")
+
+
+# 기본 종류로 만든 프롬프트 (DB 없이 부를 때와 테스트용)
+EXTRACT_PROMPT = build_extract_prompt(default_schema())
 
 _KNOWN_GUIDE = """
 
@@ -41,26 +62,34 @@ _KNOWN_GUIDE = """
 _KC_REGISTRATION = re.compile(r"\b(?:R|MSIP|KCC)-[A-Z]{1,3}-[A-Za-z0-9]{2,6}-[A-Za-z0-9][A-Za-z0-9\-]{1,30}\b")
 
 
-def extract_page_graph(text: str, llm=None, known: list[dict] | None = None) -> PageGraph:
+def extract_page_graph(text: str, llm=None, known: list[dict] | None = None,
+                       schema: ExtractionSchema | None = None) -> PageGraph:
     """한 페이지 텍스트의 개체·관계. LLM이 실패하면 예외를 그대로 던진다 (호출부가 기록).
+
+    schema는 그때의 개체·관계 종류다 (graph_repo.extraction_schema()). None이면 기본 종류를 쓴다.
+    활성·추출 대상 종류로 구조화 출력 형식(type Literal)을 만든다. 뽑을 종류가 없으면 LLM을 부르지 않는다.
 
     known은 사양 DB의 정식 이름 [{"type": "product"|"component", "name": 모델명, "aliases": [다른 표기]}]이다 (지시서 H3).
     주면 같은 대상을 정식 이름으로 뽑게 하고, 정식 이름이 페이지에 없어도 별칭 중 하나가 있으면 남긴다.
     None이면 프롬프트와 걸러내기가 예전과 같다.
     """
     text = (text or "").strip()
-    if not text:
+    schema = schema or default_schema()
+    model = page_graph_model(schema)
+    if not text or model is None:
         return PageGraph()
 
     if llm is None:
         from agent.llm_provider import get_llm_model  # 서버 부트스트랩이 주입한 모델
         llm = get_llm_model("local")
-    structured = llm.with_structured_output(PageGraph)
+    structured = llm.with_structured_output(model)
     result = structured.invoke([
-        {"role": "system", "content": _system_prompt(known)},
+        {"role": "system", "content": _system_prompt(known, schema)},
         {"role": "user", "content": text[:config.GRAPH_EXTRACT_MAX_CHARS]},
     ])
-    graph = result if isinstance(result, PageGraph) else PageGraph.model_validate(result or {})
+    if isinstance(result, BaseModel):
+        result = result.model_dump()
+    graph = PageGraph.model_validate(result or {})
     _add_relation_endpoints(graph)
     _add_registration_numbers(graph, text)
     graph = _keep_grounded(graph, text, {normalize(k["name"]) for k in known or []} - {""})
@@ -70,8 +99,8 @@ def extract_page_graph(text: str, llm=None, known: list[dict] | None = None) -> 
 _KNOWN_TYPE_LABELS = {"product": "제품", "component": "부품"}
 
 
-def _system_prompt(known: list[dict] | None = None) -> str:
-    prompt = EXTRACT_PROMPT
+def _system_prompt(known: list[dict] | None = None, schema: ExtractionSchema | None = None) -> str:
+    prompt = EXTRACT_PROMPT if schema is None else build_extract_prompt(schema)
     if known:
         items = []
         for item in known:

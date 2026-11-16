@@ -9,7 +9,8 @@ import uuid
 from datetime import date
 
 import config
-from graph_rag.types import ENTITY_TYPES, normalize
+from graph_rag.defaults import PALETTE, PROJECTION_TYPES
+from graph_rag.types import normalize
 from repository.graph_repository import GraphEditError, GraphNotFoundError, _add_alias, _upsert_entity
 
 
@@ -35,8 +36,12 @@ class EffectiveGraphService:
 
     def schema(self):
         with self.db.get_conn() as conn:
+            entity_types = [{**dict(r), 'used_by_projection': r['key'] in PROJECTION_TYPES,
+                             'entity_count': conn.execute(
+                                 "SELECT count(*) FROM graph_entity WHERE type=? AND lifecycle_state!='merged'", (r['key'],)).fetchone()[0]}
+                            for r in conn.execute('SELECT * FROM graph_entity_type ORDER BY sort_order,key')]
             return {
-                'entity_types': [{'key': k, 'description': v} for k, v in ENTITY_TYPES.items()],
+                'entity_types': entity_types,
                 'relation_types': [decoded(r) for r in conn.execute('SELECT * FROM graph_relation_type ORDER BY builtin DESC,key')],
                 'property_definitions': [decoded(r) for r in conn.execute('SELECT * FROM graph_property_definition ORDER BY property_id')],
                 'schema_revision': conn.execute('SELECT coalesce(max(event_id),0) FROM graph_edit_event').fetchone()[0],
@@ -138,7 +143,7 @@ class GraphEditService(EffectiveGraphService):
         for field in ('expected_revision','target_revision','property_id','entity_id','source_id','target_id','page'):
             if data.get(field) is not None and (type(data[field]) is not int or data[field] < 1):
                 raise GraphEditError(f'{field}: 양의 정수여야 합니다.')
-        for field in ('multiple','allow_self','reverse','active'):
+        for field in ('multiple','allow_self','reverse','active','extract','requires_identifier'):
             if field in data and type(data[field]) is not bool:
                 raise GraphEditError(f'{field}: 참/거짓 값이어야 합니다.')
         for field in ('file_id','ref_type','ref_id','type'):
@@ -202,8 +207,13 @@ class GraphEditService(EffectiveGraphService):
             raise GraphEditError(f'{field}: 1~{maximum}자 문자열을 입력하세요.' if required else f'{field}: {maximum}자 이하 문자열이어야 합니다.')
         return value.strip()
 
+    def _type_keys(self, active_only=False):
+        sql = 'SELECT key FROM graph_entity_type' + (' WHERE active=1' if active_only else '') + ' ORDER BY sort_order,key'
+        return [r[0] for r in self.conn.execute(sql)]
+
     def _types(self, values):
-        if not isinstance(values,list) or not values or any(not isinstance(v,str) or v not in ENTITY_TYPES for v in values):
+        known = set(self._type_keys())
+        if not isinstance(values,list) or not values or any(not isinstance(v,str) or v not in known for v in values):
             raise GraphEditError('객체 종류 목록을 확인하세요.')
         return packed(sorted(set(values)))
 
@@ -220,7 +230,7 @@ class GraphEditService(EffectiveGraphService):
     def _create_entity(self, _, data):
         kind = data.get('type')
         name = self._text(data.get('name'),'name')
-        if not isinstance(kind,str) or kind not in ENTITY_TYPES or len(normalize(name)) < 2:
+        if not isinstance(kind,str) or kind not in self._type_keys() or len(normalize(name)) < 2:
             raise GraphEditError('객체 종류와 이름(기호 제외 2자 이상)을 확인하세요.')
         ref_type, ref_id = data.get('ref_type'), data.get('ref_id')
         if bool(ref_type) != bool(ref_id) or (ref_type and (ref_type not in ('product','component') or ref_type != kind)):
@@ -302,13 +312,145 @@ class GraphEditService(EffectiveGraphService):
         key, label = self._key(data.get('key')), self._text(data.get('label'),'label')
         self._unique('graph_relation_type',key,label)
         self.conn.execute("""INSERT INTO graph_relation_type
-          (key,label,description,source_entity_types,target_entity_types,allow_self) VALUES (?,?,?,?,?,?)""",
+          (key,label,description,source_entity_types,target_entity_types,allow_self,extract) VALUES (?,?,?,?,?,?,?)""",
           (key,label,self._text(data.get('description',''),'description',config.GRAPH_EDIT_TEXT_LIMIT,False),
-           self._types(data.get('source_entity_types',list(ENTITY_TYPES))),
-           self._types(data.get('target_entity_types',list(ENTITY_TYPES))),int(bool(data.get('allow_self',False)))))
+           self._types(data.get('source_entity_types',self._type_keys(True))),
+           self._types(data.get('target_entity_types',self._type_keys(True))),int(bool(data.get('allow_self',False))),
+           int(bool(data.get('extract',False)))))
         row = self._row('graph_relation_type','key',key)
         self._event('relation_type',key,'create',None,row)
         return decoded(row)
+
+    # ---------------------------------------------------------------- 개체 종류 (지시서 GR2)
+
+    def _color(self, value):
+        if value is None:
+            used = {r[0].upper() for r in self.conn.execute('SELECT color FROM graph_entity_type')}
+            return next((c for c in PALETTE if c.upper() not in used), PALETTE[0])
+        if not isinstance(value,str) or not re.fullmatch(r'#[0-9A-Fa-f]{6}', value):
+            raise GraphEditError('color: #RRGGBB 형식이어야 합니다.')
+        return value.upper()
+
+    def _sort_order(self, value):
+        if type(value) is not int or not -100000 <= value <= 100000:
+            raise GraphEditError('sort_order: 정수여야 합니다.')
+        return value
+
+    def _entity_type_label(self, label, key=None):
+        label = self._text(label,'label')
+        if self.conn.execute('SELECT 1 FROM graph_entity_type WHERE lower(label)=lower(?) AND key!=?',(label,key or '')).fetchone():
+            raise GraphConflictError('이미 등록된 종류 이름입니다.')
+        return label
+
+    def _create_entity_type(self, _, data):
+        key = data.get('key')
+        if not isinstance(key,str) or not re.fullmatch(r'[a-z][a-z0-9_]{1,29}', key):
+            raise GraphEditError('key: 영문 소문자로 시작하는 2~30자 (소문자·숫자·_)여야 합니다.')
+        if self.conn.execute('SELECT 1 FROM graph_entity_type WHERE key=?',(key,)).fetchone():
+            raise GraphConflictError('이미 등록된 종류 키입니다.')
+        label = self._entity_type_label(data.get('label'))
+        order = data.get('sort_order')
+        if order is None:
+            order = (self.conn.execute('SELECT coalesce(max(sort_order),0) FROM graph_entity_type').fetchone()[0] or 0) + 10
+        self.conn.execute("""INSERT INTO graph_entity_type
+          (key,label,description,color,extract,requires_identifier,active,sort_order) VALUES (?,?,?,?,?,?,?,?)""",
+          (key,label,self._text(data.get('description',''),'description',config.GRAPH_EDIT_TEXT_LIMIT,False),
+           self._color(data.get('color')),int(bool(data.get('extract',False))),int(bool(data.get('requires_identifier',False))),
+           int(data.get('active',True)),self._sort_order(order)))
+        row = self._row('graph_entity_type','key',key)
+        self._event('entity_type',key,'create',None,row)
+        return row
+
+    def _update_entity_type(self, key, data):
+        row = self._row('graph_entity_type','key',key)
+        self._revision(row,data)
+        allowed = {'label','description','color','extract','requires_identifier','active','sort_order','expected_revision'}
+        if set(data)-allowed:
+            raise GraphEditError('바꿀 수 없는 필드입니다: ' + ', '.join(sorted(set(data)-allowed)) + ' (key는 바꾸지 않습니다)')
+        changes = {}
+        if 'label' in data:
+            changes['label'] = self._entity_type_label(data['label'],key)
+        if 'description' in data:
+            changes['description'] = self._text(data['description'],'description',config.GRAPH_EDIT_TEXT_LIMIT,False)
+        if 'color' in data:
+            changes['color'] = self._color(data['color'])
+        for flag in ('extract','requires_identifier','active'):
+            if flag in data:
+                changes[flag] = int(data[flag])
+        if 'sort_order' in data:
+            changes['sort_order'] = self._sort_order(data['sort_order'])
+        if not changes:
+            raise GraphEditError('변경할 필드가 없습니다.')
+        return self._update('graph_entity_type','key',key,changes,'entity_type',row)
+
+    def _replace_type_in_definitions(self, key, into):
+        """관계 종류의 허용 출발·도착 종류, 속성 정의의 적용 종류에서 key를 into로 바꾼다 (into가 None이면 뺀다)."""
+        emptied = []
+        for table, ident, columns in (('graph_relation_type','key',('source_entity_types','target_entity_types')),
+                                      ('graph_property_definition','property_id',('allowed_entity_types',))):
+            for row in self.conn.execute(f"SELECT * FROM {table}").fetchall():
+                changes = {}
+                for column in columns:
+                    values = json.loads(row[column])
+                    if key not in values:
+                        continue
+                    values = [v for v in values if v != key] + ([into] if into else [])
+                    if not values:
+                        emptied.append(f"{row['label']}({column})")
+                    changes[column] = packed(sorted(set(values)))
+                if changes:
+                    self._update(table,ident,row[ident],changes,'relation_type' if table=='graph_relation_type' else 'property_definition',dict(row))
+        if emptied:
+            raise GraphEditError('이 종류만 허용하는 정의가 있습니다. 먼저 허용 종류를 고치세요: ' + ', '.join(emptied))
+
+    def _merge_entity_type(self, key, data):
+        """이 종류의 개체를 모두 다른 종류로 옮기고 종류를 지운다. 같은 이름의 개체가 옮길 종류에 있으면 개체 병합 규칙을 따른다."""
+        row = self._row('graph_entity_type','key',key)
+        self._revision(row,data)
+        into = data.get('into')
+        if not isinstance(into,str) or into == key:
+            raise GraphEditError('into: 합칠 다른 종류의 key를 지정하세요.')
+        target_type = self._row('graph_entity_type','key',into)
+        moved = merged = 0
+        for entity in self.conn.execute("SELECT * FROM graph_entity WHERE type=? AND lifecycle_state!='merged' ORDER BY id",(key,)).fetchall():
+            norms = {entity['norm']} | {r[0] for r in self.conn.execute('SELECT alias_norm FROM graph_alias WHERE entity_id=?',(entity['id'],))}
+            marks = ','.join('?'*len(norms))
+            other = self.conn.execute(f"""SELECT DISTINCT e.* FROM graph_entity e LEFT JOIN graph_alias a ON a.entity_id=e.id
+              WHERE e.type=? AND (e.norm IN ({marks}) OR a.alias_norm IN ({marks}))
+              ORDER BY e.lifecycle_state='merged', e.id LIMIT 1""",(into,*norms,*norms)).fetchone()
+            while other is not None and other['lifecycle_state']=='merged' and other['merged_into_id']:
+                other = self.conn.execute('SELECT * FROM graph_entity WHERE id=?',(other['merged_into_id'],)).fetchone()
+            if other is None:
+                self._update('graph_entity','id',entity['id'],{'type':into,'manual_retained':1},'entity',self._row('graph_entity','id',entity['id']),'retype')
+                moved += 1
+                continue
+            if entity['lifecycle_state']!='active' or other['lifecycle_state']!='active':
+                raise GraphConflictError(f"같은 이름의 개체가 삭제 상태라 합칠 수 없습니다: #{entity['id']} {entity['name']} ↔ #{other['id']} {other['name']}. 먼저 복구하세요.")
+            self._merge_entity(entity['id'],{'target_id':other['id'],'expected_revision':entity['revision'],
+                                             'target_revision':other['revision']},allow_type_change=True)
+            merged += 1
+        self._replace_type_in_definitions(key,into)
+        for block in self.conn.execute('SELECT * FROM graph_relation_block WHERE src_type=? OR dst_type=?',(key,key)).fetchall():
+            self.conn.execute('DELETE FROM graph_relation_block WHERE src_type=? AND src_norm=? AND type=? AND dst_type=? AND dst_norm=?',
+                              (block['src_type'],block['src_norm'],block['type'],block['dst_type'],block['dst_norm']))
+            self.conn.execute('INSERT OR IGNORE INTO graph_relation_block (src_type,src_norm,type,dst_type,dst_norm) VALUES (?,?,?,?,?)',
+                              (into if block['src_type']==key else block['src_type'],block['src_norm'],block['type'],
+                               into if block['dst_type']==key else block['dst_type'],block['dst_norm']))
+        self.conn.execute('DELETE FROM graph_entity_type WHERE key=?',(key,))
+        result = {'key':key,'into':into,'moved':moved,'merged':merged,'into_label':target_type['label']}
+        self._event('entity_type',key,'merge',row,result)
+        return result
+
+    def _delete_entity_type(self, key, data):
+        row = self._row('graph_entity_type','key',key)
+        self._revision(row,data)
+        count = self.conn.execute("SELECT count(*) FROM graph_entity WHERE type=? AND lifecycle_state!='merged'",(key,)).fetchone()[0]
+        if count:
+            raise GraphEditError(f'이 종류의 개체가 {count}개 있습니다. 개체를 잃지 않도록 "합치기"로 다른 종류에 옮기세요.')
+        self._replace_type_in_definitions(key,None)
+        self.conn.execute('DELETE FROM graph_entity_type WHERE key=?',(key,))
+        self._event('entity_type',key,'delete',row,None)
+        return {'key':key,'deleted':True}
 
     def _create_property_definition(self, _, data):
         key, label = self._key(data.get('key')), self._text(data.get('label'),'label')
@@ -328,7 +470,7 @@ class GraphEditService(EffectiveGraphService):
             raise GraphEditError('선택지는 중복될 수 없습니다.')
         identity = self.conn.execute("""INSERT INTO graph_property_definition
           (key,label,value_type,unit,allowed_values,allowed_entity_types,multiple) VALUES (?,?,?,?,?,?,?)""",
-          (key,label,value_type,unit,packed(choices),self._types(data.get('allowed_entity_types',list(ENTITY_TYPES))),int(bool(data.get('multiple',False))))).lastrowid
+          (key,label,value_type,unit,packed(choices),self._types(data.get('allowed_entity_types',self._type_keys(True))),int(bool(data.get('multiple',False))))).lastrowid
         row = self._row('graph_property_definition','property_id',identity)
         self._event('property_definition',identity,'create',None,row)
         return decoded(row)
@@ -338,7 +480,7 @@ class GraphEditService(EffectiveGraphService):
         self._revision(row,data)
         if row.get('builtin'):
             raise GraphEditError('시스템 관계의 의미와 정의는 고정입니다.')
-        if set(data)-{'label','description','active','expected_revision'}:
+        if set(data)-{'label','description','active','extract','expected_revision'}:
             raise GraphConflictError('자료형·단위·연결 규칙 변경은 새 정의를 등록해 이관하세요.')
         changes = {}
         if 'label' in data:
@@ -351,6 +493,8 @@ class GraphEditService(EffectiveGraphService):
             if type(data['active']) is not bool:
                 raise GraphEditError('active: 참/거짓 값이어야 합니다.')
             changes['active'] = int(data['active'])
+        if 'extract' in data and table=='graph_relation_type':
+            changes['extract'] = int(data['extract'])
         if not changes:
             raise GraphEditError('변경할 필드가 없습니다.')
         return self._update(table,key,identity,changes,kind,row)
@@ -556,11 +700,11 @@ class GraphEditService(EffectiveGraphService):
         self._source('relation',identity,data)
         return self._relation_result(identity)
 
-    def _merge_entity(self, identity, data):
+    def _merge_entity(self, identity, data, allow_type_change=False):
         source,target = self._entity(identity),self._entity(data.get('target_id'))
         self._revision(source,data)
         self._revision(target,{'expected_revision':data.get('target_revision')})
-        if identity==target['id'] or source['type']!=target['type']:
+        if identity==target['id'] or (source['type']!=target['type'] and not allow_type_change):
             raise GraphEditError('서로 다른 같은 종류의 객체만 병합할 수 있습니다.')
         if source['ref_id'] and target['ref_id'] and (source['ref_type'],source['ref_id'])!=(target['ref_type'],target['ref_id']):
             raise GraphConflictError('서로 다른 사양 대상입니다. 사양 참조 충돌을 먼저 해결하세요.')

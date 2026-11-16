@@ -5,7 +5,6 @@ from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query, Requ
 from urllib.parse import unquote
 
 from graph_rag.service import index_all, index_file, search_graph
-from graph_rag.types import ENTITY_TYPES
 from repository import file_repo, graph_repo, page_repo
 from repository.graph_repository import GraphEditError, GraphNotFoundError
 from graph_rag.edit_service import EffectiveGraphService, GraphEditService, GraphConflictError
@@ -50,7 +49,7 @@ def graph_view(
 ) -> dict:
     """그래프 화면용 노드·엣지."""
     type_list = [t for t in (types or "").split(",") if t]
-    unknown = [t for t in type_list if t not in ENTITY_TYPES]
+    unknown = [t for t in type_list if t not in graph_repo.entity_type_keys()]
     if unknown:
         raise HTTPException(status_code=400, detail=f"없는 개체 종류입니다: {', '.join(unknown)}")
     return _run(graph_repo.view, entity_id=entity_id, depth=depth, types=type_list, file_id=file_id, limit=limit)
@@ -63,8 +62,9 @@ def list_entities(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> list[dict]:
-    if type is not None and type not in ENTITY_TYPES:
-        raise HTTPException(status_code=400, detail=f"없는 개체 종류입니다: {type} (가능: {', '.join(ENTITY_TYPES)})")
+    keys = graph_repo.entity_type_keys()
+    if type is not None and type not in keys:
+        raise HTTPException(status_code=400, detail=f"없는 개체 종류입니다: {type} (가능: {', '.join(keys)})")
     return graph_repo.list_entities(type, q, limit, offset)
 
 
@@ -124,6 +124,33 @@ def restore_entity(entity_id: int, request: Request, body: dict = Body(...)):
 def merge_entity(entity_id: int, request: Request, body: dict = Body(...)):
     result = _edit(request, "merge_entity", entity_id, body)
     return graph_repo.get_entity(result["id"])
+
+
+@router.get("/entity-types")
+def entity_types():
+    return graph_schema()["entity_types"]
+
+
+@router.post("/entity-types", status_code=201)
+def create_entity_type(request: Request, body: dict = Body(...)):
+    return _edit(request, "create_entity_type", data=body)
+
+
+@router.patch("/entity-types/{key}")
+def update_entity_type(key: str, request: Request, body: dict = Body(...)):
+    return _edit(request, "update_entity_type", key, body)
+
+
+@router.post("/entity-types/{key}/merge")
+def merge_entity_type(key: str, request: Request, body: dict = Body(...)):
+    """이 종류의 개체를 모두 다른 종류(body.into)로 옮기고 종류를 지운다."""
+    return _edit(request, "merge_entity_type", key, body)
+
+
+@router.delete("/entity-types/{key}")
+def delete_entity_type(key: str, request: Request, expected_revision: int | None = None):
+    """개체가 0개면 지운다. 있으면 400과 합치기 안내."""
+    return _edit(request, "delete_entity_type", key, {"expected_revision": expected_revision})
 
 
 @router.get("/relation-types")

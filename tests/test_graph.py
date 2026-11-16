@@ -196,7 +196,7 @@ def test_index_file_combines_blocks_and_skips_failed_pages(env, monkeypatch):
     ])
     seen = []
 
-    def fake_extract(text, known=None):
+    def fake_extract(text, known=None, schema=None):
         seen.append(text)
         if "실패" in text:
             raise RuntimeError("LLM 오류")

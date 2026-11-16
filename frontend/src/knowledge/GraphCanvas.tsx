@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 
 import { bounds, type Point } from './layout';
-import { ENTITY_META, ORIGIN_META, nodeRadius } from './meta';
-import { relationLabel, useGraphSchema } from './schemaContext';
+import { ORIGIN_META, nodeRadius } from './meta';
+import { entityMeta, relationLabel, useGraphSchema } from './schemaContext';
 import type { GraphEdge, GraphNode, RelationOrigin } from './types';
 
 export type Selection = { kind: 'node'; id: number } | { kind: 'edge'; id: number } | null;
@@ -313,7 +313,7 @@ export function GraphCanvas({
                         const p = positions.get(node.id);
                         if (!p) return null;
                         const r = nodeRadius(node);
-                        const meta = ENTITY_META[node.type];
+                        const meta = entityMeta(schema, node.type);
                         const selected = node.id === selectedNodeId;
                         const dim = focus !== null && !focus.nodeIds.has(node.id);
                         const showLabel = showAllLabels || selected || hovered === node.id || node.degree >= 4

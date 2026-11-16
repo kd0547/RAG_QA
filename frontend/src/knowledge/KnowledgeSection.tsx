@@ -12,7 +12,8 @@ import { GraphCanvas, type Selection } from './GraphCanvas';
 import { layoutGraph, type Point } from './layout';
 import { GraphSchemaProvider } from './schema';
 import { GraphEditingToolbar } from './GraphEditing';
-import { ENTITY_META, ENTITY_TYPES, ORIGIN_META } from './meta';
+import { ORIGIN_META } from './meta';
+import { entityMeta, typeKeys, useGraphSchema } from './schemaContext';
 import type { EntityType, GraphNode, GraphRelation, GraphStats, GraphView, RelationOrigin } from './types';
 
 /**
@@ -49,6 +50,7 @@ export function KnowledgeSection() {
 }
 
 function KnowledgeContent() {
+    const { schema } = useGraphSchema();
     const [initial] = useState(readUrl);
     const [focusId, setFocusId] = useState<number | null>(initial.entityId);
     const [depth, setDepth] = useState(initial.depth);
@@ -168,7 +170,7 @@ function KnowledgeContent() {
         setTypes((list) => (list.includes(type) ? list.filter((t) => t !== type) : [...list, type].sort()));
     };
 
-    const totalEntities = stats ? Object.values(stats.entities).reduce((a, b) => a + (b ?? 0), 0) : null;
+    const totalEntities = stats ? Object.values(stats.entities).reduce<number>((a, b) => a + (b ?? 0), 0) : null;
     const isEmpty = data !== null && data.nodes.length === 0;
     const focusNode = focusId !== null ? nodeById.get(focusId) : undefined;
 
@@ -225,19 +227,20 @@ function KnowledgeContent() {
                             </select>
                         )}
                         <div role="group" aria-label="개체 종류 거르기" className="pointer-events-auto flex flex-wrap gap-1">
-                            {ENTITY_TYPES.map((t) => {
+                            {typeKeys(schema, true).map((t) => {
                                 const active = types.includes(t);
+                                const meta = entityMeta(schema, t);
                                 return (
                                     <button
                                         key={t}
                                         type="button"
                                         aria-pressed={active}
                                         onClick={() => toggleType(t)}
-                                        title={ENTITY_META[t].hint}
+                                        title={meta.hint}
                                         className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] font-semibold transition-colors ${active ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink/75 hover:bg-chip'}`}
                                     >
                                         <TypeDot type={t} className="w-2 h-2 ring-1 ring-white/70" />
-                                        {ENTITY_META[t].label}
+                                        {meta.label}
                                         {stats?.entities[t] !== undefined && <span className={active ? 'text-white/70' : 'text-muted'}>{stats.entities[t]}</span>}
                                     </button>
                                 );
@@ -370,10 +373,10 @@ function KnowledgeContent() {
                                 <li>사람이 고친 관계는 문서를 다시 추출해도 유지됩니다.</li>
                             </ul>
                             <div className="mt-4 grid grid-cols-2 gap-1.5">
-                                {ENTITY_TYPES.map((t) => (
+                                {typeKeys(schema, true).map((t) => (
                                     <span key={t} className="flex items-center gap-1.5 text-[11.5px]">
                                         <TypeDot type={t} />
-                                        <span className="text-ink/80">{ENTITY_META[t].label}</span>
+                                        <span className="text-ink/80">{entityMeta(schema, t).label}</span>
                                     </span>
                                 ))}
                             </div>

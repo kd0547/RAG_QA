@@ -1,12 +1,7 @@
 /** 문서 그래프 API 타입 (백엔드: app/routers/graph.py, repository/graph_repository.py) */
 
-export type EntityType =
-    | 'product'
-    | 'component'
-    | 'certification'
-    | 'cert_number'
-    | 'organization'
-    | 'standard';
+/** graph_entity_type의 key. 종류 목록은 GET /graph/schema가 준다 (지시서 GR2) */
+export type EntityType = string;
 
 export type RelationType = string;
 
