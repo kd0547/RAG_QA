@@ -15,7 +15,7 @@ def test_v3_is_prompt_doc_code_block_verbatim():
     [block] = re.findall(r"```text\n(.*?)\n```", doc, re.S)
     assert PROMPT_V3_TEMPLATE.template == block + "\n"
     assert PROMPT_V3_NAME == "v3 근거 ID·사양"
-    assert SYSTEM_PROMPT_TEMPLATE is PROMPT_V3_TEMPLATE  # 기본값도 v3
+    assert SYSTEM_PROMPT_TEMPLATE is not PROMPT_V3_TEMPLATE  # 기본값은 v4 (GR6)
     rendered = render_prompt(PROMPT_V3_TEMPLATE.template)
     for removed in ("$aliases", "용어 별칭", "상위 개념"):
         assert removed not in rendered
@@ -58,7 +58,7 @@ def test_replaced_skill_documents_are_version_2_and_load():
     loaded = load_skills(PROJECT_ROOT / "skills")
     for name in ("certification-bundle", "mail-reply-style", "revise-after-reject", "spec-compare"):
         text = (PROJECT_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
-        assert 'version: "2"' in text, name
+        assert ('version: "3"' if name == "certification-bundle" else 'version: "2"') in text, name  # GR6
         assert name in loaded, name
     assert "compare_specs" in loaded["spec-compare"].body
     assert not (PROJECT_ROOT / "docs" / "skills_next").exists()

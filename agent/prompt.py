@@ -92,8 +92,6 @@ $aliases
 - 근거에서 찾지 못했으면 마지막 줄은 `근거: 없음`이다.
 """)
 
-# 기본값 (DB에 프롬프트가 없을 때, 처음 만드는 DB의 기본 프롬프트)
-SYSTEM_PROMPT_TEMPLATE = PROMPT_V3_TEMPLATE
 
 
 # 옛 프롬프트(v2·v3)에 남은 시스템 상위 개념 문구 (지시서 GR1). DB 행은 그대로 두고 렌더링할 때만 지운다.
@@ -103,6 +101,36 @@ _LEGACY_GRAPH_SEARCH = " 상위 개념(예: KC 인증)은 속한 인증 종류�
 _LEGACY_CONCEPT_RULE = re.compile(r"^- 상위 개념이 펼쳐졌으면 속한 종류마다 문서를 찾고, 찾지 못한 종류는 \"문서 없음\"으로 밝힌다\.(?=\r?$)", re.M)
 BUNDLE_RULE = ('- 인증 묶음 이름(예: KC 인증)은 시스템이 속한 종류로 펼쳐 주지 않는다. 그 모델의 인증 관계와 인증서 문서에서 '
                '확인한 종류만 쓰고, 묶음에 무엇이 들어가는지 근거가 없으면 "확인 필요"로 밝힌다.')
+
+
+# 프롬프트 v4 (근거 ID·사양·그래프 정비, 지시서 GR6). v3 본문에서 세 곳만 바꾼다:
+# 1) 용어 별칭 줄과 $aliases 줄 삭제 2) graph_search 행 교체 3) 상위 개념 펼치기 문장 → 인증 묶음·제품군 두 줄.
+# 서버 시작 때 prompt_repo.ensure_v4()가 한 번 등록·선택한다. v2·v3 행은 그대로 둔다. 전문은 docs/prompt_v4.md.
+PROMPT_V4_NAME = "v4 근거 ID·사양·그래프 정비"
+GRAPH_SEARCH_ROW_V4 = ("| graph_search | 질문의 모델명·부품·인증·규격·사양 값으로 관련 개체, 관계, 문서(file_id)와 페이지를 찾는다. "
+                       "관계에는 출처(문서·사양 DB·사용자 입력)가 붙는다. 제품군과 하위 모델이 구분된다. "
+                       "matched의 ref_type·ref_id는 get_specs에 넘길 수 있다 |")
+PRODUCT_LINE_RULE = ("- 제품군(예: A650)은 판매 모델이 아니다. 제품군을 물으면 하위 모델별로 나눠 답하고, "
+                     "제품군의 값을 하위 모델의 값으로 단정하지 않는다.")
+_V3_GRAPH_SEARCH_ROW = ("| graph_search | 질문의 모델명·인증·부품·규격으로 관련 문서(file_id)와 페이지를 찾는다. "
+                        "상위 개념(예: KC 인증)은 속한 인증 종류로 펼쳐 준다 |")
+_V3_CONCEPT_RULE = '- 상위 개념이 펼쳐졌으면 속한 종류마다 문서를 찾고, 찾지 못한 종류는 "문서 없음"으로 밝힌다.'
+
+
+def _v4_from_v3(text: str) -> str:
+    for old, new in (("**용어 별칭 (표준 이름 = 별칭)**\n$aliases\n\n", ""),
+                     (_V3_GRAPH_SEARCH_ROW, GRAPH_SEARCH_ROW_V4),
+                     (_V3_CONCEPT_RULE, BUNDLE_RULE + "\n" + PRODUCT_LINE_RULE)):
+        if text.count(old) != 1:
+            raise ValueError(f"v3 본문에서 바꿀 곳을 찾지 못함: {old[:30]}")
+        text = text.replace(old, new)
+    return text
+
+
+PROMPT_V4_TEMPLATE = Template(_v4_from_v3(PROMPT_V3_TEMPLATE.template))
+
+# 기본값 (DB에 프롬프트가 없을 때, 처음 만드는 DB의 기본 프롬프트)
+SYSTEM_PROMPT_TEMPLATE = PROMPT_V4_TEMPLATE
 
 
 def strip_legacy_concepts(content: str) -> str:

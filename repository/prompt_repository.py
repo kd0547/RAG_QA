@@ -9,7 +9,10 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 
-from agent.prompt import PROMPT_V2_NAME, PROMPT_V2_TEMPLATE, PROMPT_V3_NAME, PROMPT_V3_TEMPLATE, SYSTEM_PROMPT_TEMPLATE
+from agent.prompt import (
+    PROMPT_V2_NAME, PROMPT_V2_TEMPLATE, PROMPT_V3_NAME, PROMPT_V3_TEMPLATE, PROMPT_V4_NAME, PROMPT_V4_TEMPLATE,
+    SYSTEM_PROMPT_TEMPLATE,
+)
 from repository.repo_connect import Database
 
 logger = logging.getLogger(__name__)
@@ -119,6 +122,10 @@ class PromptRepository:
     def ensure_v3(self) -> Prompt | None:
         """프롬프트 v3(근거 ID·사양 DB)를 한 번 넣고 선택한다. v2 행은 그대로 둔다."""
         return self.ensure_seeded(PROMPT_V3_NAME, PROMPT_V3_TEMPLATE.template)
+
+    def ensure_v4(self) -> Prompt | None:
+        """프롬프트 v4(근거 ID·사양·그래프 정비, 지시서 GR6)를 한 번 넣고 선택한다. v2·v3 행은 그대로 둔다."""
+        return self.ensure_seeded(PROMPT_V4_NAME, PROMPT_V4_TEMPLATE.template)
 
     def list_all(self) -> list[Prompt]:
         """저장된 프롬프트 전체 (만든 순서라 기본 프롬프트가 보통 맨 앞)."""
