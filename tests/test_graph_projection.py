@@ -299,3 +299,31 @@ def test_migration_sets_default_graph_modes_once(tmp_path):
     Database(str(path))  # 다시 시작해도 R&D가 바꾼 값을 덮지 않는다
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT graph_mode FROM spec_attribute WHERE key='os'").fetchone()[0] == "none"
+
+
+def test_component_catalog_is_not_projected(g):
+    """부품 DB는 승인 부품 카탈로그다. 제품이 가리키는 부품만 노드가 되고, 나머지와 그 사양 값은 그래프에 넣지 않는다."""
+    ssd = g.spec.create_component("ssd", "Samsung PM9C1b 1TB")
+    g.spec.add_spec("component", ssd["id"], "ssd_interface", "PCIe Gen4x4")
+    g.spec.add_spec("component", g.cpu["id"], "cpu_cores", "8")
+    summary = g.graph.project_specs()
+    nodes = _nodes(g)
+    assert "Samsung PM9C1b 1TB" not in nodes and not any(n.startswith("SSD 인터페이스") for n in nodes)
+    assert "CPU 코어 수 8코어" in nodes  # 제품(PU02)이 가리키는 CPU의 사양 값은 들어간다
+    assert summary["components"] == 1
+
+    # 예전 투영이 만든 카탈로그 부품 노드는 다음 투영에서 지운다. 문서에 나온 노드는 남긴다
+    with g.db.transaction() as conn:
+        from graph_rag.types import normalize
+        for name, ref in (("Samsung PM9C1b 1TB", ssd["id"]),):
+            cur = conn.execute("INSERT INTO graph_entity (type, name, norm, creation_origin, ref_type, ref_id) VALUES ('component', ?, ?, 'spec', 'component', ?)",
+                               (name, normalize(name), ref))
+            conn.execute("INSERT INTO graph_alias (entity_id, alias, alias_norm) VALUES (?, ?, ?)", (cur.lastrowid, name, normalize(name)))
+    other = g.spec.create_component("ssd", "WD SN770 1TB")
+    file_id = g.add_file("ssd.pdf")
+    g.graph.replace_page(file_id, 1, PageGraph(entities=[ExtractedEntity(type="component", name="WD SN770 1TB")]), link_specs=True)
+    summary = g.graph.project_specs()
+    nodes = _nodes(g)
+    assert summary["catalog_removed"] == 1 and "Samsung PM9C1b 1TB" not in nodes
+    assert nodes["WD SN770 1TB"]["ref_id"] == other["id"]  # 문서에 나온 부품은 남는다
+

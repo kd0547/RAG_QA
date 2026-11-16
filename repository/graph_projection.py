@@ -2,7 +2,8 @@
 
 무엇을 만드는가 (GR4-1)
 - 하위 모델이 있는 product → 제품군(product_line) 노드, 없는 product → 제품(product) 노드. parent_id → variant_of
-- component 전부 → 부품 노드. product_component → has_component(is_option)
+- 제품이 가리키는 component만 → 부품 노드 (product_component, 부품을 가리키는 제품 사양 값). 부품 DB는 승인 부품
+  카탈로그라 제품과 이어지지 않는 부품은 넣지 않는다. product_component → has_component(is_option)
 - 속성의 그래프 방식(spec_attribute.graph_mode)
   - entity: 값이 가리키는 대상 노드(예: cpu_model → 부품)와 관계(graph_relation_type, 기본 has_component)
   - value_node: 사양 값 노드(<속성 이름> <값 표기>)와 has_spec. 같은 속성·같은 값은 한 노드
@@ -263,20 +264,38 @@ class _Projection:
             if product["parent_id"]:
                 self.put(product_nodes.get(product["id"]), product_nodes.get(product["parent_id"]), "variant_of", "variant_of")
 
-        component_nodes: dict[str, int] = {}
+        # 부품은 제품이 실제로 가리키는 것만 노드로 만든다: 제품-부품 연결(product_component)과 제품 사양 값 중
+        # 부품을 가리키는 값(그래프 방식 entity, 예: cpu_model). 부품 DB는 승인 부품 카탈로그라 제품과 이어지지 않으므로
+        # 나머지 부품과 그 사양 값은 그래프에 넣지 않는다 (사양 화면의 부품 탭에서 본다)
+        components = {r["id"]: r for r in conn.execute("SELECT id, kind, model FROM component ORDER BY kind, model")}
         component_keys: dict[str, str | None] = {}
-        for component in conn.execute("SELECT id, kind, model FROM component ORDER BY kind, model").fetchall():
-            node_id = self.node("component", component["model"], ("component", component["id"], ""), ("component", "product"),
-                                disambiguator=component["kind"])
-            if node_id is not None:
-                component_nodes[component["id"]] = node_id
+        for component in components.values():
             for key in spec_match_keys(component["model"], self.vendors):
                 component_keys[key] = None if key in component_keys and component_keys[key] != component["id"] else component["id"]
-        for link in conn.execute("SELECT product_id, component_id, is_option FROM product_component").fetchall():
+        attributes = {r["key"]: r for r in conn.execute("SELECT * FROM spec_attribute")}
+        links = [link for link in conn.execute("SELECT product_id, component_id, is_option FROM product_component").fetchall()
+                 if link["product_id"] in product_nodes]
+        referenced = {link["component_id"] for link in links}
+        for row in conn.execute("SELECT owner_id, attribute_key, value_text FROM spec_value WHERE owner_type = 'product'"):
+            attribute = attributes.get(row["attribute_key"])
+            if row["owner_id"] not in product_nodes or attribute is None or attribute["graph_mode"] != "entity" \
+                    or (attribute["graph_entity_type"] or "component") != "component":
+                continue
+            component_id = _component_of(strip_trailing_parens(row["value_text"] or ""), component_keys, self.vendors)
+            if component_id is not None:
+                referenced.add(component_id)
+        self.referenced_components = {cid for cid in referenced if cid in components}
+        component_nodes: dict[str, int] = {}
+        for component_id in sorted(self.referenced_components, key=lambda c: (components[c]["kind"], components[c]["model"])):
+            component = components[component_id]
+            node_id = self.node("component", component["model"], ("component", component_id, ""), ("component", "product"),
+                                disambiguator=component["kind"])
+            if node_id is not None:
+                component_nodes[component_id] = node_id
+        for link in links:
             self.put(product_nodes.get(link["product_id"]), component_nodes.get(link["component_id"]), "has_component",
                      "has_component", link["is_option"])
 
-        attributes = {r["key"]: r for r in conn.execute("SELECT * FROM spec_attribute")}
         owners = {"product": product_nodes, "component": component_nodes}
         value_nodes: set[int] = set()
         for row in conn.execute("SELECT * FROM spec_value ORDER BY id").fetchall():
@@ -319,7 +338,7 @@ class _Projection:
             return None
         keys = [normalize(name), *spec_match_keys(name, self.vendors)]
         if target_type == "component":
-            component_id = next((component_keys[k] for k in keys if component_keys.get(k)), None)
+            component_id = _component_of(name, component_keys, self.vendors)
             if component_id is not None and component_id in component_nodes:
                 node_id = component_nodes[component_id]
                 for alias in (raw, without_vendor(name, self.vendors)):
@@ -340,10 +359,30 @@ class _Projection:
         return node_id
 
 
+def _component_of(name: str, component_keys: dict, vendors) -> str | None:
+    """이름이 가리키는 사양 DB 부품 id (정식 이름 맞춤 키). 없거나 모호하면 None."""
+    keys = [normalize(name), *spec_match_keys(name, vendors)]
+    return next((component_keys[k] for k in keys if component_keys.get(k)), None)
+
+
 def project_specs(conn, vendors=DEFAULT_VENDOR_PREFIXES) -> dict:
     """한 트랜잭션 안에서 부른다. 투영 요약과 걸린 시간(seconds)을 돌려준다."""
     started = time.perf_counter()
-    summary = _Projection(conn, vendors).run()
+    projection = _Projection(conn, vendors)
+    summary = projection.run()
+    # 예전 투영이 만든 카탈로그 부품 노드(제품이 가리키지 않는 부품)를 지운다.
+    # 문서에 나왔거나 사람이 고쳤거나 다른 관계가 있는 노드는 남긴다
+    referenced = projection.referenced_components
+    stale = [r["id"] for r in conn.execute("""SELECT e.id, e.ref_id FROM graph_entity e
+        WHERE e.ref_type = 'component' AND e.creation_origin = 'spec' AND e.lifecycle_state = 'active'
+          AND e.type_locked = 0 AND e.manual_retained = 0
+          AND NOT EXISTS (SELECT 1 FROM graph_relation r WHERE r.src_id = e.id OR r.dst_id = e.id)
+          AND NOT EXISTS (SELECT 1 FROM graph_mention m WHERE m.entity_id = e.id)
+          AND NOT EXISTS (SELECT 1 FROM graph_property_value p WHERE p.entity_id = e.id)
+          AND NOT EXISTS (SELECT 1 FROM graph_entity x WHERE x.merged_into_id = e.id)""") if r["ref_id"] not in referenced]
+    for entity_id in stale:
+        conn.execute("DELETE FROM graph_entity WHERE id = ?", (entity_id,))
+    summary["catalog_removed"] = len(stale)
     # 관계가 하나도 없게 된 사양 값 노드를 정리한다 (사람이 고친 노드는 남는다)
     conn.execute(f"""DELETE FROM graph_entity
         WHERE type_locked=0 AND manual_retained=0 AND lifecycle_state='active'
