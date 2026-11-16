@@ -86,6 +86,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     source_columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_sources)")}
     if source_columns and "cited" not in source_columns:
         conn.execute("ALTER TABLE task_sources ADD COLUMN cited INTEGER NOT NULL DEFAULT 0")
+    from repository.graph_migration import migrate_graph_editing
+    migrate_graph_editing(conn)
     conn.commit()
 
 
@@ -141,6 +143,8 @@ def _migrate_graph_relation_origin(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = OFF")
     try:
         conn.execute("BEGIN")
+        conn.execute("DROP VIEW IF EXISTS effective_graph_relation")
+        conn.execute("DROP VIEW IF EXISTS effective_graph_entity")
         conn.execute("""
             CREATE TABLE graph_relation_new (
                 id         integer primary key autoincrement,
@@ -188,4 +192,5 @@ class _Transaction:
         try:
             return self.conn.__exit__(exc_type, exc_val, exc_tb)
         finally:
+            self.conn.close()
             self.db.lock.release()

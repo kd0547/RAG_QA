@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 
 import { bounds, type Point } from './layout';
-import { ENTITY_META, ORIGIN_META, RELATION_META, nodeRadius } from './meta';
+import { ENTITY_META, ORIGIN_META, nodeRadius } from './meta';
+import { relationLabel, useGraphSchema } from './schemaContext';
 import type { GraphEdge, GraphNode, RelationOrigin } from './types';
 
 export type Selection = { kind: 'node'; id: number } | { kind: 'edge'; id: number } | null;
@@ -39,6 +40,7 @@ export function GraphCanvas({
     onPick: (nodeId: number) => void;
     onMoveNode: (nodeId: number, point: Point) => void;
 }) {
+    const { schema } = useGraphSchema();
     const svgRef = useRef<SVGSVGElement>(null);
     const [view, setView] = useState<ViewBox>({ x: -300, y: -200, w: 600, h: 400 });
     const [hovered, setHovered] = useState<number | null>(null);
@@ -300,7 +302,7 @@ export function GraphCanvas({
                                 paintOrder="stroke"
                                 pointerEvents="none"
                             >
-                                {RELATION_META[edge.type].label}
+                                {relationLabel(schema, edge.type)}
                             </text>
                         );
                     })}

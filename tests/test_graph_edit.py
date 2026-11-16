@@ -49,6 +49,9 @@ def env(tmp_path, monkeypatch):
     def add_file(name):
         file = create_file(original_name=name, stored_path=str(tmp_path / name))
         files.file_save(file)
+        with db.transaction() as conn:
+            conn.execute('INSERT INTO file_page(file_id,seq,page,text,original_text) VALUES (?,1,1,?,?)',
+                         (file.file_id,'테스트 근거','테스트 근거'))
         return file
 
     return files, graph, add_file
@@ -93,11 +96,12 @@ def test_manual_relation_survives_reextract_and_readding_unblocks(env):
         ("A650", "has_component", "RTX 5070", "extract"),
         ("A650", "has_certification", "KC 안전확인", "manual"),
         ("A650", "has_number", "A600", "manual"),
+        ("A650", "has_number", "A600", "extract"),  # 사용자 주장과 문서 주장을 별도로 보존
     }
     assert graph.stats()["blocked_relations"] == 0  # 다시 넣은 관계는 차단이 풀린다
 
 
-def test_manual_relation_with_evidence_goes_with_the_file(env):
+def test_manual_relation_with_evidence_survives_file_deletion(env):
     files, graph, add_file = env
     file = add_file("a650.docx")
     graph.replace_page(file.file_id, 1, A650_PAGE)
@@ -108,7 +112,10 @@ def test_manual_relation_with_evidence_goes_with_the_file(env):
     files.delete_file(file.file_id)
     graph.prune_orphans()
 
-    assert _relations(graph, a650) == {("A650", "complies_with", "KN 32", "manual")}
+    assert _relations(graph, a650) == {("A650", "complies_with", "KN 32", "manual"),
+                                     ("A650", "has_certification", "KC 안전확인", "manual")}
+    kept = next(r for r in graph.get_entity(a650)['relations'] if r['type']=='has_certification')
+    assert kept['sources'][0]['file_deleted']==1
 
 
 def test_update_relation_reverses_and_changes_type(env):
@@ -118,8 +125,11 @@ def test_update_relation_reverses_and_changes_type(env):
     a650 = _id(graph, "product", "A650")
     relation = next(r for r in graph.get_entity(a650)["relations"] if r["target_name"] == "A600")
 
-    updated = graph.update_relation(relation["id"], rel_type="has_component", reverse=False)
-    assert (updated["type"], updated["origin"], updated["file_id"], updated["page"]) == ("has_component", "manual", file.file_id, 1)
+    from graph_rag.edit_service import GraphEditService
+    GraphEditService(graph.db).execute('create_relation_type',data={'key':'custom:related','label':'관련'})
+    updated = graph.update_relation(relation["id"], rel_type="custom:related", reverse=False)
+    assert (updated["type"], updated["origin"], updated["file_id"], updated["page"]) == ("custom:related", "manual", None, None)
+    assert updated['sources'][0]['file_id']==file.file_id
 
     flipped = graph.update_relation(updated["id"], reverse=True)
     assert (flipped["source_name"], flipped["target_name"]) == ("A600", "A650")
@@ -246,7 +256,8 @@ def test_api_create_update_delete(env, monkeypatch):
         relation = created.json()
         assert (relation["target_name"], relation["origin"]) == ("KC 적합등록", "manual")
 
-        assert client.patch(f"/graph/relations/{relation['id']}", json={"reverse": True}).json()["source_name"] == "KC 적합등록"
+        assert client.patch(f"/graph/relations/{relation['id']}", json={"reverse": True}).status_code == 409
+        assert client.patch(f"/graph/relations/{relation['id']}", json={"reverse": True,"expected_revision":1}).status_code == 400
         bad = client.post("/graph/relations", json={"source_id": a650, "type": "part_of", "target_id": a650})
         assert bad.status_code == 400
         assert client.delete("/graph/relations/999999").status_code == 404

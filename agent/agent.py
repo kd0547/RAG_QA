@@ -27,7 +27,7 @@ from entity.type import Attachment, DocumentType
 from repository import graph_repo, group_repo, prompt_repo
 from tools.tool import (
     attachment_page_texts, compare_specs, get_customer_history, get_specs, graph_search, grep_documents, list_documents,
-    list_evidence,
+    list_evidence, read_graph_facts,
     list_spec_attributes, load_skill, read_attachment, read_pages, rerank_documents, search_documents,
     search_spec_items,
 )
@@ -43,7 +43,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 BASE_TOOLS = [
-    graph_search, list_documents, grep_documents, read_pages, read_attachment,
+    graph_search, read_graph_facts, list_documents, grep_documents, read_pages, read_attachment,
     search_documents, rerank_documents, list_evidence, load_skill,
 ]
 # 사양 DB 도구 (지시서 E3). config.SPEC_TOOLS_ENABLED가 꺼지면 도구 목록에서 빠진다
@@ -574,6 +574,19 @@ def _attachment_to_blocks(attachment: Attachment, index: int, preread: list[str]
 SOURCE_TEXT_CHARS = 500
 
 
+def _evidence_display_text(evidence: dict) -> str:
+    if evidence['origin_type'] != 'graph_fact':
+        return (evidence['text'] or '')[:SOURCE_TEXT_CHARS]
+    try:
+        facts = json.loads(evidence['text'])['facts']
+        lines = [f"{p['label']}: {p['value']} {p['unit'] or ''} ({'명시적 미지원' if p['confirmation']=='unsupported' else '사용자 확정'})"
+                 for p in facts['properties']]
+        lines += [f"{r['source_name']} → {r['label']} → {r['target_name']} (사용자 입력)" for r in facts['relations']]
+        return '\n'.join(lines)[:SOURCE_TEXT_CHARS]
+    except (ValueError,KeyError,TypeError):
+        return '사용자 입력 근거 스냅샷'
+
+
 def evidence_sources(run_id: str, owner: Owner | None = None) -> list[dict]:
     """실행의 출처 목록. 답변이 인용한 근거(cite)가 있으면 그것만, 없으면 이번 실행에서 읽은 근거(read).
 
@@ -591,7 +604,7 @@ def evidence_sources(run_id: str, owner: Owner | None = None) -> list[dict]:
             "file_id": e["file_id"],
             "source": e["source_name"] or "",
             "page": e["page"],
-            "text": (e["text"] or "")[:SOURCE_TEXT_CHARS],
+            "text": _evidence_display_text(e),
             "origin_type": e["origin_type"],
             "cited": bool(cited),
         }

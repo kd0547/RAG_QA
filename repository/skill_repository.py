@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import uuid
 from datetime import datetime
@@ -36,6 +37,9 @@ MAX_ANALYSIS_ATTEMPTS = 3
 
 LABEL_MAX = 30
 DESCRIPTION_MAX = 200
+
+# 실행 로그의 인자는 200자에서 잘릴 수 있다 (request_analysis.used_skills와 같은 복원 규칙).
+_NAME_IN_ARGS = re.compile(r"""['"]name['"]\s*:\s*['"]([^'"]+)['"]""")
 
 # 기본 유형 (지시서 I2 표)
 SEED_TYPES = (
@@ -689,9 +693,16 @@ class SkillRepository:
             names = {ref.get("name") for ref in _loads(row["skills_json"], []) if isinstance(ref, dict)}
             for call in _loads(row["tool_calls_json"], []):
                 if isinstance(call, dict) and call.get("tool") == "load_skill":
-                    args = _loads(call.get("args_summary"), {})
-                    if isinstance(args, dict):
-                        names.add(args.get("name"))
+                    summary = call.get("args_summary") or ""
+                    name = None
+                    try:
+                        args = json.loads(summary)
+                        name = args.get("name") if isinstance(args, dict) else None
+                    except (ValueError, TypeError):
+                        match = _NAME_IN_ARGS.search(summary) if isinstance(summary, str) else None
+                        name = match.group(1) if match else None
+                    if isinstance(name, str) and name:
+                        names.add(name[:80])
             for name in names - {None}:
                 counts[name] = counts.get(name, 0) + 1
         return counts

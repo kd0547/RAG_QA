@@ -112,6 +112,8 @@ def _evidence(relation: dict) -> str:
     """관계의 근거. 사람이 근거 문서 없이 넣은 관계는 '담당자 확인', 사양 DB에서 심은 관계는 '사양 DB'로 적는다."""
     if relation.get("origin") == "spec":
         return "사양 DB, 옵션" if relation.get("is_option") else "사양 DB"
+    if relation.get('origin') == 'manual':
+        return '사용자 입력 · read_graph_facts로 현재 근거 확인'
     if relation.get("file_id") and relation.get("original_name"):
         page = f' p{relation["page"]}' if relation.get("page") is not None else ""
         suffix = ", 담당자 확인" if relation.get("origin") == "manual" else ""
@@ -193,7 +195,7 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
         logger.warning("그래프 문서의 저장 경로 없음: %s", missing_paths)
 
     return {
-        "matched": [{"name": e["name"], "type": e["type"], "ref_type": e.get("ref_type"), "ref_id": e.get("ref_id")}
+        "matched": [{"id":e["id"], "name": e["name"], "type": e["type"], "ref_type": e.get("ref_type"), "ref_id": e.get("ref_id")}
                     for e in matched],
         "expanded": [
             {"concept": c["name"], "members": [m["name"] for m in members if m["concept_id"] == c["id"]]}

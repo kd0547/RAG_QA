@@ -9,19 +9,13 @@ export type EntityType =
     | 'standard'
     | 'concept';
 
-export type RelationType =
-    | 'has_component'
-    | 'has_certification'
-    | 'has_number'
-    | 'issued_by'
-    | 'complies_with'
-    | 'part_of'
-    | 'variant_of';
+export type RelationType = string;
 
 /** extract: 문서에서 뽑음 · seed: aliases.yaml · manual: 사람이 넣음 (다시 뽑아도 유지) · spec: 사양 DB에서 심음 */
 export type RelationOrigin = 'extract' | 'seed' | 'manual' | 'spec';
 
 export interface GraphNode {
+    revision: number;
     id: number;
     type: EntityType;
     name: string;
@@ -30,6 +24,7 @@ export interface GraphNode {
 }
 
 export interface GraphEdge {
+    revision: number;
     id: number;
     source: number;
     target: number;
@@ -48,6 +43,8 @@ export interface GraphView {
 }
 
 export interface GraphRelation {
+    revision: number;
+    sources?: FactSource[];
     id: number;
     type: RelationType;
     origin: RelationOrigin;
@@ -63,6 +60,11 @@ export interface GraphRelation {
 }
 
 export interface GraphEntityDetail {
+    revision: number;
+    ref_type: string | null;
+    ref_id: string | null;
+    creation_origin: string;
+    properties: PropertyValue[];
     id: number;
     type: EntityType;
     name: string;
@@ -72,6 +74,7 @@ export interface GraphEntityDetail {
 }
 
 export interface GraphEntitySummary {
+    revision: number;
     id: number;
     type: EntityType;
     name: string;
@@ -88,10 +91,21 @@ export interface GraphStats {
 }
 
 export interface RelationCreateInput {
+    source?: { reason: string; file_id?: string | null; page?: number | null };
+    reverse?: boolean;
     source_id: number;
     type: RelationType;
     target_id?: number;
     new_target?: { type: EntityType; name: string };
     file_id?: string | null;
     page?: number | null;
+}
+
+export interface FactSource {
+    source_id: number; source_name: string | null; page: number | null; file_deleted: boolean;
+    reason: string; verification: string; revision: string | null;
+}
+export interface PropertyValue {
+    value_id: number; property_id: number; label: string; value_type: string; unit: string | null;
+    value: string | number | boolean | null; revision: number; confirmation: string; sources: FactSource[];
 }

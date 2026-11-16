@@ -94,6 +94,19 @@ def validate_answer(run_id: str, owner: Owner, answer: str) -> ValidationResult:
         errors.append("근거를 읽지 않고 답변")
 
     for evidence_id in cited:
+        evidence = evidence_repo.get(evidence_id, owner.type, owner.id)
+        if evidence and evidence['origin_type'] == 'graph_fact':
+            import json
+            from graph_rag.edit_service import EffectiveGraphService
+            from repository.graph_repository import GraphNotFoundError
+            try:
+                snapshot = json.loads(evidence['text'])
+                current = EffectiveGraphService(repository.graph_repo.db).facts(
+                    snapshot['entity_id'], snapshot.get('property_keys'), snapshot.get('relation_keys'))
+                if current['revision'] != evidence['revision']:
+                    errors.append(f'변경된 사용자 입력 근거입니다. read_graph_facts로 다시 읽으세요: {evidence_id}')
+            except (ValueError, KeyError, GraphNotFoundError):
+                errors.append(f'삭제되었거나 검증할 수 없는 사용자 입력 근거: {evidence_id}')
         evidence_repo.record_use(run_id, evidence_id, "cite")
 
     return ValidationResult(ok=not errors, errors=errors, warnings=warnings, cited_ids=cited, answer=body)

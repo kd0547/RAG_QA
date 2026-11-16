@@ -1,5 +1,7 @@
 # R-summary 남은 단계 통합 구현·검증 기록
 
+> 2026-11-13 Codex 후속: 제공된 T5 보고서를 현재 HEAD와 대조해 4개 지적을 보완하고, 기존 OCR 콜백 선언 순서 문제를 수정했다. 전체 테스트 **463 passed**, 전체 프론트 린트·타입 검사·임시 outDir 빌드 통과. 운영 DB 두 파일 백업 및 사본의 2회 초기화 검증 완료. 운영 DB 원본·서버는 변경하지 않았다. 아래는 기존 완료 시점 기록이며, 최신 상태와 실제 측정값은 [T-predeploy-2026-11-13.md](/C:/TG_AI_DEV/rag_QA/docs/dev_log/T-predeploy-2026-11-13.md)를 기준으로 한다.
+
 정리일: 2026-11-13. 지시서: [opus_development_instructions_remaining.md](../opus_development_instructions_remaining.md).
 
 R0·E·H·G·Z1 구현, F 비교 결과 정리, T2 사본 마이그레이션 예행을 마쳤다. 전체 자동 테스트는 **453 passed**다. T1 전체 린트에는 기존 App.tsx 오류 2건이 남아 있다. F는 실행 가능한 9문항의 비교를 완료했으며, 빈 10번 문항과 정답 대조는 미완료다. 운영 반영과 T4~T6 확인은 아래 조건에 따라 남는다.

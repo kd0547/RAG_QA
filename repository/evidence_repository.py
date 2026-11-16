@@ -16,7 +16,7 @@ from repository.repo_connect import Database
 logger = logging.getLogger(__name__)
 
 OWNER_TYPES = ("task", "session")
-ORIGIN_TYPES = ("file_page", "chunk", "attachment", "spec_value")
+ORIGIN_TYPES = ("file_page", "chunk", "attachment", "spec_value", "graph_fact")
 USE_ACTIONS = ("read", "rerank", "cite")
 RUN_STATUSES = ("running", "ok", "error", "limit")
 

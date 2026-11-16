@@ -1,5 +1,7 @@
 # I-summary 문의 분석, 절차 초안 생성, R&D 승인
 
+> 2026-11-13 후속: 실제 `create-skill` 문서의 출처·라이선스 표시·크기·외부 실행 여부를 [I-I1](/C:/TG_AI_DEV/rag_QA/docs/dev_log/I-I1.md)의 후속 현행화에 기록했다. 작성 절차의 사양 도구 안내와 잘린 로그의 사용량 집계를 수정했으며, 최신 전체 테스트는 463 passed다. 아래 항목별 수치는 당시 기록으로 유지한다. 최신 검증은 [운영 반영 전 점검](/C:/TG_AI_DEV/rag_QA/docs/dev_log/T-predeploy-2026-11-13.md)을 참조한다.
+
 지시서: [opus_development_instructions_I.md](../opus_development_instructions_I.md)
 
 ## 항목과 커밋

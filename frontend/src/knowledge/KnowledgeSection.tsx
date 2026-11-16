@@ -10,6 +10,8 @@ import { EdgePanel, EntityPanel, type RequestPick } from './EntityPanel';
 import { errorText } from './errors';
 import { GraphCanvas, type Selection } from './GraphCanvas';
 import { layoutGraph, type Point } from './layout';
+import { GraphSchemaProvider } from './schema';
+import { GraphEditingToolbar } from './GraphEditing';
 import { ENTITY_META, ENTITY_TYPES, ORIGIN_META } from './meta';
 import type { EntityType, GraphNode, GraphRelation, GraphStats, GraphView, RelationOrigin } from './types';
 
@@ -43,6 +45,10 @@ function writeUrl(entityId: number | null, depth: number) {
 }
 
 export function KnowledgeSection() {
+    return <GraphSchemaProvider><KnowledgeContent /></GraphSchemaProvider>;
+}
+
+function KnowledgeContent() {
     const [initial] = useState(readUrl);
     const [focusId, setFocusId] = useState<number | null>(initial.entityId);
     const [depth, setDepth] = useState(initial.depth);
@@ -152,7 +158,7 @@ export function KnowledgeSection() {
         const target = edge && nodeById.get(edge.target);
         if (!edge || !source || !target) return null;
         return {
-            id: edge.id, type: edge.type, origin: edge.origin, page: edge.page, file_id: edge.file_id, original_name: edge.original_name,
+            id: edge.id, revision: edge.revision, type: edge.type, origin: edge.origin, page: edge.page, file_id: edge.file_id, original_name: edge.original_name,
             source_id: source.id, source_type: source.type, source_name: source.name,
             target_id: target.id, target_type: target.type, target_name: target.name,
         };
@@ -181,6 +187,7 @@ export function KnowledgeSection() {
             >
                 <span className="hidden sm:block text-[12px] text-muted truncate">문서에서 뽑은 제품·부품·인증 관계</span>
             </AppHeader>
+            <GraphEditingToolbar onChanged={changed} onSelect={focus} />
 
             <div className="flex-1 min-h-0 flex flex-col md:flex-row">
                 <main className="relative flex-1 min-w-0 min-h-[480px] bg-surface">
@@ -334,8 +341,8 @@ export function KnowledgeSection() {
                             onFocus={focus}
                             onChanged={changed}
                             onMerged={(sourceId, targetId) => {
-                                if (focusId === sourceId) setFocusId(targetId);
-                                setSelection({ kind: 'node', id: targetId });
+                                if (focusId === sourceId) setFocusId(targetId || null);
+                                setSelection(targetId ? { kind: 'node', id: targetId } : null);
                                 changed();
                             }}
                             requestPick={requestPick}

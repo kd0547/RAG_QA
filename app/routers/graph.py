@@ -1,13 +1,15 @@
 """문서 그래프(Graph RAG) 조회·편집·재추출 API. 그래프 화면(frontend/src/knowledge)이 쓴다."""
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query, Request
+from urllib.parse import unquote
 
 from graph_rag.service import index_all, index_file, search_graph
-from graph_rag.types import ENTITY_TYPES, RELATION_TYPES
+from graph_rag.types import ENTITY_TYPES
 from repository import file_repo, graph_repo, page_repo
 from repository.graph_repository import GraphEditError, GraphNotFoundError
+from graph_rag.edit_service import EffectiveGraphService, GraphEditService, GraphConflictError
+import config
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 
@@ -18,8 +20,10 @@ def _run(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except GraphNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GraphConflictError as exc:
+        raise HTTPException(status_code=409, detail={"code":"revision_conflict", "message":str(exc)}) from exc
     except GraphEditError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail={"code":"invalid_graph_input", "message":str(exc)}) from exc
 
 
 # ---------- 조회 ----------
@@ -27,10 +31,7 @@ def _run(fn, *args, **kwargs):
 @router.get("/schema")
 def graph_schema() -> dict:
     """개체·관계 종류와 설명. 화면의 범례와 선택 목록에 쓴다."""
-    return {
-        "entity_types": [{"key": k, "description": v} for k, v in ENTITY_TYPES.items()],
-        "relation_types": [{"key": k, "description": v} for k, v in RELATION_TYPES.items()],
-    }
+    return EffectiveGraphService(graph_repo.db).schema()
 
 
 @router.get("/stats")
@@ -84,66 +85,132 @@ def graph_search(q: str = Query(..., min_length=1), group_id: str | None = None)
 
 # ---------- 편집 ----------
 
-class NewEntityBody(BaseModel):
-    type: str
-    name: str
+def _edit(request: Request, command: str, identity=None, data=None):
+    if not config.GRAPH_EDIT_ENABLED:
+        raise HTTPException(status_code=403, detail="그래프 편집 기능이 비활성화되어 있습니다.")
+    return _run(GraphEditService(graph_repo.db).execute, command, identity, data,
+                actor=unquote(request.headers.get("X-Graph-Actor", "")),
+                session=request.headers.get("X-Graph-Session", ""),
+                request_key=request.headers.get("Idempotency-Key"))
 
 
-class RelationCreateBody(BaseModel):
-    source_id: int
-    type: str
-    target_id: int | None = None       # 기존 개체로 잇기
-    new_target: NewEntityBody | None = None  # 새 개체를 만들어 잇기 (같은 이름이 있으면 그 개체)
-    file_id: str | None = None         # 근거 문서 (선택)
-    page: int | None = None
-
-
-class RelationUpdateBody(BaseModel):
-    type: str | None = None
-    reverse: bool = False              # 방향 뒤집기
-
-
-class EntityUpdateBody(BaseModel):
-    name: str
-
-
-class EntityMergeBody(BaseModel):
-    target_id: int                     # 이 개체로 합친다 (요청 경로의 개체는 지워진다)
-
-
-@router.post("/relations", status_code=201)
-def create_relation(body: RelationCreateBody) -> dict:
-    """사람이 관계를 넣는다. 문서를 다시 뽑아도 유지된다."""
-    new_target = (body.new_target.type, body.new_target.name) if body.new_target else None
-    return _run(
-        graph_repo.add_relation, body.source_id, body.type,
-        target_id=body.target_id, new_target=new_target, file_id=body.file_id, page=body.page,
-    )
-
-
-@router.patch("/relations/{relation_id}")
-def update_relation(relation_id: int, body: RelationUpdateBody) -> dict:
-    """관계 종류를 바꾸거나 방향을 뒤집는다. 원래 관계는 다시 뽑아도 되살아나지 않는다."""
-    return _run(graph_repo.update_relation, relation_id, rel_type=body.type, reverse=body.reverse)
-
-
-@router.delete("/relations/{relation_id}")
-def delete_relation(relation_id: int) -> dict:
-    """관계를 지운다. 같은 두 개체 사이의 같은 종류 관계는 모두 지우고, 다시 뽑아도 되살아나지 않게 한다."""
-    return {"deleted": _run(graph_repo.delete_relation, relation_id)}
+@router.post("/entities", status_code=201)
+def create_entity(request: Request, body: dict = Body(...)):
+    return _edit(request, "create_entity", data=body)
 
 
 @router.patch("/entities/{entity_id}")
-def rename_entity(entity_id: int, body: EntityUpdateBody) -> dict:
-    """개체 이름을 바꾼다. 옛 이름은 별칭으로 남는다."""
-    return _run(graph_repo.rename_entity, entity_id, body.name)
+def update_entity(entity_id: int, request: Request, body: dict = Body(...)):
+    _edit(request, "update_entity", entity_id, body)
+    return graph_repo.get_entity(entity_id)
+
+
+@router.get("/entities/{entity_id}/delete-impact")
+def delete_impact(entity_id: int):
+    return _run(EffectiveGraphService(graph_repo.db).impact, entity_id)
+
+
+@router.delete("/entities/{entity_id}")
+def delete_entity(entity_id: int, request: Request, expected_revision: int | None = None):
+    return _edit(request, "delete_entity", entity_id, {"expected_revision":expected_revision})
+
+
+@router.post("/entities/{entity_id}/restore")
+def restore_entity(entity_id: int, request: Request, body: dict = Body(...)):
+    return _edit(request, "restore_entity", entity_id, body)
 
 
 @router.post("/entities/{entity_id}/merge")
-def merge_entity(entity_id: int, body: EntityMergeBody) -> dict:
-    """이 개체를 target_id 개체에 합친다. 합친 결과 개체를 돌려준다."""
-    return _run(graph_repo.merge_entities, entity_id, body.target_id)
+def merge_entity(entity_id: int, request: Request, body: dict = Body(...)):
+    result = _edit(request, "merge_entity", entity_id, body)
+    return graph_repo.get_entity(result["id"])
 
+
+@router.get("/relation-types")
+def relation_types():
+    return graph_schema()["relation_types"]
+
+
+@router.post("/relation-types", status_code=201)
+def create_relation_type(request: Request, body: dict = Body(...)):
+    return _edit(request, "create_relation_type", data=body)
+
+
+@router.patch("/relation-types/{key}")
+def update_relation_type(key: str, request: Request, body: dict = Body(...)):
+    return _edit(request, "update_relation_type", key, body)
+
+
+@router.get("/property-definitions")
+def property_definitions():
+    return graph_schema()["property_definitions"]
+
+
+@router.post("/property-definitions", status_code=201)
+def create_property_definition(request: Request, body: dict = Body(...)):
+    return _edit(request, "create_property_definition", data=body)
+
+
+@router.patch("/property-definitions/{property_id}")
+def update_property_definition(property_id: int, request: Request, body: dict = Body(...)):
+    return _edit(request, "update_property_definition", property_id, body)
+
+
+@router.get("/entities/{entity_id}/properties")
+def properties(entity_id: int):
+    get_entity(entity_id)
+    return EffectiveGraphService(graph_repo.db).properties(entity_id)
+
+
+@router.post("/entities/{entity_id}/properties", status_code=201)
+def create_property(entity_id: int, request: Request, body: dict = Body(...)):
+    return _edit(request, "create_property", entity_id, body)
+
+
+@router.patch("/entities/{entity_id}/properties/{value_id}")
+def update_property(entity_id: int, value_id: int, request: Request, body: dict = Body(...)):
+    return _edit(request, "update_property", value_id, {**body,"entity_id":entity_id})
+
+
+@router.delete("/entities/{entity_id}/properties/{value_id}")
+def delete_property(entity_id: int, value_id: int, request: Request, expected_revision: int | None = None):
+    return _edit(request, "delete_property", value_id, {"entity_id":entity_id,"expected_revision":expected_revision})
+
+
+@router.post("/relations", status_code=201)
+def create_relation(request: Request, body: dict = Body(...)):
+    return _edit(request, "create_relation", data=body)
+
+
+@router.patch("/relations/{relation_id}")
+def update_relation(relation_id: int, request: Request, body: dict = Body(...)):
+    return _edit(request, "update_relation", relation_id, body)
+
+
+@router.delete("/relations/{relation_id}")
+def delete_relation(relation_id: int, request: Request, expected_revision: int | None = None, scope: str = "all"):
+    return _edit(request, "delete_relation", relation_id, {"expected_revision":expected_revision,"scope":scope})
+
+
+@router.post("/relations/{relation_id}/restore")
+def restore_relation(relation_id: int, request: Request, body: dict = Body(...)):
+    return _edit(request, "restore_relation", relation_id, body)
+
+
+@router.get("/changes")
+def changes(kind: str | None = None, target_id: str | None = None,
+            limit: int = Query(100,ge=1,le=500), offset: int = Query(0,ge=0)):
+    return EffectiveGraphService(graph_repo.db).changes(kind,target_id,limit,offset)
+
+
+@router.get("/deleted")
+def deleted(limit: int = Query(100,ge=1,le=500), offset: int = Query(0,ge=0)):
+    return EffectiveGraphService(graph_repo.db).deleted(limit,offset)
+
+
+@router.get("/entities/{entity_id}/facts")
+def facts(entity_id: int):
+    return _run(EffectiveGraphService(graph_repo.db).facts, entity_id)
 
 # ---------- 재추출 ----------
 

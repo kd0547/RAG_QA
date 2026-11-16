@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import sqlite3
 
-from graph_rag.types import ENTITY_TYPES, RELATION_TYPES, PageGraph, normalize
+from graph_rag.types import PageGraph, normalize
 from repository.repo_connect import Database
 
 # 이보다 짧은 표기는 검색어 안에 우연히 들어 있을 수 있어 개체로 쓰지 않는다 (예: "PC", "KC"는 2자라 허용)
@@ -45,12 +45,12 @@ def _query_tokens(query: str) -> list[str]:
     return sorted(t for t in tokens if len(t) >= MIN_PARTIAL_LEN)
 
 
-_RELATION_COLUMNS = """r.id, r.type, r.origin, r.is_option, r.page, r.file_id, f.original_name,
+_RELATION_COLUMNS = """r.id, r.revision, r.source_key, r.lifecycle_state, r.type, r.origin, r.is_option, r.page, r.file_id, f.original_name,
                        s.id AS source_id, s.type AS source_type, s.name AS source_name,
                        d.id AS target_id, d.type AS target_type, d.name AS target_name"""
-_RELATION_JOINS = """FROM graph_relation r
-                     JOIN graph_entity s ON s.id = r.src_id
-                     JOIN graph_entity d ON d.id = r.dst_id
+_RELATION_JOINS = """FROM effective_graph_relation r
+                     JOIN effective_graph_entity s ON s.id = r.src_id
+                     JOIN effective_graph_entity d ON d.id = r.dst_id
                      LEFT JOIN file f ON f.file_id = r.file_id"""
 
 
@@ -79,11 +79,11 @@ class GraphRepository:
         with self.db.transaction() as conn:
             conn.execute("DELETE FROM graph_relation WHERE origin = 'seed'")
             for concept, members in (concepts or {}).items():
-                concept_id = _upsert_entity(conn, "concept", str(concept))
+                concept_id = _upsert_entity(conn, "concept", str(concept), creation_origin='seed')
                 if concept_id is None:
                     continue
                 for member in members or []:
-                    member_id = _upsert_entity(conn, "certification", str(member))
+                    member_id = _upsert_entity(conn, "certification", str(member), creation_origin='seed')
                     if member_id is None or member_id == concept_id or _is_blocked(conn, member_id, concept_id, "part_of"):
                         continue
                     conn.execute(
@@ -258,175 +258,44 @@ class GraphRepository:
 
     # ------------------------------------------------------------ 화면에서 편집
 
-    def add_relation(
-        self,
-        source_id: int,
-        rel_type: str,
-        target_id: int | None = None,
-        new_target: tuple[str, str] | None = None,
-        file_id: str | None = None,
-        page: int | None = None,
-    ) -> dict:
-        """사람이 관계를 넣는다. 도착 개체는 기존 개체(target_id) 또는 새 개체(new_target=(종류, 이름))다.
+    def _edit(self, command, identity=None, data=None):
+        from graph_rag.edit_service import GraphEditService
+        return GraphEditService(self.db).execute(command, identity, data)
 
-        새 개체는 같은 종류에 같은 표기가 있으면 그 개체를 쓴다. 같은 관계를 전에 지웠다면 차단을 푼다.
-        """
-        if rel_type not in RELATION_TYPES:
-            raise GraphEditError(f"없는 관계 종류입니다: {rel_type}")
-        if (target_id is None) == (new_target is None):
-            raise GraphEditError("도착 개체를 하나만 지정하세요 (기존 개체 또는 새 개체).")
-        with self.db.transaction() as conn:
-            source = _entity_row(conn, source_id)
-            if new_target is not None:
-                target_type, target_name = new_target
-                if target_type not in ENTITY_TYPES:
-                    raise GraphEditError(f"없는 개체 종류입니다: {target_type}")
-                target_id = _upsert_entity(conn, target_type, target_name)
-                if target_id is None:
-                    raise GraphEditError(f"개체 이름은 기호를 빼고 {MIN_NORM_LEN}자 이상이어야 합니다.")
-            target = _entity_row(conn, target_id)
-            if source["id"] == target["id"]:
-                raise GraphEditError("같은 개체끼리는 연결할 수 없습니다.")
-            if rel_type == "part_of" and target["type"] != "concept":
-                raise GraphEditError("상위 개념(part_of) 관계의 도착 개체는 상위 개념이어야 합니다.")
-            if file_id is not None and conn.execute("SELECT 1 FROM file WHERE file_id = ?", (file_id,)).fetchone() is None:
-                raise GraphEditError("근거 문서를 찾을 수 없습니다.")
+    def add_relation(self, source_id, rel_type, target_id=None, new_target=None, file_id=None, page=None):
+        return self._edit('create_relation', data={
+            'source_id': source_id, 'type': rel_type, 'target_id': target_id,
+            'new_target': {'type':new_target[0], 'name':new_target[1]} if new_target else None,
+            'file_id': file_id, 'page': page,
+        })
 
-            _unblock(conn, source, target, rel_type)
-            existing = conn.execute(
-                """SELECT id FROM graph_relation
-                   WHERE src_id = ? AND dst_id = ? AND type = ? AND ifnull(file_id, '') = ifnull(?, '') AND ifnull(page, -1) = ifnull(?, -1)""",
-                (source["id"], target["id"], rel_type, file_id, page),
-            ).fetchone()
-            if existing is not None:
-                # 같은 근거로 뽑힌 관계가 이미 있으면 사람이 확인한 관계로 바꾼다 (다시 뽑아도 유지)
-                conn.execute("UPDATE graph_relation SET origin = 'manual' WHERE id = ?", (existing[0],))
-                relation_id = existing[0]
-            else:
-                relation_id = conn.execute(
-                    "INSERT INTO graph_relation (src_id, dst_id, type, file_id, page, origin) VALUES (?, ?, ?, ?, ?, 'manual')",
-                    (source["id"], target["id"], rel_type, file_id, page),
-                ).lastrowid
-            return _relation(conn, relation_id)
+    def delete_relation(self, relation_id):
+        with self.db.get_conn() as conn:
+            row = conn.execute('SELECT revision FROM graph_relation WHERE id=?',(relation_id,)).fetchone()
+        if row is None:
+            raise GraphNotFoundError('관계를 찾을 수 없습니다.')
+        self._edit('delete_relation', relation_id, {'expected_revision':row[0]})
+        return 1
 
-    def delete_relation(self, relation_id: int) -> int:
-        """관계를 지운다. 같은 두 개체 사이의 같은 종류 관계는 근거 페이지가 달라도 모두 지우고,
-        다시 뽑거나 aliases.yaml을 다시 넣어도 되살아나지 않게 차단한다. 지운 관계 수를 돌려준다."""
-        with self.db.transaction() as conn:
-            row = conn.execute("SELECT src_id, dst_id, type FROM graph_relation WHERE id = ?", (relation_id,)).fetchone()
-            if row is None:
-                raise GraphNotFoundError("관계를 찾을 수 없습니다.")
-            _block(conn, row["src_id"], row["dst_id"], row["type"])
-            cur = conn.execute(
-                "DELETE FROM graph_relation WHERE src_id = ? AND dst_id = ? AND type = ?",
-                (row["src_id"], row["dst_id"], row["type"]),
-            )
-            _prune_orphans(conn)
-            return cur.rowcount
+    def update_relation(self, relation_id, rel_type=None, reverse=False):
+        with self.db.get_conn() as conn:
+            row = conn.execute('SELECT revision FROM graph_relation WHERE id=?',(relation_id,)).fetchone()
+        if row is None:
+            raise GraphNotFoundError('관계를 찾을 수 없습니다.')
+        return self._edit('update_relation', relation_id, {'type':rel_type,'reverse':reverse,'expected_revision':row[0]})
 
-    def update_relation(self, relation_id: int, rel_type: str | None = None, reverse: bool = False) -> dict:
-        """관계 종류를 바꾸거나 방향을 뒤집는다. 원래 관계는 지우고 차단한 뒤 사람이 넣은 관계로 새로 만든다.
-        근거 문서·페이지는 그대로 옮긴다."""
-        with self.db.transaction() as conn:
-            row = conn.execute(
-                "SELECT src_id, dst_id, type, file_id, page FROM graph_relation WHERE id = ?", (relation_id,)
-            ).fetchone()
-            if row is None:
-                raise GraphNotFoundError("관계를 찾을 수 없습니다.")
-            new_type = rel_type or row["type"]
-            if new_type not in RELATION_TYPES:
-                raise GraphEditError(f"없는 관계 종류입니다: {new_type}")
-            src, dst = (row["dst_id"], row["src_id"]) if reverse else (row["src_id"], row["dst_id"])
-            if new_type == row["type"] and (src, dst) == (row["src_id"], row["dst_id"]):
-                return _relation(conn, relation_id)
-            if new_type == "part_of" and _entity_row(conn, dst)["type"] != "concept":
-                raise GraphEditError("상위 개념(part_of) 관계의 도착 개체는 상위 개념이어야 합니다.")
-
-            _block(conn, row["src_id"], row["dst_id"], row["type"])
-            conn.execute(
-                "DELETE FROM graph_relation WHERE src_id = ? AND dst_id = ? AND type = ?",
-                (row["src_id"], row["dst_id"], row["type"]),
-            )
-            _unblock(conn, _entity_row(conn, src), _entity_row(conn, dst), new_type)
-            conn.execute(
-                "INSERT OR IGNORE INTO graph_relation (src_id, dst_id, type, file_id, page, origin) VALUES (?, ?, ?, ?, ?, 'manual')",
-                (src, dst, new_type, row["file_id"], row["page"]),
-            )
-            conn.execute(
-                """UPDATE graph_relation SET origin = 'manual'
-                   WHERE src_id = ? AND dst_id = ? AND type = ? AND ifnull(file_id, '') = ifnull(?, '') AND ifnull(page, -1) = ifnull(?, -1)""",
-                (src, dst, new_type, row["file_id"], row["page"]),
-            )
-            new_id = conn.execute(
-                """SELECT id FROM graph_relation
-                   WHERE src_id = ? AND dst_id = ? AND type = ? AND ifnull(file_id, '') = ifnull(?, '') AND ifnull(page, -1) = ifnull(?, -1)""",
-                (src, dst, new_type, row["file_id"], row["page"]),
-            ).fetchone()[0]
-            return _relation(conn, new_id)
-
-    def rename_entity(self, entity_id: int, name: str) -> dict:
-        """개체 표시 이름을 바꾼다. 옛 이름은 별칭으로 남아 다시 뽑아도 같은 개체로 묶인다."""
-        name = (name or "").strip()
-        norm = normalize(name)
-        if len(norm) < MIN_NORM_LEN:
-            raise GraphEditError(f"개체 이름은 기호를 빼고 {MIN_NORM_LEN}자 이상이어야 합니다.")
-        with self.db.transaction() as conn:
-            entity = _entity_row(conn, entity_id)
-            other = conn.execute(
-                """SELECT e.id, e.name FROM graph_alias a JOIN graph_entity e ON e.id = a.entity_id
-                   WHERE a.alias_norm = ? AND e.type = ? AND e.id != ? LIMIT 1""",
-                (norm, entity["type"], entity_id),
-            ).fetchone()
-            if other is not None:
-                raise GraphEditError(f"같은 종류에 '{other['name']}' 개체가 이미 그 이름을 씁니다. 합치기를 사용하세요.")
-            conn.execute("UPDATE graph_entity SET name = ?, norm = ? WHERE id = ?", (name, norm, entity_id))
-            conn.execute(
-                "INSERT OR IGNORE INTO graph_alias (entity_id, alias, alias_norm) VALUES (?, ?, ?)", (entity_id, name, norm)
-            )
+    def rename_entity(self, entity_id, name):
+        entity = self.get_entity(entity_id)
+        if entity is None:
+            raise GraphNotFoundError('객체를 찾을 수 없습니다.')
+        self._edit('update_entity', entity_id, {'name':name,'expected_revision':entity['revision']})
         return self.get_entity(entity_id)
 
-    def merge_entities(self, source_id: int, target_id: int) -> dict:
-        """source 개체를 target에 합친다. 별칭·등장 위치·관계를 target으로 옮기고 source는 지운다.
-
-        source의 이름이 target의 별칭이 되므로, 같은 종류면 다시 뽑아도 target으로 묶인다.
-        """
-        if source_id == target_id:
-            raise GraphEditError("같은 개체끼리는 합칠 수 없습니다.")
-        with self.db.transaction() as conn:
-            source = _entity_row(conn, source_id)
-            target = _entity_row(conn, target_id)
-            if source["type"] == "concept" and target["type"] != "concept":
-                raise GraphEditError("상위 개념은 상위 개념끼리만 합칠 수 있습니다.")
-            conn.execute(
-                """INSERT OR IGNORE INTO graph_alias (entity_id, alias, alias_norm)
-                   SELECT ?, alias, alias_norm FROM graph_alias WHERE entity_id = ?""",
-                (target_id, source_id),
-            )
-            conn.execute(
-                """INSERT OR IGNORE INTO graph_mention (entity_id, file_id, page)
-                   SELECT ?, file_id, page FROM graph_mention WHERE entity_id = ?""",
-                (target_id, source_id),
-            )
-            # 관계는 끝점을 target으로 바꿔 복사한다. 합친 뒤 자기 자신을 가리키게 되는 관계는 버린다
-            conn.execute(
-                """INSERT OR IGNORE INTO graph_relation (src_id, dst_id, type, file_id, page, origin, is_option, created_at)
-                   SELECT CASE WHEN src_id = :s THEN :t ELSE src_id END,
-                          CASE WHEN dst_id = :s THEN :t ELSE dst_id END,
-                          type, file_id, page, origin, is_option, created_at
-                   FROM graph_relation
-                   WHERE (src_id = :s OR dst_id = :s)
-                     AND (CASE WHEN src_id = :s THEN :t ELSE src_id END) != (CASE WHEN dst_id = :s THEN :t ELSE dst_id END)""",
-                {"s": source_id, "t": target_id},
-            )
-            # 사양 DB 대상 표시는 target에 없을 때만 옮긴다 (target이 이미 다른 대상을 가리키면 그대로 둔다)
-            conn.execute(
-                """UPDATE graph_entity SET ref_type = (SELECT ref_type FROM graph_entity WHERE id = :s),
-                                           ref_id = (SELECT ref_id FROM graph_entity WHERE id = :s)
-                   WHERE id = :t AND ref_id IS NULL""",
-                {"s": source_id, "t": target_id},
-            )
-            conn.execute("DELETE FROM graph_entity WHERE id = ?", (source_id,))  # 별칭·등장·관계는 외래키로 같이 지워진다
-            _prune_orphans(conn)
+    def merge_entities(self, source_id, target_id):
+        source,target = self.get_entity(source_id),self.get_entity(target_id)
+        if source is None or target is None:
+            raise GraphNotFoundError('객체를 찾을 수 없습니다.')
+        self._edit('merge_entity',source_id,{'target_id':target_id,'expected_revision':source['revision'],'target_revision':target['revision']})
         return self.get_entity(target_id)
 
     # ------------------------------------------------------------ 검색
@@ -456,7 +325,7 @@ class GraphRepository:
         # SQL은 후보를 넉넉히 뽑고(별칭 원문 포함), 접두 일치는 아래에서 어절 단위로 다시 거른다
         sql = f"""
             SELECT e.id, e.type, e.name, e.ref_type, e.ref_id, a.alias, a.alias_norm
-            FROM graph_alias a JOIN graph_entity e ON e.id = a.entity_id
+            FROM graph_alias a JOIN effective_graph_entity e ON e.id = a.entity_id
             WHERE {' OR '.join(conditions)}
         """
         with self.db.get_conn() as conn:
@@ -488,8 +357,19 @@ class GraphRepository:
             if alias not in rest:
                 best.pop(entity_id, None)
         ranked = sorted(best.values(), key=lambda item: (-item[0], item[1]["id"]))
-        return [{"id": r["id"], "type": r["type"], "name": r["name"], "ref_type": r["ref_type"], "ref_id": r["ref_id"]}
-                for _, r in ranked[:limit]]
+        result = [{"id": r["id"], "type": r["type"], "name": r["name"], "ref_type": r["ref_type"], "ref_id": r["ref_id"]}
+                  for _, r in ranked[:limit]]
+        if len(result)<limit:
+            with self.db.get_conn() as conn:
+                extra = conn.execute("""SELECT DISTINCT e.id,e.type,e.name,e.ref_type,e.ref_id
+                  FROM effective_graph_entity e JOIN graph_property_value v ON v.entity_id=e.id
+                  JOIN graph_property_definition d USING(property_id)
+                  WHERE v.lifecycle_state='active' AND
+                  (instr(lower(coalesce(v.value_text,'')),lower(?))>0 OR instr(lower(d.label),lower(?))>0
+                   OR instr(lower(?),lower(d.label))>0) ORDER BY e.id LIMIT ?""",(query,query,query,limit)).fetchall()
+                known={e['id'] for e in result}
+                result.extend(dict(r) for r in extra if r['id'] not in known)
+        return result[:limit]
 
     def parents_of(self, entity_ids: list[int]) -> list[dict]:
         """파생 모델 → 상위 모델 (variant_of). [{child_id, parent_id, parent_name, ref_type, ref_id}]"""
@@ -499,7 +379,7 @@ class GraphRepository:
         with self.db.get_conn() as conn:
             rows = conn.execute(
                 f"""SELECT DISTINCT r.src_id AS child_id, p.id AS parent_id, p.name AS parent_name, p.ref_type, p.ref_id
-                    FROM graph_relation r JOIN graph_entity p ON p.id = r.dst_id
+                    FROM effective_graph_relation r JOIN effective_graph_entity p ON p.id = r.dst_id
                     WHERE r.type = 'variant_of' AND r.src_id IN ({marks})
                     ORDER BY p.name""",
                 entity_ids,
@@ -514,7 +394,7 @@ class GraphRepository:
         with self.db.get_conn() as conn:
             rows = conn.execute(
                 f"""SELECT DISTINCT e.id, e.type, e.name, r.dst_id AS concept_id
-                    FROM graph_relation r JOIN graph_entity e ON e.id = r.src_id
+                    FROM effective_graph_relation r JOIN effective_graph_entity e ON e.id = r.src_id
                     WHERE r.type = 'part_of' AND r.dst_id IN ({marks})
                     ORDER BY e.id""",
                 concept_ids,
@@ -557,7 +437,7 @@ class GraphRepository:
                 f"""SELECT m.entity_id, e.name AS entity_name, m.file_id, m.page,
                            f.original_name, f.stored_path, f.group_id
                     FROM graph_mention m
-                    JOIN graph_entity e ON e.id = m.entity_id
+                    JOIN effective_graph_entity e ON e.id = m.entity_id
                     JOIN file f ON f.file_id = m.file_id
                     WHERE m.entity_id IN ({marks}) {group_sql}
                     ORDER BY f.original_name, m.page""",
@@ -572,9 +452,9 @@ class GraphRepository:
         with self.db.get_conn() as conn:
             rows = conn.execute(
                 """SELECT DISTINCT c.id AS concept_id, c.name AS concept, e.id AS member_id, e.name AS member
-                   FROM graph_entity c
-                   JOIN graph_relation r ON r.dst_id = c.id AND r.type = 'part_of'
-                   JOIN graph_entity e ON e.id = r.src_id
+                   FROM effective_graph_entity c
+                   JOIN effective_graph_relation r ON r.dst_id = c.id AND r.type = 'part_of'
+                   JOIN effective_graph_entity e ON e.id = r.src_id
                    WHERE c.type = 'concept'
                    ORDER BY c.id, e.id"""
             ).fetchall()
@@ -589,15 +469,18 @@ class GraphRepository:
             conditions.append("e.type = ?")
             params.append(entity_type)
         if q and normalize(q):
-            conditions.append("e.id IN (SELECT entity_id FROM graph_alias WHERE alias_norm LIKE ?)")
+            conditions.append("""(e.id IN (SELECT entity_id FROM graph_alias WHERE alias_norm LIKE ?)
+              OR e.id IN (SELECT v.entity_id FROM graph_property_value v JOIN graph_property_definition d USING(property_id)
+              WHERE v.lifecycle_state='active' AND (v.value_text LIKE ? OR d.label LIKE ?)))""")
             params.append(f"%{normalize(q)}%")
+            params.extend([f'%{q}%',f'%{q}%'])
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         with self.db.get_conn() as conn:
             rows = conn.execute(
-                f"""SELECT e.id, e.type, e.name,
+                f"""SELECT e.id, e.type, e.name, e.revision,
                            (SELECT count(*) FROM graph_mention m WHERE m.entity_id = e.id) AS mention_count,
-                           (SELECT count(*) FROM graph_relation r WHERE r.src_id = e.id OR r.dst_id = e.id) AS relation_count
-                    FROM graph_entity e {where}
+                           (SELECT count(*) FROM effective_graph_relation r WHERE r.src_id = e.id OR r.dst_id = e.id) AS relation_count
+                    FROM effective_graph_entity e {where}
                     ORDER BY e.type, e.name
                     LIMIT ? OFFSET ?""",
                 (*params, limit, offset),
@@ -607,11 +490,11 @@ class GraphRepository:
     def get_entity(self, entity_id: int) -> dict | None:
         """개체 하나의 별칭, 모든 관계(상위 개념 포함, 출처·id 포함), 나온 문서 페이지."""
         with self.db.get_conn() as conn:
-            row = conn.execute("SELECT id, type, name FROM graph_entity WHERE id = ?", (entity_id,)).fetchone()
+            row = conn.execute("SELECT * FROM effective_graph_entity WHERE id = ?", (entity_id,)).fetchone()
             if row is None:
                 return None
             aliases = [r["alias"] for r in conn.execute(
-                "SELECT alias FROM graph_alias WHERE entity_id = ? ORDER BY alias", (entity_id,)
+                "SELECT alias FROM graph_alias WHERE entity_id = ? AND hidden=0 ORDER BY alias", (entity_id,)
             )]
             relations = [dict(r) for r in conn.execute(
                 f"""SELECT {_RELATION_COLUMNS} {_RELATION_JOINS}
@@ -625,6 +508,12 @@ class GraphRepository:
         entity["mentions"] = [
             {k: m[k] for k in ("file_id", "page", "original_name")} for m in self.mentions_of([entity_id])
         ]
+        from graph_rag.edit_service import EffectiveGraphService
+        service = EffectiveGraphService(self.db)
+        entity['properties'] = service.properties(entity_id)
+        with self.db.get_conn() as conn:
+            for relation in entity['relations']:
+                relation['sources'] = service.sources(conn, 'relation', relation['id'])
         return entity
 
     def view(
@@ -645,7 +534,8 @@ class GraphRepository:
         with self.db.get_conn() as conn:
             truncated = False
             if entity_id is not None:
-                _entity_row(conn, entity_id)
+                if conn.execute('SELECT 1 FROM effective_graph_entity WHERE id=?',(entity_id,)).fetchone() is None:
+                    raise GraphNotFoundError('활성 객체를 찾을 수 없습니다.')
                 ids: list[int] = [entity_id]
                 seen = {entity_id}
                 frontier = [entity_id]
@@ -655,8 +545,8 @@ class GraphRepository:
                     marks = ",".join("?" * len(frontier))
                     rows = conn.execute(
                         f"""SELECT r.src_id, r.dst_id, s.type AS src_type, d.type AS dst_type
-                            FROM graph_relation r
-                            JOIN graph_entity s ON s.id = r.src_id JOIN graph_entity d ON d.id = r.dst_id
+                            FROM effective_graph_relation r
+                            JOIN effective_graph_entity s ON s.id = r.src_id JOIN effective_graph_entity d ON d.id = r.dst_id
                             WHERE r.src_id IN ({marks}) OR r.dst_id IN ({marks})
                             ORDER BY r.id""",
                         (*frontier, *frontier),
@@ -681,16 +571,16 @@ class GraphRepository:
                 if file_id:
                     conditions.append(
                         """(e.id IN (SELECT entity_id FROM graph_mention WHERE file_id = ?)
-                            OR e.id IN (SELECT src_id FROM graph_relation WHERE file_id = ?)
-                            OR e.id IN (SELECT dst_id FROM graph_relation WHERE file_id = ?))"""
+                            OR e.id IN (SELECT src_id FROM effective_graph_relation WHERE file_id = ?)
+                            OR e.id IN (SELECT dst_id FROM effective_graph_relation WHERE file_id = ?))"""
                     )
                     params.extend([file_id] * 3)
                 where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
                 rows = conn.execute(
                     f"""SELECT e.id,
-                               (SELECT count(*) FROM graph_relation r WHERE r.src_id = e.id OR r.dst_id = e.id) AS degree,
+                               (SELECT count(*) FROM effective_graph_relation r WHERE r.src_id = e.id OR r.dst_id = e.id) AS degree,
                                (SELECT count(*) FROM graph_mention m WHERE m.entity_id = e.id) AS mentions
-                        FROM graph_entity e {where}
+                        FROM effective_graph_entity e {where}
                         ORDER BY degree DESC, mentions DESC, e.id
                         LIMIT ?""",
                     (*params, limit + 1),
@@ -702,15 +592,15 @@ class GraphRepository:
                 return {"nodes": [], "edges": [], "truncated": False}
             marks = ",".join("?" * len(ids))
             nodes = [dict(r) for r in conn.execute(
-                f"""SELECT e.id, e.type, e.name,
+                f"""SELECT e.id, e.type, e.name, e.revision,
                            (SELECT count(*) FROM graph_mention m WHERE m.entity_id = e.id) AS mention_count,
-                           (SELECT count(*) FROM graph_relation r WHERE r.src_id = e.id OR r.dst_id = e.id) AS degree
-                    FROM graph_entity e WHERE e.id IN ({marks})""",
+                           (SELECT count(*) FROM effective_graph_relation r WHERE r.src_id = e.id OR r.dst_id = e.id) AS degree
+                    FROM effective_graph_entity e WHERE e.id IN ({marks})""",
                 ids,
             )]
             edges = [dict(r) for r in conn.execute(
-                f"""SELECT r.id, r.src_id AS source, r.dst_id AS target, r.type, r.origin, r.file_id, r.page, f.original_name
-                    FROM graph_relation r LEFT JOIN file f ON f.file_id = r.file_id
+                f"""SELECT r.id, r.revision, r.src_id AS source, r.dst_id AS target, r.type, r.origin, r.file_id, r.page, f.original_name
+                    FROM effective_graph_relation r LEFT JOIN file f ON f.file_id = r.file_id
                     WHERE r.src_id IN ({marks}) AND r.dst_id IN ({marks})
                     ORDER BY r.id""",
                 (*ids, *ids),
@@ -720,14 +610,14 @@ class GraphRepository:
     def stats(self) -> dict:
         with self.db.get_conn() as conn:
             by_type = {r["type"]: r["n"] for r in conn.execute(
-                "SELECT type, count(*) AS n FROM graph_entity GROUP BY type ORDER BY type"
+                "SELECT type, count(*) AS n FROM effective_graph_entity GROUP BY type ORDER BY type"
             )}
-            relations = conn.execute("SELECT count(*) FROM graph_relation").fetchone()[0]
+            relations = conn.execute("SELECT count(*) FROM effective_graph_relation").fetchone()[0]
             by_origin = {r["origin"]: r["n"] for r in conn.execute(
-                "SELECT origin, count(*) AS n FROM graph_relation GROUP BY origin ORDER BY origin"
+                "SELECT origin, count(*) AS n FROM effective_graph_relation GROUP BY origin ORDER BY origin"
             )}
             files = conn.execute("SELECT count(DISTINCT file_id) FROM graph_mention").fetchone()[0]
-            blocked = conn.execute("SELECT count(*) FROM graph_relation_block").fetchone()[0]
+            blocked = conn.execute("SELECT count(*) FROM (SELECT src_id,dst_id,type,source_key FROM graph_exclusion UNION SELECT -1,-1,type,src_norm || dst_norm FROM graph_relation_block WHERE NOT EXISTS (SELECT 1 FROM graph_exclusion x JOIN graph_entity s ON s.id=x.src_id JOIN graph_entity d ON d.id=x.dst_id WHERE s.norm=graph_relation_block.src_norm AND d.norm=graph_relation_block.dst_norm AND x.type=graph_relation_block.type))").fetchone()[0]
         return {"entities": by_type, "relations": relations, "relations_by_origin": by_origin,
                 "blocked_relations": blocked, "indexed_files": files}
 
@@ -759,6 +649,8 @@ def _block_key(conn: sqlite3.Connection, src_id: int, dst_id: int, rel_type: str
 
 
 def _is_blocked(conn: sqlite3.Connection, src_id: int, dst_id: int, rel_type: str) -> bool:
+    if conn.execute("SELECT 1 FROM graph_exclusion WHERE src_id=? AND dst_id=? AND type=? AND source_key='*'", (src_id,dst_id,rel_type)).fetchone():
+        return True
     key = _block_key(conn, src_id, dst_id, rel_type)
     return key is not None and conn.execute(
         """SELECT 1 FROM graph_relation_block
@@ -784,20 +676,24 @@ def _unblock(conn: sqlite3.Connection, source: sqlite3.Row, target: sqlite3.Row,
     )
 
 
-def _upsert_entity(conn: sqlite3.Connection, entity_type: str, name: str) -> int | None:
+def _upsert_entity(conn: sqlite3.Connection, entity_type: str, name: str, creation_origin: str = 'extract') -> int | None:
     """같은 종류에 같은 표기(이름 또는 별칭)의 개체가 있으면 그 id를, 없으면 새로 만들어 id를 돌려준다."""
     name = (name or "").strip()
     norm = normalize(name)
     if len(norm) < MIN_NORM_LEN:
         return None
     row = conn.execute(
-        """SELECT e.id FROM graph_alias a JOIN graph_entity e ON e.id = a.entity_id
+        """SELECT e.id, e.merged_into_id FROM graph_alias a JOIN graph_entity e ON e.id = a.entity_id
            WHERE a.alias_norm = ? AND e.type = ? ORDER BY e.id LIMIT 1""",
         (norm, entity_type),
     ).fetchone()
     if row is not None:
-        return row[0]
-    conn.execute("INSERT OR IGNORE INTO graph_entity (type, name, norm) VALUES (?, ?, ?)", (entity_type, name, norm))
+        identity = row[0]
+        while row['merged_into_id'] is not None:
+            identity = row['merged_into_id']
+            row = conn.execute('SELECT id,merged_into_id FROM graph_entity WHERE id=?',(identity,)).fetchone()
+        return identity
+    conn.execute("INSERT OR IGNORE INTO graph_entity (type, name, norm, creation_origin) VALUES (?, ?, ?, ?)", (entity_type, name, norm, creation_origin))
     entity_id = conn.execute(
         "SELECT id FROM graph_entity WHERE type = ? AND norm = ?", (entity_type, norm)
     ).fetchone()[0]
@@ -835,7 +731,7 @@ def _link_spec_entity(conn: sqlite3.Connection, entity_type: str, name: str, ref
     모델명이 바뀌었으면 새 모델명을 별칭으로 더한다. 같은 이름의 개체가 이미 다른 대상을 가리키면 바꾸지 않는다.
     """
     row = conn.execute(
-        "SELECT id FROM graph_entity WHERE type = ? AND ref_type = ? AND ref_id = ? ORDER BY id LIMIT 1",
+        "SELECT id FROM graph_entity WHERE type = ? AND ref_type = ? AND ref_id = ? AND lifecycle_state!='merged' ORDER BY id LIMIT 1",
         (entity_type, ref_type, ref_id),
     ).fetchone()
     if row is not None:
@@ -844,8 +740,11 @@ def _link_spec_entity(conn: sqlite3.Connection, entity_type: str, name: str, ref
     entity_id = _upsert_entity(conn, entity_type, name)
     if entity_id is None:
         return None
+    existing = conn.execute('SELECT ref_type,ref_id FROM graph_entity WHERE id=?',(entity_id,)).fetchone()
+    if existing['ref_id'] is not None and (existing['ref_type'],existing['ref_id']) != (ref_type,ref_id):
+        return None
     conn.execute(
-        "UPDATE graph_entity SET ref_type = ?, ref_id = ? WHERE id = ? AND ref_id IS NULL", (ref_type, ref_id, entity_id)
+        "UPDATE graph_entity SET ref_type = ?, ref_id = ?, creation_origin=CASE WHEN creation_origin='extract' THEN 'spec' ELSE creation_origin END WHERE id = ? AND ref_id IS NULL", (ref_type, ref_id, entity_id)
     )
     return entity_id
 
@@ -855,6 +754,9 @@ def _prune_orphans(conn: sqlite3.Connection) -> int:
     cur = conn.execute(
         """DELETE FROM graph_entity
            WHERE type != 'concept'
+             AND manual_retained=0 AND lifecycle_state='active'
+             AND NOT EXISTS (SELECT 1 FROM graph_property_value p WHERE p.entity_id=graph_entity.id)
+             AND NOT EXISTS (SELECT 1 FROM graph_entity e WHERE e.merged_into_id=graph_entity.id)
              AND ref_id IS NULL
              AND NOT EXISTS (SELECT 1 FROM graph_mention m WHERE m.entity_id = graph_entity.id)
              AND NOT EXISTS (SELECT 1 FROM graph_relation r

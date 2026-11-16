@@ -5,7 +5,7 @@ import { ENTITY_META, ENTITY_TYPES } from './meta';
 import type { EntityType, GraphEntitySummary } from './types';
 
 export type PickedEntity =
-    | { kind: 'existing'; id: number; type: EntityType; name: string }
+    | { kind: 'existing'; id: number; type: EntityType; name: string; revision: number }
     | { kind: 'new'; type: EntityType; name: string };
 
 export function TypeDot({ type, className = 'w-2 h-2' }: { type: EntityType; className?: string }) {
@@ -92,7 +92,7 @@ export function EntityPicker({
                     if (e.key === 'Escape') setOpen(false);
                     if (e.key === 'Enter' && visible[0]) {
                         e.preventDefault();
-                        pick({ kind: 'existing', id: visible[0].id, type: visible[0].type, name: visible[0].name });
+                        pick({ kind: 'existing', id: visible[0].id, type: visible[0].type, name: visible[0].name, revision: visible[0].revision });
                     }
                 }}
                 placeholder={placeholder}
@@ -107,7 +107,7 @@ export function EntityPicker({
                             key={r.id}
                             type="button"
                             onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => pick({ kind: 'existing', id: r.id, type: r.type, name: r.name })}
+                            onClick={() => pick({ kind: 'existing', id: r.id, type: r.type, name: r.name, revision: r.revision })}
                             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] hover:bg-chip"
                         >
                             <TypeDot type={r.type} />

@@ -20,7 +20,7 @@
 2. `author` 채널은 단독으로만 쓸 수 있게 했다. `channels: "author,mail"`이면 같은 문서가 메일 선택 목록에 나오므로 지시서 I1-1("메일·웹의 선택 절차 목록에 나오지 않는다")을 지키려고 검사 오류로 뺀다.
 3. **서버 적용 절차는 저장소에서만 찾는다.** 저장소 `mail-reply-style` 문서가 빠져 있을 때 같은 이름의 DB 절차가 그 자리를 채우는 길을 막았다 (원칙 3). DB 절차를 읽을 때도 `SERVER_CHOSEN` 이름은 무조건 뺀다.
 4. DB 절차의 검사(`db_skill_problem`)는 승인 전 검사(I4 `check_skill_draft`)와 별개로 읽을 때 한 번 더 한다. 승인 뒤 저장소에 같은 이름의 절차가 들어오면 그때부터 DB 쪽이 빠진다.
-5. 사용자가 넣은 `skills/skill-creator/`(GitHub 원본)는 머리말에 `metadata.channels`가 없고 본문이 33,168자라 로더가 ERROR 로그를 남기고 뺀다. 이름도 `create-skill`이 아니다. 지시서 2-2와 11-1에 따라 **구현자는 이 문서를 고치거나 옮기지 않았다.** 설계자가 `skills/create-skill/SKILL.md`(`channels: "author"`)로 고쳐 넣을 때까지 초안 생성은 꺼진 상태이고 화면에 사유가 보인다.
+5. I1 작성 당시 사용자가 넣은 `skills/skill-creator/`(GitHub 원본)는 머리말에 `metadata.channels`가 없고 본문이 33,168자라 로더가 ERROR 로그를 남기고 뺐다. 이름도 `create-skill`이 아니다. 지시서 2-2와 11-1에 따라 **구현자는 이 문서를 고치거나 옮기지 않았다.** 당시 초안 생성은 꺼진 상태였다. 이후 설계자가 author 전용 `skills/create-skill/SKILL.md`를 추가했으며, 현재 상태는 아래 보완 기록을 참조한다.
 
 ## 테스트: 명령과 출력
 ```
@@ -53,9 +53,25 @@ tests/test_skills.py::test_skill_bodies_only_mention_existing_tools PASSED [100%
 ```
 
 ## 확인하지 못한 것 / Gemini에게 요청할 검증
-- `create-skill` 실제 문서가 없어 `author_skill()`이 진짜 문서로 동작하는지는 임시 폴더 문서로만 확인했다.
+- I1 당시에는 `create-skill` 실제 문서가 없어 임시 폴더 문서로만 확인했다. 이후 추가된 실제 문서의 채널·크기·작성 경위는 아래 기록과 후속 테스트에서 확인했다.
 - **시작 조건**: 지시서 I는 "단계 D가 Gemini 검증을 통과한 뒤"에 시작하라고 한다. `docs/dev_log/`에 D 판정 기록(D-summary, D-live-check)이 없다. 사용자가 2026-11-13 "개발 진행해주고"로 지시해 시작했다.
 - I-11(`author` 채널 절차가 메일·웹에서 읽히지 않는다): `test_author_skill_is_not_listed_or_loadable_in_answer_channels`.
 
 ## 커밋 해시
 (커밋 후 I-summary.md에 적는다)
+
+## 후속 현행화 — 2026-11-13 운영 반영 전 점검
+
+위 구현·테스트 기록은 I1 당시 상태다. 현재 실제 작성 절차는 `skills/create-skill/SKILL.md`이며 최초 추가 커밋은 `16274c1`이다. 제공된 T5 보고서가 지목한 추가 커밋·크기와는 다르므로 현재 파일을 기준으로 다시 측정했다.
+
+| 항목 | 현재 확인 결과 |
+| --- | --- |
+| 출처 | 이 저장소의 런타임에 맞춰 프로젝트용으로 작성한 요약 절차. `skills/skill-creator/`의 간결성·점진적 로딩 원칙을 참고한 작성 경위가 최초 커밋에 기록됨 |
+| 라이선스 표시 | `create-skill/SKILL.md` 자체에는 별도 라이선스 선언이 없음. 외부 원본의 배포 허가가 이 요약본에 자동 적용된다고 단정하지 않음 |
+| 원본 보호 | 사용자가 수정한 `skills/skill-creator/SKILL.md`는 이번 작업에서 변경하지 않았으며 시작·종료 SHA-256 일치 |
+| 채널 | `metadata.channels: "author"`. 메일·웹 답변 모델의 선택 절차 목록에서 제외 |
+| 크기 | LF 기준 전체 2,320자, 머리말 제외·앞뒤 공백 제거한 본문 2,131자, 72줄. 본문 상한 6,000자 이내 |
+| 외부 실행 | 문서 자체에 외부 스크립트·네트워크 실행 없음. 이번 검증은 대역 모델만 사용 |
+| 안내 보완 | 사양 조회를 없는 도구의 예시로 쓰던 문구 제거. 실제 활성 도구 계약에 따르고, 없는 기능의 예시는 웹 검색·재고/ERP 조회로 변경 |
+
+대상 테스트 53건 및 전체 테스트 463건 통과. 상세 명령과 사전 반영 검증은 [T-predeploy-2026-11-13.md](/C:/TG_AI_DEV/rag_QA/docs/dev_log/T-predeploy-2026-11-13.md)를 참조한다. 작성 모델의 실제 응답 품질과 운영 화면 확인은 T4에 남긴다.

@@ -6,7 +6,9 @@ import { reviewPath } from '../rag/api';
 import { graphApi } from './api';
 import { EntityPicker, TypeDot, type PickedEntity } from './EntityPicker';
 import { errorText } from './errors';
-import { ENTITY_META, ORIGIN_META, RELATION_META, RELATION_TYPES } from './meta';
+import { ENTITY_META, ORIGIN_META } from './meta';
+import { relationLabel, useGraphSchema } from './schemaContext';
+import { EntityProperties } from './GraphEditing';
 import type { GraphEntityDetail, GraphNode, GraphRelation, RelationType } from './types';
 
 /** "그래프에서 고르기": 부모가 다음 노드 클릭을 이 콜백으로 넘긴다 */
@@ -40,8 +42,10 @@ export function RelationRow({
     onReplaced: (relation: GraphRelation) => void;
     onDeleted: () => void;
 }) {
+    const { schema } = useGraphSchema();
     const [busy, setBusy] = useState(false);
     const [confirming, setConfirming] = useState(false);
+    const [deleteScope, setDeleteScope] = useState('all');
     const [error, setError] = useState('');
 
     const outgoing = perspectiveId === undefined || relation.source_id === perspectiveId;
@@ -84,23 +88,25 @@ export function RelationRow({
                 )}
                 <OriginBadge relation={relation} />
             </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {!schema.editing_enabled && <p className="mt-1.5 text-xs">{relationLabel(schema, relation.type)}</p>}
+            <div hidden={!schema.editing_enabled} className="mt-1.5 flex-wrap items-center gap-1.5">
                 <select
                     aria-label="관계 종류"
                     value={relation.type}
                     disabled={busy}
                     onChange={(e) => {
                         const type = e.target.value as RelationType;
-                        void run(async () => onReplaced(await graphApi.updateRelation(relation.id, { type })));
+                        void run(async () => onReplaced(await graphApi.updateRelation(relation.id, { type, expected_revision: relation.revision })));
                     }}
                     className="h-7 rounded-md border border-line bg-white px-1.5 text-[11.5px] font-semibold disabled:opacity-50"
                 >
-                    {RELATION_TYPES.map((t) => <option key={t} value={t}>{RELATION_META[t].label} ({RELATION_META[t].hint})</option>)}
+                    {schema.relation_types.filter((t) => t.active || t.key === relation.type).map((t) => <option key={t.key} value={t.key}>{t.label} ({t.description})</option>)}
+                    {!schema.relation_types.some((t) => t.key === relation.type) && <option value={relation.type}>{relation.type}</option>}
                 </select>
                 <button
                     type="button"
                     disabled={busy}
-                    onClick={() => void run(async () => onReplaced(await graphApi.updateRelation(relation.id, { reverse: true })))}
+                    onClick={() => void run(async () => onReplaced(await graphApi.updateRelation(relation.id, { reverse: true, expected_revision: relation.revision })))}
                     title="출발과 도착을 바꿉니다"
                     className="h-7 rounded-md border border-line px-2 text-[11.5px] font-semibold text-ink/70 hover:bg-chip disabled:opacity-50"
                 >
@@ -112,7 +118,7 @@ export function RelationRow({
                             type="button"
                             disabled={busy}
                             onClick={() => void run(async () => {
-                                await graphApi.deleteRelation(relation.id);
+                                await graphApi.deleteRelation(relation.id, relation.revision, deleteScope);
                                 onDeleted();
                             })}
                             className="h-7 rounded-md bg-danger px-2 text-[11.5px] font-bold text-white hover:opacity-90 disabled:opacity-50"
@@ -134,9 +140,12 @@ export function RelationRow({
             </div>
             {confirming && (
                 <p className="mt-1.5 text-[11px] leading-4 text-muted">
-                    두 개체 사이의 이 종류 관계를 모두 지웁니다. 문서를 다시 추출해도 되살아나지 않습니다.
+                    {relation.origin === 'manual' ? '이 사용자 입력을 삭제 상태로 보관합니다. 삭제된 항목에서 복구할 수 있습니다.' : '이 논리 관계의 모든 자동 출처를 그래프에서 제외합니다. 원본 문서·사양 연결은 유지됩니다.'}
                 </p>
             )}
+            {confirming && relation.origin !== 'manual' && <select aria-label="자동 관계 제외 범위" value={deleteScope} onChange={(e) => setDeleteScope(e.target.value)} className="mt-1 w-full rounded border border-line text-xs">
+                <option value="all">이 논리 관계의 모든 출처 제외</option><option value="source">선택한 출처 주장만 제외</option>
+            </select>}
             {evidence && (
                 relation.file_id ? (
                     <a {...linkProps(reviewPath(relation.file_id))} className="mt-1 block truncate text-[11px] text-muted hover:text-brand-hover hover:underline">
@@ -145,6 +154,7 @@ export function RelationRow({
                 ) : <p className="mt-1 truncate text-[11px] text-muted">근거: {evidence}</p>
             )}
             {error && <p role="alert" className="mt-1 text-[11px] text-danger">{error}</p>}
+            {relation.sources?.map((s) => <p key={s.source_id} className="mt-1 text-[11px] text-muted">{s.file_deleted ? '근거 파일 삭제됨 · ' : ''}{s.source_name || '사용자 입력'}{s.page ? ` · ${s.page}쪽` : ''} · {s.reason || '사유 없음'} · 파일 검증 미완료</p>)}
         </li>
     );
 }
@@ -159,30 +169,34 @@ function AddRelationForm({
     onCreated: (relation: GraphRelation) => void;
     requestPick: RequestPick;
 }) {
+    const { schema } = useGraphSchema();
     const [type, setType] = useState<RelationType>(entity.type === 'certification' ? 'part_of' : 'has_component');
     const [outgoing, setOutgoing] = useState(true);
     const [target, setTarget] = useState<PickedEntity | null>(null);
     const [picking, setPicking] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [reason, setReason] = useState('');
+    const [fileId, setFileId] = useState('');
+    const [page, setPage] = useState('');
 
     const save = async () => {
         if (!target) return;
         setSaving(true);
         setError('');
         try {
+            const source = { reason, file_id: fileId || null, page: page ? Number(page) : null };
             let relation: GraphRelation;
             if (outgoing) {
                 relation = await graphApi.createRelation(target.kind === 'existing'
-                    ? { source_id: entity.id, type, target_id: target.id }
-                    : { source_id: entity.id, type, new_target: { type: target.type, name: target.name } });
+                    ? { source_id: entity.id, type, target_id: target.id, source }
+                    : { source_id: entity.id, type, new_target: { type: target.type, name: target.name }, source });
             } else {
                 // 들어오는 관계: 새 개체가 출발점이면 먼저 이 개체 쪽으로 만든 뒤 뒤집는다
                 if (target.kind === 'existing') {
-                    relation = await graphApi.createRelation({ source_id: target.id, type, target_id: entity.id });
+                    relation = await graphApi.createRelation({ source_id: target.id, type, target_id: entity.id, source });
                 } else {
-                    const created = await graphApi.createRelation({ source_id: entity.id, type, new_target: { type: target.type, name: target.name } });
-                    relation = await graphApi.updateRelation(created.id, { reverse: true });
+                    relation = await graphApi.createRelation({ source_id: entity.id, type, new_target: { type: target.type, name: target.name }, reverse: true, source });
                 }
             }
             setTarget(null);
@@ -204,7 +218,7 @@ function AddRelationForm({
                     onChange={(e) => setType(e.target.value as RelationType)}
                     className="h-8 rounded-md border border-line bg-white px-1.5 text-[12px]"
                 >
-                    {RELATION_TYPES.map((t) => <option key={t} value={t}>{RELATION_META[t].label} ({RELATION_META[t].hint})</option>)}
+                    {schema.relation_types.filter((t) => t.active).map((t) => <option key={t.key} value={t.key}>{t.label} ({t.description})</option>)}
                 </select>
                 <span className="font-semibold text-muted">방향</span>
                 <div role="group" aria-label="관계 방향" className="flex rounded-md bg-chip p-0.5">
@@ -243,7 +257,7 @@ function AddRelationForm({
                                 setPicking(true);
                                 requestPick((node) => {
                                     setPicking(false);
-                                    if (node.id !== entity.id) setTarget({ kind: 'existing', id: node.id, type: node.type, name: node.name });
+                                    if (node.id !== entity.id) setTarget({ kind: 'existing', id: node.id, type: node.type, name: node.name, revision: node.revision });
                                 });
                             }}
                             title="그래프에서 노드를 눌러 고릅니다"
@@ -254,6 +268,13 @@ function AddRelationForm({
                     </div>
                 )}
             </div>
+            <p className="mt-2 text-xs font-semibold">{outgoing ? entity.name : target?.name || '대상'} → {relationLabel(schema, type)} → {outgoing ? target?.name || '대상' : entity.name}</p>
+            <details className="mt-2 text-xs"><summary>입력 사유·근거 (선택)</summary>
+                <label className="mt-2 block">사유<textarea className="w-full rounded border border-line p-1" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={4000} /></label>
+                <label className="block">근거 파일 ID<input className="w-full rounded border border-line p-1" value={fileId} onChange={(e) => setFileId(e.target.value)} /></label>
+                <label className="block">페이지<input type="number" min={1} className="w-full rounded border border-line p-1" value={page} onChange={(e) => setPage(e.target.value)} /></label>
+                <p>파일 선택만으로 내용이 검증되지는 않습니다.</p>
+            </details>
             {error && <p role="alert" className="mt-2 text-[11.5px] text-danger">{error}</p>}
             <div className="mt-2.5 flex justify-end">
                 <button
@@ -302,6 +323,7 @@ export function EntityPanel({
     onMerged: (sourceId: number, targetId: number) => void;
     requestPick: RequestPick;
 }) {
+    const { schema } = useGraphSchema();
     const [entity, setEntity] = useState<GraphEntityDetail | null>(null);
     const [loadError, setLoadError] = useState('');
     const [renaming, setRenaming] = useState<string | null>(null);
@@ -342,7 +364,7 @@ export function EntityPanel({
         setBusy(true);
         setActionError('');
         try {
-            setEntity(await graphApi.renameEntity(entity.id, renaming.trim()));
+            setEntity(await graphApi.renameEntity(entity.id, renaming.trim(), entity.revision));
             setRenaming(null);
             onChanged();
         } catch (e) {
@@ -357,7 +379,7 @@ export function EntityPanel({
         setBusy(true);
         setActionError('');
         try {
-            const merged = await graphApi.mergeEntity(entity.id, mergeTarget.id);
+            const merged = await graphApi.mergeEntity(entity.id, mergeTarget.id, entity.revision, mergeTarget.revision);
             setMergeTarget(null);
             onMerged(entity.id, merged.id);
         } catch (e) {
@@ -389,7 +411,7 @@ export function EntityPanel({
                 ) : (
                     <div className="mt-1.5 flex items-start gap-2">
                         <h2 className="min-w-0 flex-1 break-words text-[17px] font-bold leading-6">{entity.name}</h2>
-                        <button type="button" onClick={() => setRenaming(entity.name)} className="mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[11.5px] font-semibold text-muted hover:bg-chip hover:text-ink">이름 수정</button>
+                        {schema.editing_enabled && <button type="button" onClick={() => setRenaming(entity.name)} className="mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[11.5px] font-semibold text-muted hover:bg-chip hover:text-ink">{entity.ref_id ? '표시명 수정' : '이름 수정'}</button>}
                     </div>
                 )}
                 {otherAliases.length > 0 && (
@@ -407,6 +429,7 @@ export function EntityPanel({
                 </button>
             </div>
 
+            <EntityProperties key={entity.id} entity={entity} changed={changed} removed={() => onMerged(entity.id, 0)} />
             <Section title="관계" count={entity.relations.length}>
                 {entity.relations.length === 0 && <p className="mb-2 text-[12px] text-muted">연결된 관계가 없습니다.</p>}
                 <ul className="space-y-1.5">
@@ -422,7 +445,7 @@ export function EntityPanel({
                     ))}
                 </ul>
                 <div className="mt-2.5">
-                    <AddRelationForm key={entity.id} entity={entity} onCreated={changed} requestPick={requestPick} />
+                    {schema.editing_enabled && <AddRelationForm key={entity.id} entity={entity} onCreated={changed} requestPick={requestPick} />}
                 </div>
             </Section>
 
@@ -443,7 +466,7 @@ export function EntityPanel({
                 )}
             </Section>
 
-            <Section title="다른 개체와 합치기">
+            {schema.editing_enabled && <Section title="다른 개체와 합치기">
                 <p className="mb-2 text-[11.5px] leading-5 text-muted">
                     같은 대상이 다른 이름으로 나뉘어 있을 때 씁니다. 이 개체의 관계와 문서가 고른 개체로 옮겨지고, 이 이름은 그 개체의 다른 표기가 됩니다.
                 </p>
@@ -458,7 +481,7 @@ export function EntityPanel({
                 ) : (
                     <EntityPicker label="합칠 대상 개체" placeholder="합칠 개체 찾기" excludeId={entity.id} onPick={setMergeTarget} />
                 )}
-            </Section>
+            </Section>}
         </div>
     );
 }
@@ -475,11 +498,12 @@ export function EdgePanel({
     onReplaced: (relation: GraphRelation) => void;
     onDeleted: () => void;
 }) {
+    const { schema } = useGraphSchema();
     return (
         <div className="p-4">
             <p className="text-[11px] font-bold text-muted">관계</p>
-            <h2 className="mt-1 text-[15px] font-bold">{RELATION_META[relation.type].label}</h2>
-            <p className="mt-0.5 text-[11.5px] text-muted">{RELATION_META[relation.type].hint}</p>
+            <h2 className="mt-1 text-[15px] font-bold">{relationLabel(schema, relation.type)}</h2>
+            <p className="mt-0.5 text-[11.5px] text-muted">{schema.relation_types.find((r) => r.key === relation.type)?.description}</p>
             <ul className="mt-3">
                 <RelationRow key={relation.id} relation={relation} onOpenEntity={onOpenEntity} onReplaced={onReplaced} onDeleted={onDeleted} />
             </ul>

@@ -1,5 +1,5 @@
 /** 그래프 화면의 이름표와 색. 종류 키는 백엔드 graph_rag/types.py 와 같다. */
-import type { EntityType, GraphNode, RelationOrigin, RelationType } from './types';
+import type { EntityType, GraphNode, RelationOrigin } from './types';
 
 export const ENTITY_META: Record<EntityType, { label: string; color: string; hint: string }> = {
     product: { label: '제품', color: '#00A4E4', hint: '제품 모델 (예: N5800, A650)' },
@@ -12,18 +12,6 @@ export const ENTITY_META: Record<EntityType, { label: string; color: string; hin
 };
 
 export const ENTITY_TYPES = Object.keys(ENTITY_META) as EntityType[];
-
-export const RELATION_META: Record<RelationType, { label: string; hint: string }> = {
-    has_component: { label: '부품', hint: '제품 → 부품' },
-    has_certification: { label: '인증', hint: '제품 → 인증 종류' },
-    has_number: { label: '번호', hint: '인증 종류·제품 → 인증번호' },
-    issued_by: { label: '발급 기관', hint: '인증·번호 → 기관' },
-    complies_with: { label: '규격 준수', hint: '제품·인증 → 규격' },
-    part_of: { label: '상위 개념', hint: '인증 종류 → 상위 개념' },
-    variant_of: { label: '상위 모델', hint: '파생 모델 → 상위 모델 (사양 DB)' },
-};
-
-export const RELATION_TYPES = Object.keys(RELATION_META) as RelationType[];
 
 export const ORIGIN_META: Record<RelationOrigin, { label: string; className: string; stroke: string; dash?: string }> = {
     extract: { label: '문서 추출', className: 'border-line bg-white text-muted', stroke: '#B8C2CF' },

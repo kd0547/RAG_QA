@@ -322,8 +322,7 @@ create table if not exists graph_relation (
     created_at text not null default current_timestamp
 );
 -- file_id가 NULL인 행도 중복을 막도록 빈 문자열/-1로 바꿔 유일성을 건다
-CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_relation_unique
-    ON graph_relation(src_id, dst_id, type, ifnull(file_id, ''), ifnull(page, -1));
+-- Source-aware uniqueness and editing tables are installed transactionally by graph_migration.py.
 CREATE INDEX IF NOT EXISTS idx_graph_relation_dst ON graph_relation(dst_id);
 CREATE INDEX IF NOT EXISTS idx_graph_relation_file ON graph_relation(file_id, page);
 

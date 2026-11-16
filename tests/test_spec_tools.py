@@ -93,6 +93,35 @@ def _call(tool, args, owner=OWNER, run="r1"):
         return tool.invoke(args)
 
 
+@pytest.mark.parametrize("model", ["NO-SPEC", "A650"])
+def test_compare_specs_explains_missing_values_without_registering_evidence(agent_env, specs, model):
+    from tools.tool import compare_specs
+
+    if model == "NO-SPEC":
+        agent_env.spec_repo.create_product(model)
+    # A650에는 다른 속성(ram_gb)만 있고 weight_kg는 없다.
+    result = _call(compare_specs, {"owner_type": "product", "owner_ids": [model],
+                   "conditions": [{"attribute": "weight_kg", "op": "<=", "value": "2", "unit": "kg"}]})
+
+    [target] = result["targets"]
+    assert target["evidence_id"] is None
+    assert "근거 미등록" in target["message"] and "확인 필요" in target["message"]
+    assert target["unknown"] == 1 and target["results"][0]["verdict"] == "unknown"
+    assert agent_env.evidence_repo.list_for_owner(OWNER.type, OWNER.id) == []
+
+
+def test_compare_specs_missing_target_does_not_hide_other_targets_evidence(agent_env, specs):
+    from tools.tool import compare_specs
+
+    result = _call(compare_specs, {"owner_type": "product", "owner_ids": ["N5800", "A650"],
+                   "conditions": [{"attribute": "weight_kg", "op": "<=", "value": "2", "unit": "kg"}]})
+
+    complete, missing = result["targets"]
+    assert complete["evidence_id"] and complete["met"] == 1 and "message" not in complete
+    assert missing["evidence_id"] is None and "근거 미등록" in missing["message"]
+    assert len(agent_env.evidence_repo.list_for_owner(OWNER.type, OWNER.id)) == 1
+
+
 def test_same_call_twice_gives_same_evidence_id(agent_env, specs):
     from tools.tool import compare_specs, get_specs
 

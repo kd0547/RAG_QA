@@ -1,5 +1,6 @@
 /** 문서 그래프 API 클라이언트 (백엔드: app/routers/graph.py). 베이스 URL 규칙은 lib/http.ts 참고. */
 import { request } from '../lib/http';
+import { graphWrite } from './write';
 import type {
     EntityType,
     GraphEntityDetail,
@@ -51,28 +52,25 @@ export const graphApi = {
         return request<GraphEntityDetail>(`/graph/entities/${id}`);
     },
 
-    renameEntity(id: number, name: string): Promise<GraphEntityDetail> {
-        return request<GraphEntityDetail>(`/graph/entities/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+    renameEntity(id: number, name: string, expected_revision: number): Promise<GraphEntityDetail> {
+        return graphWrite<GraphEntityDetail>(`/entities/${id}`, 'PATCH', { name, expected_revision });
     },
 
     /** sourceId 개체를 targetId에 합친다. 합친 결과(target)를 돌려준다 */
-    mergeEntity(sourceId: number, targetId: number): Promise<GraphEntityDetail> {
-        return request<GraphEntityDetail>(`/graph/entities/${sourceId}/merge`, {
-            method: 'POST',
-            body: JSON.stringify({ target_id: targetId }),
-        });
+    mergeEntity(sourceId: number, targetId: number, expected_revision: number, target_revision: number): Promise<GraphEntityDetail> {
+        return graphWrite<GraphEntityDetail>(`/entities/${sourceId}/merge`, 'POST', { target_id: targetId, expected_revision, target_revision });
     },
 
     createRelation(input: RelationCreateInput): Promise<GraphRelation> {
-        return request<GraphRelation>('/graph/relations', { method: 'POST', body: JSON.stringify(input) });
+        return graphWrite<GraphRelation>('/relations', 'POST', input);
     },
 
-    updateRelation(id: number, changes: { type?: RelationType; reverse?: boolean }): Promise<GraphRelation> {
-        return request<GraphRelation>(`/graph/relations/${id}`, { method: 'PATCH', body: JSON.stringify(changes) });
+    updateRelation(id: number, changes: { type?: RelationType; reverse?: boolean; expected_revision: number }): Promise<GraphRelation> {
+        return graphWrite<GraphRelation>(`/relations/${id}`, 'PATCH', changes);
     },
 
-    deleteRelation(id: number): Promise<{ deleted: number }> {
-        return request<{ deleted: number }>(`/graph/relations/${id}`, { method: 'DELETE' });
+    deleteRelation(id: number, revision: number, scope = 'all'): Promise<{ deleted: number }> {
+        return graphWrite<{ deleted: number }>(`/relations/${id}?expected_revision=${revision}&scope=${scope}`, 'DELETE');
     },
 
     /** 저장된 페이지 텍스트로 다시 뽑는다 (백그라운드). 사람이 넣거나 지운 관계는 유지된다 */

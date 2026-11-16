@@ -28,7 +28,7 @@ export function ComponentsTab({
     onChanged: () => Promise<void>;
     onAddDefaultAttributes: () => Promise<void>;
 }) {
-    const [activeId, setActiveId] = useState<ActiveId>(null);
+    const [activeId, setActiveId] = useState<ActiveId>(() => new URLSearchParams(window.location.search).get('component'));
     const [detail, setDetail] = useState<ComponentDetail | null>(null);
     const [detailKey, setDetailKey] = useState(0);
     const [draft, setDraft] = useState<ComponentInput>(EMPTY);

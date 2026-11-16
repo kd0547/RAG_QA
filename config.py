@@ -113,6 +113,10 @@ CUSTOMER_HISTORY_DAYS = int(os.getenv("CUSTOMER_HISTORY_DAYS", "90"))
 GRAPH_EXTRACT_ENABLED = os.getenv("GRAPH_EXTRACT_ENABLED", "1") not in ("0", "false", "False", "")
 # LLM에 넘기는 페이지 텍스트 최대 길이
 GRAPH_EXTRACT_MAX_CHARS = int(os.getenv("GRAPH_EXTRACT_MAX_CHARS", "12000"))
+GRAPH_EDIT_ENABLED = _flag("GRAPH_EDIT_ENABLED")
+GRAPH_EDIT_NAME_LIMIT = int(os.getenv("GRAPH_EDIT_NAME_LIMIT", "100"))
+GRAPH_EDIT_TEXT_LIMIT = int(os.getenv("GRAPH_EDIT_TEXT_LIMIT", "4000"))
+GRAPH_EDIT_PROPERTY_LIMIT = int(os.getenv("GRAPH_EDIT_PROPERTY_LIMIT", "50"))
 
 # ---------- 로그 ----------
 # 로그 파일 폴더 (기본: 프로젝트 루트의 logs/). 상대 경로면 프로젝트 루트 기준.

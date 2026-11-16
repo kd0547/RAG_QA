@@ -85,7 +85,8 @@ export function ProductsTab({
             .then((list) => {
                 if (cancelled) return;
                 setProducts(list);
-                setActiveId(list[0]?.id ?? null);
+                const requested = new URLSearchParams(window.location.search).get('product');
+                setActiveId(list.find((p) => p.id === requested)?.id ?? list[0]?.id ?? null);
             })
             .catch((e) => { if (!cancelled) setLoadError(errorMessage(e, '제품 목록을 불러오지 못했습니다.')); });
         return () => { cancelled = true; };

@@ -291,30 +291,6 @@ export default function App() {
             ? wrapHtmlDocument(currentHtmlBody, currentTitle)
             : '';
 
-    // ===== 파일 추가 =====
-    const handleAddFiles = useCallback((fileList: FileList | File[]) => {
-        const accepted = Array.from(fileList).filter(
-            (f) => f.type.startsWith('image/') || f.type === 'application/pdf'
-        );
-        if (accepted.length === 0) return;
-
-        const newItems: OcrFile[] = accepted.map((file) => ({
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            file,
-            name: file.name,
-            type: file.type,
-            size: file.size,
-            status: 'pending',
-            pages: [],
-            error: '',
-        }));
-
-        setFiles((prev) => [...prev, ...newItems]);
-        setSelection((prev) => prev ?? { fileId: newItems[0].id, pageIndex: null });
-
-        newItems.forEach((item) => runOcr(item));
-    }, []);
-
     // ===== OCR 호출 =====
     const runOcr = useCallback(async (item: OcrFile): Promise<void> => {
         setFiles((prev) =>
@@ -368,6 +344,30 @@ export default function App() {
             );
         }
     }, []);
+
+    // ===== 파일 추가 =====
+    const handleAddFiles = useCallback((fileList: FileList | File[]) => {
+        const accepted = Array.from(fileList).filter(
+            (f) => f.type.startsWith('image/') || f.type === 'application/pdf'
+        );
+        if (accepted.length === 0) return;
+
+        const newItems: OcrFile[] = accepted.map((file) => ({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            file,
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            status: 'pending',
+            pages: [],
+            error: '',
+        }));
+
+        setFiles((prev) => [...prev, ...newItems]);
+        setSelection((prev) => prev ?? { fileId: newItems[0].id, pageIndex: null });
+
+        newItems.forEach((item) => runOcr(item));
+    }, [runOcr]);
 
     // ===== 이벤트 핸들러 =====
     const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {

@@ -112,3 +112,46 @@ def test_type_helpers(repo):
                      (cert["type_id"], created["type_id"]))
     assert repo.resolve_type(created["type_id"])["type_id"] == cert["type_id"]
     assert repo.resolve_type(9999) is None
+
+
+@pytest.mark.parametrize("summary, expected", [
+    ('{"name": "warranty-terms"}', "warranty-terms"),
+    (('{"name": "warranty-terms", "extra": "' + "x" * 300)[:200], "warranty-terms"),
+    ("{'name': 'warranty-terms', 'extra': '" + "x" * 200, "warranty-terms"),
+    ('[{"name": "warranty-terms"}]', None),
+    ('{"name": null}', None),
+    ('{"extra": "' + "x" * 200, None),
+])
+def test_skill_usage_recovers_truncated_load_arguments(repo, summary, expected):
+    from repository.evidence_repository import EvidenceRepository
+
+    evidence = EvidenceRepository(repo.db)
+    run_id = evidence.start_run("task", "t1", "test", None)
+    calls = [
+        {"tool": "load_skill", "args_summary": summary},
+        {"tool": "load_skill", "args_summary": summary},
+        {"tool": "other_tool", "args_summary": '{"name": "ignored"}'},
+    ]
+    evidence.finish_run(run_id, "ok", calls, 0, 0)
+
+    assert repo.skill_usage_since("2000-01-01") == ({expected: 1} if expected else {})
+
+
+def test_skill_usage_counts_once_per_run_and_matches_analysis(repo, monkeypatch):
+    import repository
+    from agent.request_analysis import used_skills
+    from repository.evidence_repository import EvidenceRepository
+
+    evidence = EvidenceRepository(repo.db)
+    monkeypatch.setattr(repository, "evidence_repo", evidence)
+    truncated = ('{"name": "warranty-terms", "extra": "' + "x" * 300)[:200]
+    for _ in range(2):
+        run_id = evidence.start_run("task", "t1", "test", None, skills=[{"name": "mail-reply-style"}])
+        evidence.finish_run(run_id, "ok", [
+            {"tool": "load_skill", "args_summary": truncated},
+            {"tool": "load_skill", "args_summary": '{"name": "mail-reply-style"}'},
+        ], 0, 0)
+
+    counts = repo.skill_usage_since("2000-01-01")
+    assert counts == {"warranty-terms": 2, "mail-reply-style": 2}
+    assert set(counts) == set(used_skills("t1"))

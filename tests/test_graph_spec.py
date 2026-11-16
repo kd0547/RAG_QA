@@ -90,7 +90,7 @@ def test_check_migration_keeps_rows_ids_and_indexes(tmp_path):
             conn.execute("insert into graph_relation (src_id, dst_id, type, origin) values (1, 2, 'x', 'guess')")
     assert after == before
     assert "'spec'" in table_sql and "graph_relation_new" not in table_sql
-    assert {"idx_graph_relation_unique", "idx_graph_relation_dst", "idx_graph_relation_file"} <= indexes
+    assert {"idx_graph_relation_source", "idx_graph_relation_dst", "idx_graph_relation_file"} <= indexes
     assert options == [(0,)]
     assert entity_columns.count("ref_type") == 1 and entity_columns.count("ref_id") == 1
 
@@ -383,7 +383,7 @@ def docs(g):
 
 def test_graph_search_matched_has_spec_ref(docs):
     result = service.search_graph("N5800 무게")
-    assert result["matched"] == [{"name": "N5800", "type": "product", "ref_type": "product", "ref_id": docs.n5800["id"]}]
+    assert result["matched"] == [{"id":docs.graph.find_entities('N5800')[0]['id'], "name": "N5800", "type": "product", "ref_type": "product", "ref_id": docs.n5800["id"]}]
 
 
 def test_n5800_and_variant_are_different_entities(docs):

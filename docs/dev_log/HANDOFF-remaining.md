@@ -1,5 +1,7 @@
 # 인계: 통합 지시서(remaining) 마무리 상태 — 2026-11-13
 
+> 최신 후속 기록: [T-predeploy-2026-11-13.md](/C:/TG_AI_DEV/rag_QA/docs/dev_log/T-predeploy-2026-11-13.md). P3 4건 보완, 전체 463 passed, 전체 린트·타입 검사·임시 빌드 통과, DB 백업·사본 초기화 재검증 완료. 서버 재시작과 실메일·실환경 검증은 시행하지 않았다.
+
 지시서: [opus_development_instructions_remaining.md](../opus_development_instructions_remaining.md)
 전체 항목·커밋·DB 변경·검증 위치: **[R-summary](R-summary.md)**
 
@@ -16,11 +18,11 @@ R0·E1~E4·H1~H4·G1~G2·Z1 구현과 T2 마이그레이션 예행은 이전에 
 
 ## 남은 것
 
-1. **T1 기존 린트 오류**: `frontend/src/App.tsx` 315행 `react-hooks/immutability`, 319행 `react-hooks/preserve-manual-memoization`, 316행 의존성 경고. 마지막 변경은 2026-11-05 `52963dd`이며 이번 구현과 무관하다. 인계 지시대로 수정하지 않고 보고했다. T1 전체 통과로 표시하지 않는다.
+1. **T1 후속 완료**: 기존 `App.tsx`의 OCR 콜백을 호출부보다 먼저 선언하고 의존성을 연결했다. 후속 `npx --no-install eslint src`와 타입 검사·임시 운영용 빌드가 모두 통과했다. 기존 T-T1 기록은 수정 전의 이력으로 보존한다.
 2. **평가셋 빈 문항·정답**: 10번 주간판매 질문은 질문·mail_uid·task_id가 비어 있어 F1은 양쪽 9문항만 실행했다. 전 문항 `expected_evidence`·`expected_keywords`도 비어 있다. 담당자가 채워야 한다.
-3. **T3 사용자 운영 반영**: 운영 `mail.db`·`agent_threads.db` 백업, frontend `npm run build`, 서버 재시작. 재시작 전 [R-summary의 DB 변경 표](R-summary.md#재시작-시-운영-db-변경-표)를 확인한다.
+3. **T3 사용자 운영 반영**: 이번 백업은 `storage/backup/predeploy-20261113-164410/`에 있다. 이후 DB에 쓰기가 있었다면 재백업하고, 검토한 변경을 배포한 뒤 실제 frontend 빌드·서버 재시작을 진행한다. 이번 빌드는 배포용 dist를 바꾸지 않은 임시 outDir 빌드다. 재시작 전 [R-summary의 DB 변경 표](R-summary.md#재시작-시-운영-db-변경-표)를 확인한다.
 4. **T4 실환경 확인**: 사용자의 「통합 확인 진행」 지시 후 시행한다. 메일 흐름은 작업과 검토 알림을 발생시키며, S1 실제 승인 발송은 별도 지시가 필요하다. 결과는 `T-live-check.md`에 적을 예정이고 아직 파일을 만들지 않았다.
-5. **T5 Gemini**: 읽기 전용 검증. [R-summary](R-summary.md)의 항목별 확인표와 D·I 요약을 사용한다.
+5. **T5 보고서 대조 완료**: 제공된 보고서의 P3 4건은 보완했다. 다만 D 검증표의 파일·함수·근거 ID 등 일부 설명이 같은 HEAD의 실제 코드와 다르므로, 그 PASS 표를 그대로 운영 판정에 사용하지 않는다. 실제 대조 근거는 최신 후속 기록에 정리했다.
 6. **T6 개발 서버 기준선**: 사용자가 서버 주소를 제공한 뒤 문서 17개 환경에서 실행한다. 빈 문항·정답 칸 상태를 함께 기록한다.
 
 ## F 결과를 읽을 때
