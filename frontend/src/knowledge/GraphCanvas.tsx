@@ -3,7 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 
 import { bounds, type Point } from './layout';
 import { ORIGIN_META, nodeRadius } from './meta';
-import { entityMeta, relationLabel, useGraphSchema } from './schemaContext';
+import { edgeLabel, relationPhrase } from './relationPhrases';
+import { entityMeta, useGraphSchema } from './schemaContext';
 import type { GraphEdge, GraphNode, RelationOrigin } from './types';
 import { groupRelations } from './relationGroups';
 
@@ -368,7 +369,9 @@ export function GraphCanvas({
                                         drag.current = null;
                                         if (!picking) onSelect({ kind: 'edge', id: edge.id });
                                     }}
-                                />
+                                >
+                                    <title>{relationPhrase(schema, edge.type, nodeById.get(edge.source)?.name ?? '', nodeById.get(edge.target)?.name ?? '')}</title>
+                                </path>
                                 <path
                                     d={d}
                                     fill="none"
@@ -402,7 +405,7 @@ export function GraphCanvas({
                                 paintOrder="stroke"
                                 pointerEvents="none"
                             >
-                                {relationLabel(schema, edge.type)}{(sourceCount.get(edge.id) ?? 1) > 1 ? ` · 출처 ${sourceCount.get(edge.id)}` : ''}
+                                {edgeLabel(schema, edge.type)}{(sourceCount.get(edge.id) ?? 1) > 1 ? ` · 출처 ${sourceCount.get(edge.id)}` : ''}
                             </text>
                         );
                     })}

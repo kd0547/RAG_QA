@@ -33,6 +33,23 @@ function relationName(schema: GraphSchema, type: string): string {
     return schema.relation_types.find((r) => r.key === type)?.label ?? type;
 }
 
+/** 그래프 선 위 글자: 화살표 방향대로 "출발 ○○ 도착"으로 읽히는 짧은 말 */
+const EDGE_LABELS: Record<string, string> = {
+    has_component: '부품으로 씀',
+    variant_of: '의 하위 모델',
+    has_certification: '인증 받음',
+    complies_with: '규격 따름',
+    made_by: '만든 회사',
+    issued_by: '발급 기관',
+    has_number: '번호',
+    has_spec: '사양',
+};
+
+/** 선 위 글자. 사용자가 만든 관계 종류는 등록된 이름 그대로 */
+export function edgeLabel(schema: GraphSchema, type: string): string {
+    return EDGE_LABELS[type] ?? relationName(schema, type);
+}
+
 export function relationPhrase(schema: GraphSchema, type: string, source: string, target: string): string {
     const phrase = PHRASES[type];
     return phrase ? phrase(source, target) : `${source} → ${relationName(schema, type)} → ${target}`;
