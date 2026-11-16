@@ -13,6 +13,7 @@ import { graphWrite } from './write';
  */
 const input = 'w-full rounded border border-line bg-white px-2 py-1 text-xs';
 const button = 'rounded border border-line bg-white px-2.5 py-1 text-xs font-semibold hover:bg-chip disabled:opacity-50';
+const primary = 'rounded border border-brand bg-brand px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-hover disabled:opacity-50';
 
 function RelationTypeForm({ definition, done }: { definition: RelationDefinition; done: () => void }) {
     const [label, setLabel] = useState(definition.label);
@@ -44,7 +45,7 @@ function RelationTypeForm({ definition, done }: { definition: RelationDefinition
                 <label><input type="checkbox" checked={extract} onChange={(e) => setExtract(e.target.checked)} /> 문서 추출 대상</label>
                 <label><input type="checkbox" checked={allowSelf} onChange={(e) => setAllowSelf(e.target.checked)} /> 자기 연결 허용</label>
             </div>
-            <div className="flex gap-2"><button type="button" className={`${button} bg-brand text-white`} disabled={busy || !label.trim() || !sources.length || !targets.length} onClick={() => void save()}>저장</button>
+            <div className="flex gap-2"><button type="button" className={primary} disabled={busy || !label.trim() || !sources.length || !targets.length} onClick={() => void save()}>저장</button>
                 <button type="button" className={button} onClick={done}>취소</button></div>
             {error && <p role="alert" className="text-danger">{error}</p>}
         </div>
@@ -81,7 +82,7 @@ function PropertyDefinitionForm({ definition, done }: { definition: PropertyDefi
                 {['text', 'number', 'boolean', 'date', 'enum'].map((v) => <option key={v}>{v}</option>)}</select></label>
             {valueType === 'number' && <label className="block">단위<input className={input} value={unit} onChange={(e) => setUnit(e.target.value)} /></label>}
             {valueType === 'enum' && <label className="block">선택지 (쉼표로 구분)<input className={input} value={choices} onChange={(e) => setChoices(e.target.value)} /></label>}
-            <div className="flex gap-2"><button type="button" className={`${button} bg-brand text-white`} disabled={busy || !label.trim()} onClick={() => void save()}>저장</button>
+            <div className="flex gap-2"><button type="button" className={primary} disabled={busy || !label.trim()} onClick={() => void save()}>저장</button>
                 <button type="button" className={button} onClick={done}>취소</button></div>
             {error && <p role="alert" className="text-danger">{error}</p>}
             {badValues.length > 0 && <ul className="list-disc pl-4 text-danger">

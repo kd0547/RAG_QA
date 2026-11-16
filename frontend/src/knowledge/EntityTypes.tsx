@@ -10,7 +10,7 @@ import { graphWrite } from './write';
  */
 const input = 'w-full rounded border border-line bg-white px-2 py-1.5 text-sm';
 const button = 'rounded border border-line bg-white px-2.5 py-1 text-xs font-semibold hover:bg-chip disabled:opacity-50';
-const primary = `${button} bg-brand text-white`;
+const primary = 'rounded border border-brand bg-brand px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-hover disabled:opacity-50';
 
 interface Draft {
     key: string; label: string; description: string; color: string;

@@ -11,7 +11,8 @@
 ## 결정한 것
 - v4 본문은 문자열을 따로 적지 않고 v3 상수에 세 바꾸기를 적용해 만든다 (각 바꿀 곳이 정확히 한 번 있는지 검사). "v3 본문에서 아래만 바꾼다"를 코드가 보장하게 하려는 것이다. `docs/prompt_v4.md`의 코드 블록이 그 결과와 같은지 테스트가 확인한다.
 - GR1에서 넣은 옛 프롬프트 렌더링 정리(`strip_legacy_concepts`)는 그대로 둔다. v4에는 지울 문구가 없어 렌더링 결과가 본문과 같다.
-- 다른 절차 문서(mail-reply-style, revise-after-reject, spec-compare)는 바꾸지 않았다. 위 grep 결과처럼 절차·도구 설명에 "펼쳐"·"상위 개념" 문구가 남지 않았다.
+- 다른 절차 문서(mail-reply-style, revise-after-reject, spec-compare)는 바꾸지 않았다. 절차·도구 설명에 상위 개념을 펼친다는 문구는 남지 않았다("펼쳐 주지 않는다"는 부정 문장만 있다).
+- `agent/prompt.py`의 `PROMPT_V2_TEMPLATE`·`PROMPT_V3_TEMPLATE` 상수에는 옛 문구가 그대로 있다. DB의 v2·v3 행과 같은 원문을 지키라는 규칙(v2·v3 행은 그대로) 때문이며, 렌더링 때 `strip_legacy_concepts`가 지운다. v4 상수를 만들 때 이 원문에서 바꿀 곳을 찾는 데도 쓴다.
 
 ## 테스트: 명령과 출력
 ```
