@@ -12,6 +12,7 @@ import { GraphCanvas, type Selection } from './GraphCanvas';
 import { layoutGraph, layoutHierarchy, type Point } from './layout';
 import { GraphSchemaProvider } from './schema';
 import { GraphEditingToolbar } from './GraphEditing';
+import { MergeConfirm, type MergeDone } from './MergeViews';
 import { RelationChooser } from './RelationViews';
 import { relationPhrase } from './relationPhrases';
 import { ORIGIN_META } from './meta';
@@ -137,6 +138,8 @@ function KnowledgeContent() {
     const [connectMode, setConnectMode] = useState(false);
     const [connecting, setConnecting] = useState<{ fromId: number; toId: number; x: number; y: number } | null>(null);
     const [connectNotice, setConnectNotice] = useState('');
+    // 끌어다 놓아 합치기: 끈 노드, 놓은 노드, 확인 창 자리, 끌기 전 위치 (취소하면 되돌린다)
+    const [merging, setMerging] = useState<{ draggedId: number; targetId: number; x: number; y: number; origin?: Point } | null>(null);
     const mainRef = useRef<HTMLElement>(null);
     // 계층 보기: null이면 자동 (중심 개체가 제품군이면 켬)
     const [treeChoice, setTreeChoice] = useState<boolean | null>(null);
@@ -226,6 +229,40 @@ function KnowledgeContent() {
     }, []);
 
     const nodeById = useMemo(() => new Map((data?.nodes ?? []).map((n) => [n.id, n])), [data]);
+
+    /** 그래프 위 확인 창 자리: 누른 곳 근처, 그래프 영역 안 */
+    const popupAt = (clientX: number, clientY: number, height: number) => {
+        const box = mainRef.current?.getBoundingClientRect();
+        const width = box?.width ?? 600;
+        const boxHeight = box?.height ?? 600;
+        return {
+            x: Math.min(Math.max((clientX - (box?.left ?? 0)) + 12, 8), Math.max(8, width - 310)),
+            y: Math.min(Math.max((clientY - (box?.top ?? 0)) - 20, 8), Math.max(8, boxHeight - height)),
+        };
+    };
+    const canMerge = useCallback((draggedId: number, targetId: number) => (
+        schema.editing_enabled && nodeById.get(draggedId)?.type === nodeById.get(targetId)?.type
+    ), [schema.editing_enabled, nodeById]);
+    const cancelMerge = useCallback(() => {
+        const origin = merging?.origin;
+        if (merging && origin) setPositions((prev) => new Map(prev).set(merging.draggedId, origin));
+        setMerging(null);
+    }, [merging]);
+    useEffect(() => {
+        if (!merging) return;
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cancelMerge(); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [merging, cancelMerge]);
+    /** 합친 뒤: 없어진 개체를 보던 곳은 남은 개체로 바꾼다 */
+    const afterMerge = (done: MergeDone) => {
+        setMerging(null);
+        setConnecting(null);
+        setConnectNotice(done.notice);
+        if (focusId === done.sourceId) setFocusId(done.targetId);
+        setSelection({ kind: 'node', id: done.targetId });
+        changed();
+    };
 
     // 펼쳐서 새로 나온 노드만 자리를 잡는다: 펼친 노드 둘레 원형. 이미 있는 노드는 움직이지 않는다
     useEffect(() => {
@@ -433,7 +470,15 @@ function KnowledgeContent() {
                             선 잇기: 노드를 누르면 선이 따라옵니다. 이을 노드를 누르세요 · 빈 곳이나 Esc로 취소
                         </div>
                     )}
-                    {connectNotice && !connecting && (
+                    {merging && (
+                        <div role="dialog" aria-label="같은 개체로 합치기"
+                            className="absolute z-30 w-[300px] max-h-[70%] overflow-y-auto rounded-xl border border-line bg-white p-3 shadow-xl"
+                            style={{ left: merging.x, top: merging.y }}>
+                            <MergeConfirm key={`${merging.draggedId}-${merging.targetId}`} aId={merging.draggedId} bId={merging.targetId}
+                                onCancel={cancelMerge} onMerged={afterMerge} />
+                        </div>
+                    )}
+                    {connectNotice && !connecting && !merging && (
                         <div role="status" className="absolute bottom-14 left-1/2 z-20 max-w-[90%] -translate-x-1/2 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] shadow-lg">
                             {connectNotice}
                             <button type="button" onClick={() => setConnectNotice('')} aria-label="알림 닫기" className="ml-2 text-muted hover:text-ink">×</button>
@@ -458,7 +503,7 @@ function KnowledgeContent() {
                     )}
                     {picking && (
                         <div className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full bg-ink px-3.5 py-1.5 text-[12px] font-semibold text-white shadow-lg">
-                            연결할 노드를 누르세요 · Esc로 취소
+                            고를 노드를 누르세요 · Esc로 취소
                         </div>
                     )}
 
@@ -524,15 +569,14 @@ function KnowledgeContent() {
                             onToggleExpand={toggleExpand}
                             connectMode={connectMode}
                             onConnect={(fromId, toId, clientX, clientY) => {
-                                const box = mainRef.current?.getBoundingClientRect();
-                                const width = box?.width ?? 600;
-                                const height = box?.height ?? 600;
                                 setConnectNotice('');
-                                setConnecting({
-                                    fromId, toId,
-                                    x: Math.min(Math.max((clientX - (box?.left ?? 0)) + 12, 8), Math.max(8, width - 310)),
-                                    y: Math.min(Math.max((clientY - (box?.top ?? 0)) - 20, 8), Math.max(8, height - 320)),
-                                });
+                                setConnecting({ fromId, toId, ...popupAt(clientX, clientY, 320) });
+                            }}
+                            canMerge={canMerge}
+                            onMergeDrop={(draggedId, targetId, clientX, clientY, origin) => {
+                                setConnectNotice('');
+                                setConnecting(null);
+                                setMerging({ draggedId, targetId, origin, ...popupAt(clientX, clientY, 330) });
                             }}
                             onMoveNode={(id, p) => {
                                 pinnedRef.current.add(id);
@@ -561,14 +605,16 @@ function KnowledgeContent() {
                 <aside aria-label="선택한 개체" className="md:w-[360px] shrink-0 border-t md:border-t-0 md:border-l border-divide bg-white md:overflow-y-auto">
                     {selection?.kind === 'node' ? (
                         <EntityPanel
+                            key={selection.id}
                             entityId={selection.id}
                             version={panelVersion}
                             onOpenEntity={(id) => setSelection({ kind: 'node', id })}
                             onFocus={focus}
                             onChanged={changed}
-                            onMerged={(sourceId, targetId) => {
+                            onMerged={(sourceId, targetId, notice) => {
                                 if (focusId === sourceId) setFocusId(targetId || null);
                                 setSelection(targetId ? { kind: 'node', id: targetId } : null);
+                                if (notice) setConnectNotice(notice);
                                 changed();
                             }}
                             requestPick={requestPick}
@@ -594,6 +640,7 @@ function KnowledgeContent() {
                                 <li>노드를 누르면 관계를 고치거나 추가할 수 있습니다.</li>
                                 <li>선을 누르면 그 관계만 고칩니다.</li>
                                 <li>노드는 끌어서 옮기고, 휠로 확대·축소합니다.</li>
+                                {schema.editing_enabled && <li>같은 대상이 둘로 나뉘어 있으면 한 노드를 같은 종류의 노드 위로 끌어다 놓아 합칩니다.</li>}
                                 <li>사람이 고친 관계는 문서를 다시 추출해도 유지됩니다.</li>
                             </ul>
                             <div className="mt-4 grid grid-cols-2 gap-1.5">

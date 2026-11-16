@@ -4,7 +4,8 @@ import type { ReactNode } from 'react';
 import { linkProps } from '../lib/router';
 import { reviewPath } from '../rag/api';
 import { graphApi } from './api';
-import { EntityPicker, TypeDot, type PickedEntity } from './EntityPicker';
+import { EntityPicker, TypeDot } from './EntityPicker';
+import { MergeConfirm } from './MergeViews';
 import { errorText } from './errors';
 import { entityMeta, useGraphSchema } from './schemaContext';
 import { SpecDiffBox, TypeChanger } from './EntityEditExtras';
@@ -46,15 +47,19 @@ export function EntityPanel({
     onFocus: (id: number) => void;
     /** 그래프가 바뀌었다 (다시 그리기) */
     onChanged: () => void;
-    /** sourceId 개체가 targetId에 합쳐져 사라졌다 */
-    onMerged: (sourceId: number, targetId: number) => void;
+    /** sourceId 개체가 targetId에 합쳐져 사라졌다 (targetId 0이면 지워졌다). notice는 그래프 위에 보일 알림 */
+    onMerged: (sourceId: number, targetId: number, notice?: string) => void;
     requestPick: RequestPick;
 }) {
     const { schema } = useGraphSchema();
     const [entity, setEntity] = useState<GraphEntityDetail | null>(null);
     const [loadError, setLoadError] = useState('');
     const [renaming, setRenaming] = useState<string | null>(null);
-    const [mergeTarget, setMergeTarget] = useState<PickedEntity | null>(null);
+    // 합치기: 접힘 → 열림(대상 고르기) → 확인 창(mergeWith)
+    const [mergeOpen, setMergeOpen] = useState(false);
+    const [mergeWith, setMergeWith] = useState<number | null>(null);
+    const [mergePicking, setMergePicking] = useState(false);
+    const [mergeHint, setMergeHint] = useState('');
     const [busy, setBusy] = useState(false);
     const [actionError, setActionError] = useState('');
     const [reload, setReload] = useState(0);
@@ -101,19 +106,24 @@ export function EntityPanel({
         }
     };
 
-    const merge = async () => {
-        if (mergeTarget?.kind !== 'existing') return;
-        setBusy(true);
-        setActionError('');
-        try {
-            const merged = await graphApi.mergeEntity(entity.id, mergeTarget.id, entity.revision, mergeTarget.revision);
-            setMergeTarget(null);
-            onMerged(entity.id, merged.id);
-        } catch (e) {
-            setActionError(errorText(e));
-        } finally {
-            setBusy(false);
-        }
+    const closeMerge = () => {
+        setMergeOpen(false);
+        setMergeWith(null);
+        setMergePicking(false);
+        setMergeHint('');
+    };
+    const pickMergeFromGraph = () => {
+        setMergePicking(true);
+        setMergeHint('');
+        requestPick((node) => {
+            setMergePicking(false);
+            if (node.id === entity.id) return;
+            if (node.type !== entity.type) {
+                setMergeHint(`종류가 같은 노드만 고를 수 있습니다 (고른 노드: ${entityMeta(schema, node.type).label}, 이 개체: ${meta.label}).`);
+                return;
+            }
+            setMergeWith(node.id);
+        });
     };
 
     return (
@@ -191,22 +201,44 @@ export function EntityPanel({
                 )}
             </Section>
 
-            {schema.editing_enabled && <Section title="다른 개체와 합치기">
-                <p className="mb-2 text-[11.5px] leading-5 text-muted">
-                    같은 대상이 다른 이름으로 나뉘어 있을 때 씁니다. 이 개체의 관계와 문서가 고른 개체로 옮겨지고, 이 이름은 그 개체의 다른 표기가 됩니다.
-                </p>
-                {mergeTarget?.kind === 'existing' ? (
-                    <div className="rounded-lg border border-warn/30 bg-warn-soft/40 p-2.5 text-[12px] leading-5">
-                        <b>{entity.name}</b>을(를) <b>{mergeTarget.name}</b>에 합칩니다. <b>{entity.name}</b> 개체는 사라집니다.
-                        <div className="mt-2 flex justify-end gap-1.5">
-                            <button type="button" onClick={() => setMergeTarget(null)} className="h-7 rounded-md px-2 text-[11.5px] font-semibold text-muted hover:bg-white">취소</button>
-                            <button type="button" disabled={busy} onClick={() => void merge()} className="h-7 rounded-md bg-ink px-2.5 text-[11.5px] font-bold text-white disabled:opacity-50">합치기</button>
+            {schema.editing_enabled && (
+                <div className="border-t border-divide px-4 py-3.5">
+                    {mergeWith !== null ? (
+                        <div className="rounded-lg border border-line p-2.5">
+                            <MergeConfirm key={`${entity.id}-${mergeWith}`} aId={entity.id} bId={mergeWith}
+                                onCancel={() => setMergeWith(null)}
+                                onMerged={(done) => {
+                                    closeMerge();
+                                    onMerged(done.sourceId, done.targetId, done.notice);
+                                }} />
                         </div>
-                    </div>
-                ) : (
-                    <EntityPicker label="합칠 대상 개체" placeholder="합칠 개체 찾기" excludeId={entity.id} onPick={setMergeTarget} />
-                )}
-            </Section>}
+                    ) : mergeOpen ? (
+                        <div className="space-y-1.5 rounded-lg border border-brand/30 bg-surface p-2.5">
+                            <p className="text-[12px] font-semibold">같은 대상을 고르세요 <span className="font-normal text-muted">({meta.label}만)</span></p>
+                            <div className="flex gap-1.5">
+                                <div className="min-w-0 flex-1">
+                                    <EntityPicker label="합칠 개체" placeholder="이름으로 찾기" excludeId={entity.id} onlyType={entity.type}
+                                        onPick={(p) => { if (p.kind === 'existing') setMergeWith(p.id); }} />
+                                </div>
+                                <button type="button" aria-pressed={mergePicking} onClick={pickMergeFromGraph}
+                                    className={`h-9 shrink-0 rounded-lg border px-2 text-[11.5px] font-semibold ${mergePicking ? 'border-brand bg-brand-tint text-brand-hover' : 'border-line bg-white hover:bg-chip'}`}>
+                                    {mergePicking ? '노드를 누르세요' : '그래프에서 고르기'}
+                                </button>
+                            </div>
+                            {mergeHint && <p role="alert" className="text-[11.5px] text-danger">{mergeHint}</p>}
+                            <p className="text-[11px] leading-5 text-muted">그래프에서 노드를 같은 종류의 노드 위로 끌어다 놓아도 합칠 수 있습니다.</p>
+                            <div className="flex justify-end">
+                                <button type="button" onClick={closeMerge} className="h-7 rounded-md border border-line bg-white px-2 text-[11.5px] font-semibold hover:bg-chip">닫기</button>
+                            </div>
+                        </div>
+                    ) : (
+                        <button type="button" onClick={() => setMergeOpen(true)}
+                            className="h-8 w-full rounded-lg border border-dashed border-line text-[12px] font-semibold text-ink/75 hover:bg-chip">
+                            다른 개체와 합치기…
+                        </button>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

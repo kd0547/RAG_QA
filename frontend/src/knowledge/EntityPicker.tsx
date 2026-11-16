@@ -24,6 +24,7 @@ export function EntityPicker({
     allowCreate = false,
     defaultNewType = 'product',
     disabled = false,
+    onlyType,
     onPick,
 }: {
     label: string;
@@ -32,6 +33,8 @@ export function EntityPicker({
     allowCreate?: boolean;
     defaultNewType?: EntityType;
     disabled?: boolean;
+    /** 이 종류의 개체만 찾는다 (합치기) */
+    onlyType?: EntityType;
     onPick: (picked: PickedEntity) => void;
 }) {
     const inputId = useId();
@@ -47,7 +50,7 @@ export function EntityPicker({
         if (!q) return;
         let ignore = false;
         const timer = window.setTimeout(() => {
-            graphApi.searchEntities(q, undefined, 12).then((list) => {
+            graphApi.searchEntities(q, onlyType, 12).then((list) => {
                 if (!ignore) {
                     setResults(list);
                     setError('');
@@ -60,7 +63,7 @@ export function EntityPicker({
             ignore = true;
             window.clearTimeout(timer);
         };
-    }, [q]);
+    }, [q, onlyType]);
 
     const visible = q ? results.filter((r) => r.id !== excludeId) : [];
     const exact = visible.some((r) => r.name.trim().toLowerCase() === q.toLowerCase() && r.type === newType);

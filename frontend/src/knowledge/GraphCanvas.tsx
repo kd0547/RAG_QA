@@ -32,6 +32,8 @@ export function GraphCanvas({
     onToggleExpand,
     connectMode = false,
     onConnect,
+    canMerge,
+    onMergeDrop,
 }: {
     nodes: GraphNode[];
     edges: GraphEdge[];
@@ -52,6 +54,10 @@ export function GraphCanvas({
     connectMode?: boolean;
     /** 선 잇기로 두 노드를 골랐다. clientX·clientY는 두 번째 노드를 누른 화면 좌표 */
     onConnect?: (fromId: number, toId: number, clientX: number, clientY: number) => void;
+    /** 끌고 있는 노드를 이 노드 위에 놓아 합칠 수 있는가 */
+    canMerge?: (draggedId: number, targetId: number) => boolean;
+    /** 노드를 합칠 수 있는 노드 위에 놓았다. origin은 끌기 전 위치 (취소하면 되돌린다) */
+    onMergeDrop?: (draggedId: number, targetId: number, clientX: number, clientY: number, origin: Point | undefined) => void;
 }) {
     const { schema } = useGraphSchema();
     const svgRef = useRef<SVGSVGElement>(null);
@@ -69,9 +75,12 @@ export function GraphCanvas({
     }, [connectFrom]);
     const drag = useRef<
         | { kind: 'pan'; startX: number; startY: number; view: ViewBox; moved: boolean }
-        | { kind: 'node'; id: number; startX: number; startY: number; moved: boolean }
+        | { kind: 'node'; id: number; startX: number; startY: number; moved: boolean; origin: Point | undefined }
         | null
     >(null);
+    // 끌고 있는 노드를 놓으면 합칠 노드 (같은 종류 노드 위에 있을 때)
+    const [dropTarget, setDropTarget] = useState<number | null>(null);
+    const mergeEnabled = !!onMergeDrop && !!canMerge && !connectMode && !picking;
 
     const positionsRef = useRef(positions);
     useEffect(() => {
@@ -139,7 +148,23 @@ export function GraphCanvas({
         if (e.button !== 0) return;
         e.stopPropagation();
         svgRef.current?.setPointerCapture(e.pointerId);
-        drag.current = { kind: 'node', id, startX: e.clientX, startY: e.clientY, moved: false };
+        drag.current = { kind: 'node', id, startX: e.clientX, startY: e.clientY, moved: false, origin: positions.get(id) };
+    };
+    /** 포인터 아래(끌고 있는 노드 말고)에서 합칠 수 있는 가장 가까운 노드 */
+    const findDropTarget = (draggedId: number, p: Point): number | null => {
+        let best: number | null = null;
+        let bestDistance = Infinity;
+        for (const node of nodes) {
+            if (node.id === draggedId) continue;
+            const q = positions.get(node.id);
+            if (!q) continue;
+            const distance = Math.hypot(q.x - p.x, q.y - p.y);
+            if (distance <= nodeRadius(node) + 8 && distance < bestDistance && canMerge?.(draggedId, node.id)) {
+                best = node.id;
+                bestDistance = distance;
+            }
+        }
+        return best;
     };
     const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
         if (connectFrom !== null) {
@@ -153,7 +178,10 @@ export function GraphCanvas({
         d.moved = true;
         if (d.kind === 'node') {
             const p = toSvg(e.clientX, e.clientY);
-            if (p) onMoveNode(d.id, p);
+            if (p) {
+                onMoveNode(d.id, p);
+                if (mergeEnabled) setDropTarget(findDropTarget(d.id, p));
+            }
             return;
         }
         const rect = svgRef.current?.getBoundingClientRect();
@@ -166,6 +194,12 @@ export function GraphCanvas({
     const onPointerUp = (e: ReactPointerEvent<SVGSVGElement>) => {
         const d = drag.current;
         drag.current = null;
+        const target = dropTarget;
+        setDropTarget(null);
+        if (d?.kind === 'node' && d.moved && target !== null && mergeEnabled) {
+            onMergeDrop?.(d.id, target, e.clientX, e.clientY, d.origin);
+            return;
+        }
         if (!d || d.moved) return;
         if (d.kind === 'pan') {
             if (connectFrom !== null) { setConnectStart(null); return; } // 빈 곳을 누르면 선 잇기 취소
@@ -299,7 +333,7 @@ export function GraphCanvas({
                 onPointerDown={onBackgroundDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
-                onPointerCancel={() => { drag.current = null; }}
+                onPointerCancel={() => { drag.current = null; setDropTarget(null); }}
             >
                 <defs>
                     {(Object.keys(ORIGIN_META) as RelationOrigin[]).map((origin) => (
@@ -395,7 +429,7 @@ export function GraphCanvas({
                             <g
                                 key={node.id}
                                 transform={`translate(${p.x},${p.y})`}
-                                opacity={dim ? 0.25 : 1}
+                                opacity={dim && dropTarget !== node.id ? 0.25 : 1}
                                 role="button"
                                 tabIndex={0}
                                 aria-label={`${meta.label} ${node.name}`}
@@ -414,6 +448,15 @@ export function GraphCanvas({
                                 {selected && <circle r={r + 5} fill="none" stroke={meta.color} strokeOpacity={0.35} strokeWidth={4} />}
                                 {connectFrom !== null && connectFrom !== node.id && hovered === node.id && (
                                     <circle r={r + 7} fill="none" stroke="#00A4E4" strokeWidth={3} strokeDasharray="4 3" />
+                                )}
+                                {dropTarget === node.id && (
+                                    <>
+                                        <circle r={r + 9} fill="#F59E0B" fillOpacity={0.15} stroke="#F59E0B" strokeWidth={3} />
+                                        <text y={-r - 15} textAnchor="middle" className="text-[11px] font-bold" fill="#B45309"
+                                            stroke="#fff" strokeWidth={3.5} paintOrder="stroke" pointerEvents="none">
+                                            놓으면 합치기
+                                        </text>
+                                    </>
                                 )}
                                 <circle
                                     r={r}
