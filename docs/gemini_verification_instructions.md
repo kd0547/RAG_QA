@@ -149,4 +149,4 @@
 
 ### B-GR. 지식 그래프 정비 (2026-11-16)
 
-항목별 통과 조건(GR-1 ~ GR-9)은 [opus_development_instructions_graph_rework.md](opus_development_instructions_graph_rework.md) 10절을 따른다.
+항목별 통과 조건(GR-1 ~ GR-9)은 [opus_development_instructions_graph_rework.md](opus_development_instructions_graph_rework.md) 11절(GR8)을 따른다.
