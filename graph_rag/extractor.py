@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 import config
 from graph_rag.schema import ExtractionSchema, default_schema, page_graph_model
-from graph_rag.types import RELATION_ENDPOINT_TYPES, ExtractedEntity, PageGraph, normalize
+from graph_rag.types import ExtractedEntity, PageGraph, normalize
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,10 @@ _PROMPT_TEMPLATE = """당신은 사내 문서(제품 제안서, 세일즈 가이
 - 페이지에 실제로 적힌 표기만 쓰세요. 추측하거나 일반 지식으로 채우지 마세요.
 - 일반 명사(노트북, 제품, 인증서, 회사 등)만 있는 것은 개체가 아닙니다. 모델명·고유 이름·번호가 있어야 합니다.
 - 같은 대상을 다르게 쓴 표기는 aliases에 넣고 하나의 개체로 뽑으세요.
-- relations의 source와 target은 entities의 name과 똑같이 쓰세요.
+- relations의 source와 target은 entities의 name과 똑같이 쓰세요. entities에 없는 이름을 가리키는 관계는 버려집니다.
+- 브랜드·제품군 이름만 있는 표현, 기술·기능 이름, 아키텍처 이름은 개체로 뽑지 않는다.
+- 회사가 제품·부품을 만들었으면 made_by, 인증·번호를 발급했으면 issued_by다.
+- 관계의 출발과 도착은 위 표에 적힌 종류만 된다.
 - 뽑을 것이 없으면 빈 목록을 돌려주세요."""
 
 
@@ -90,7 +93,6 @@ def extract_page_graph(text: str, llm=None, known: list[dict] | None = None,
     if isinstance(result, BaseModel):
         result = result.model_dump()
     graph = PageGraph.model_validate(result or {})
-    _add_relation_endpoints(graph)
     _add_registration_numbers(graph, text)
     graph = _keep_grounded(graph, text, {normalize(k["name"]) for k in known or []} - {""})
     return graph
@@ -111,19 +113,6 @@ def _system_prompt(known: list[dict] | None = None, schema: ExtractionSchema | N
             items.append(line)
         prompt += _KNOWN_GUIDE.format(items="\n".join(items))
     return prompt
-
-
-def _add_relation_endpoints(graph: PageGraph) -> None:
-    """관계에는 있는데 entities에서 빠진 이름을 관계 종류로 개체 종류를 정해 채운다 (예: has_component의 target -> component)."""
-    known = {normalize(e.name) for e in graph.entities}
-    for e in graph.entities:
-        known.update(normalize(a) for a in e.aliases)
-    for relation in graph.relations:
-        source_type, target_type = RELATION_ENDPOINT_TYPES.get(relation.type, (None, None))
-        for name, entity_type in ((relation.source, source_type), (relation.target, target_type)):
-            if entity_type and normalize(name) and normalize(name) not in known:
-                graph.entities.append(ExtractedEntity(type=entity_type, name=name))
-                known.add(normalize(name))
 
 
 def _add_registration_numbers(graph: PageGraph, text: str) -> None:

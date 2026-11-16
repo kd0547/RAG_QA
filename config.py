@@ -114,6 +114,11 @@ GRAPH_EXTRACT_ENABLED = os.getenv("GRAPH_EXTRACT_ENABLED", "1") not in ("0", "fa
 # LLM에 넘기는 페이지 텍스트 최대 길이
 GRAPH_EXTRACT_MAX_CHARS = int(os.getenv("GRAPH_EXTRACT_MAX_CHARS", "12000"))
 GRAPH_EDIT_ENABLED = _flag("GRAPH_EDIT_ENABLED")
+# 사양 DB 대조용 이름 키에서 앞에 붙으면 뗄 제조사 이름 (지시서 GR3-4, graph_rag/rules.py). 쉼표로 구분
+GRAPH_VENDOR_PREFIXES = tuple(v.strip() for v in os.getenv(
+    "GRAPH_VENDOR_PREFIXES",
+    "NVIDIA,AMD,Intel,Qualcomm,Samsung,SK hynix,Micron,Kingston,WD,Seagate,Realtek,MediaTek",
+).split(",") if v.strip())
 GRAPH_EDIT_NAME_LIMIT = int(os.getenv("GRAPH_EDIT_NAME_LIMIT", "100"))
 GRAPH_EDIT_TEXT_LIMIT = int(os.getenv("GRAPH_EDIT_TEXT_LIMIT", "4000"))
 GRAPH_EDIT_PROPERTY_LIMIT = int(os.getenv("GRAPH_EDIT_PROPERTY_LIMIT", "50"))

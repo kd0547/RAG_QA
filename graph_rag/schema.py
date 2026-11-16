@@ -36,6 +36,7 @@ def _relation_row(row: dict) -> dict:
     for key in ("source_entity_types", "target_entity_types"):
         if isinstance(item.get(key), str):
             item[key] = json.loads(item[key])
+        item[key] = sorted(item.get(key) or [])
     return item
 
 

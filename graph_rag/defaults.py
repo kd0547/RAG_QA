@@ -35,19 +35,31 @@ DEFAULT_ENTITY_TYPES: tuple[dict, ...] = (
 # 사양 DB 투영(GR4)이 노드를 만드는 종류. 사용 중지하면 투영이 그 종류의 노드를 만들지 않는다
 PROJECTION_TYPES = frozenset({"product_line", "product", "component", "spec_value"})
 
-# 기본 관계 종류. extract=0은 문서 추출 대상이 아니다 (사양 DB에서만 만든다)
+# 기본 관계 종류 (지시서 GR3-1). extract=0은 문서 추출 대상이 아니다 (사양 DB에서만 만든다)
+_PRODUCTS = ["product", "product_line"]
 DEFAULT_RELATION_TYPES: tuple[dict, ...] = (
-    {"key": "has_component", "label": "부품", "description": "제품 -> 부품",
-     "source": ["product"], "target": ["component"], "extract": 1},
-    {"key": "has_certification", "label": "인증", "description": "제품 -> 인증 종류",
-     "source": ["product"], "target": ["certification"], "extract": 1},
-    {"key": "has_number", "label": "번호", "description": "인증 종류 또는 제품 -> 인증·등록 번호",
-     "source": ["product", "certification"], "target": ["cert_number"], "extract": 1},
-    {"key": "issued_by", "label": "발급 기관", "description": "인증 종류 또는 번호 -> 발급·시험 기관",
-     "source": ["certification", "cert_number"], "target": ["organization"], "extract": 1},
-    {"key": "complies_with", "label": "규격 준수", "description": "제품 또는 인증 -> 규격·표준",
-     "source": ["product", "certification"], "target": ["standard"], "extract": 1},
-    {"key": "variant_of", "label": "상위 모델",
-     "description": "파생 모델 -> 상위 모델. 사양 DB에서만 만든다 (LLM 추출 대상이 아니다)",
-     "source": ["product"], "target": ["product"], "extract": 0},
+    {"key": "variant_of", "label": "상위 모델", "extract": 0,
+     "description": "하위 모델 -> 상위 모델(제품군). 사양 DB에서만 만든다",
+     "source": _PRODUCTS, "target": ["product_line"]},
+    {"key": "has_component", "label": "부품", "extract": 1,
+     "description": "제품·제품군 -> 들어가는 부품 모델",
+     "source": _PRODUCTS, "target": ["component"]},
+    {"key": "has_spec", "label": "사양", "extract": 0,
+     "description": "제품·제품군·부품 -> 사양 값. 사양 DB에서만 만든다",
+     "source": [*_PRODUCTS, "component"], "target": ["spec_value"]},
+    {"key": "has_certification", "label": "인증", "extract": 1,
+     "description": "제품·제품군·부품 -> 받은 인증 종류",
+     "source": [*_PRODUCTS, "component"], "target": ["certification"]},
+    {"key": "has_number", "label": "번호", "extract": 1,
+     "description": "제품·제품군·부품·인증 -> 인증·등록·신고·성적서 번호",
+     "source": [*_PRODUCTS, "component", "certification"], "target": ["cert_number"]},
+    {"key": "issued_by", "label": "발급 기관", "extract": 1,
+     "description": "인증 종류 또는 번호 -> 발급·시험 기관. 회사가 제품·부품을 만든 것은 발급이 아니다. 그것은 made_by",
+     "source": ["certification", "cert_number"], "target": ["organization"]},
+    {"key": "made_by", "label": "제조사", "extract": 1,
+     "description": "제품군·제품·부품 -> 만든 회사(제조사)",
+     "source": ["product_line", "product", "component"], "target": ["organization"]},
+    {"key": "complies_with", "label": "규격 준수", "extract": 1,
+     "description": "제품·제품군·부품·인증 -> 지키는 규격·표준",
+     "source": [*_PRODUCTS, "component", "certification"], "target": ["standard"]},
 )

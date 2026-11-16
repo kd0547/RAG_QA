@@ -78,6 +78,7 @@ def index_file(file_id: str) -> dict:
     names = spec_names()
     schema = graph_repo.extraction_schema()  # 파일 하나를 뽑는 동안 같은 종류 목록을 쓴다
     entities = relations = failed = 0
+    dropped: dict[str, int] = defaultdict(int)
     for page, parts in sorted(texts.items()):
         try:
             text = "\n\n".join(parts)
@@ -89,8 +90,11 @@ def index_file(file_id: str) -> dict:
             continue
         entities += result["entities"]
         relations += result["relations"]
+        for reason, count in result.get("dropped", {}).items():
+            dropped[reason] += count
 
-    summary = {"file_id": file_id, "pages": len(texts), "failed_pages": failed, "entities": entities, "relations": relations}
+    summary = {"file_id": file_id, "pages": len(texts), "failed_pages": failed, "entities": entities, "relations": relations,
+               "dropped": dict(dropped)}
     logger.info("그래프 파일 추출: %s, %.1f초", summary, time.perf_counter() - started)
     return summary
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import sqlite3
 
+from graph_rag.rules import DEFAULT_VENDOR_PREFIXES, spec_match_keys
 from graph_rag.types import PageGraph, normalize
 from repository.repo_connect import Database
 
@@ -162,10 +163,19 @@ class GraphRepository:
     def replace_page(self, file_id: str, page: int, graph: PageGraph, link_specs: bool = False) -> dict:
         """한 페이지에서 뽑은 개체·관계로 그 페이지의 그래프를 갈아끼운다. 사람이 넣은 관계는 그대로 둔다.
 
+        저장 전에 validate_page_graph로 거른다 (지시서 GR3-3, 문서 추출에만). 버린 수를 사유별로 dropped에 싣는다.
         link_specs: 제품·부품 개체의 이름(또는 별칭)이 사양 DB의 모델명과 같으면 ref_type·ref_id를 단다 (지시서 H3).
+        이름 비교는 정식 이름 맞춤 키(GR3-4)로 한다.
         """
+        import config
+        from graph_rag.schema import load_schema
+        from graph_rag.validate import validate_page_graph
+
         with self.db.transaction() as conn:
-            spec_refs = _spec_ref_map(conn) if link_specs else {}
+            vendors = config.GRAPH_VENDOR_PREFIXES
+            spec_index = _spec_node_index(conn, vendors)
+            graph, dropped = validate_page_graph(graph, load_schema(conn), spec_index, vendors)
+            spec_refs = _spec_ref_map(conn, vendors) if link_specs else {}
             conn.execute("DELETE FROM graph_mention WHERE file_id = ? AND page = ?", (file_id, page))
             conn.execute(
                 "DELETE FROM graph_relation WHERE file_id = ? AND page = ? AND origin = 'extract'", (file_id, page)
@@ -175,17 +185,19 @@ class GraphRepository:
             entity_ids: set[int] = set()
             pending: list[tuple[int, int, str]] = []  # (src, dst, type)
             for entity in graph.entities:
-                entity_id = _upsert_entity(conn, entity.type, entity.name)
+                entity_id = spec_index.attached.get((entity.type, normalize(entity.name))) \
+                    or _upsert_entity(conn, entity.type, entity.name)
                 if entity_id is None:
                     continue
                 entity_ids.add(entity_id)
                 ids_by_norm.setdefault(normalize(entity.name), entity_id)
-                if spec_refs and entity.type in ("product", "component"):
-                    ref = next((spec_refs[(entity.type, normalize(n))] for n in [entity.name, *entity.aliases]
-                                if (entity.type, normalize(n)) in spec_refs), None)
+                ref_type = _SPEC_REF_TYPES.get(entity.type)
+                if spec_refs and ref_type:
+                    ref = next((spec_refs[(ref_type, key)] for n in [entity.name, *entity.aliases]
+                                for key in spec_match_keys(n, vendors) if (ref_type, key) in spec_refs), None)
                     if ref is not None:
                         conn.execute("UPDATE graph_entity SET ref_type = ?, ref_id = ? WHERE id = ? AND ref_id IS NULL",
-                                     (entity.type, ref, entity_id))
+                                     (ref_type, ref, entity_id))
                 for alias in entity.aliases:
                     alias_norm = normalize(alias)
                     if len(alias_norm) < MIN_NORM_LEN:
@@ -217,7 +229,7 @@ class GraphRepository:
                 )
                 relations += cur.rowcount
             _prune_orphans(conn)
-        return {"entities": len(entity_ids), "relations": relations}
+        return {"entities": len(entity_ids), "relations": relations, "dropped": dropped}
 
     def delete_file(self, file_id: str) -> None:
         """다시 뽑기 전에 파일 하나에서 뽑은 그래프를 지운다. 사람이 넣은 관계는 남긴다.
@@ -660,16 +672,35 @@ def _add_alias(conn: sqlite3.Connection, entity_id: int, alias: str) -> None:
         )
 
 
-def _spec_ref_map(conn: sqlite3.Connection) -> dict[tuple[str, str], str]:
-    """{(개체 종류, 정규화 모델명): 사양 DB id}. 정규화가 겹치면 먼저 나온 것."""
+# 개체 종류 → 사양 DB 참조 종류 (제품군도 product 테이블의 행이다)
+_SPEC_REF_TYPES = {"product": "product", "product_line": "product", "component": "component"}
+
+
+def _spec_ref_map(conn: sqlite3.Connection, vendors=DEFAULT_VENDOR_PREFIXES) -> dict[tuple[str, str], str]:
+    """{(참조 종류, 정식 이름 맞춤 키): 사양 DB id}. 키가 겹치면 먼저 나온 것."""
     refs: dict[tuple[str, str], str] = {}
     for row in conn.execute("SELECT id, model FROM product ORDER BY model"):
-        refs.setdefault(("product", normalize(row["model"])), row["id"])
+        for key in spec_match_keys(row["model"], vendors):
+            refs.setdefault(("product", key), row["id"])
     for row in conn.execute("SELECT id, model FROM component ORDER BY kind, model"):
-        refs.setdefault(("component", normalize(row["model"])), row["id"])
-    refs.pop(("product", ""), None)
-    refs.pop(("component", ""), None)
+        for key in spec_match_keys(row["model"], vendors):
+            refs.setdefault(("component", key), row["id"])
     return refs
+
+
+def _spec_node_index(conn: sqlite3.Connection, vendors=DEFAULT_VENDOR_PREFIXES):
+    """사양 DB 대상을 가리키는 활성 노드 (정식 종류 우선, GR3-3 1번). 노드의 현재 종류·이름을 쓴다."""
+    from graph_rag.validate import SpecIndex
+
+    index = SpecIndex()
+    aliases: dict[int, list[str]] = {}
+    for row in conn.execute("""SELECT a.entity_id, a.alias FROM graph_alias a JOIN graph_entity e ON e.id = a.entity_id
+                               WHERE e.ref_id IS NOT NULL AND e.lifecycle_state = 'active'"""):
+        aliases.setdefault(row["entity_id"], []).append(row["alias"])
+    for row in conn.execute("""SELECT id, type, coalesce(display_name, name) AS name FROM graph_entity
+                               WHERE ref_id IS NOT NULL AND lifecycle_state = 'active' ORDER BY id"""):
+        index.add(row["id"], row["type"], row["name"], [row["name"], *aliases.get(row["id"], [])], vendors)
+    return index
 
 
 def _link_spec_entity(conn: sqlite3.Connection, entity_type: str, name: str, ref_type: str, ref_id: str) -> int | None:

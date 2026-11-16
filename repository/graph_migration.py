@@ -164,10 +164,16 @@ def _migrate_types(conn):
             if item["extract"]:
                 conn.execute("UPDATE graph_relation_type SET extract=1 WHERE key=? AND builtin=1", (item["key"],))
     for item in DEFAULT_RELATION_TYPES:
+        source, target = json.dumps(sorted(item["source"])), json.dumps(sorted(item["target"]))
         conn.execute("""INSERT OR IGNORE INTO graph_relation_type
           (key,label,description,source_entity_types,target_entity_types,builtin,extract) VALUES (?,?,?,?,?,1,?)""",
-          (item["key"], item["label"], item["description"], json.dumps(item["source"]), json.dumps(item["target"]),
-           item["extract"]))
+          (item["key"], item["label"], item["description"], source, target, item["extract"]))
+        # 사용자가 고치지 않은(revision 1) 기본 관계만 기본 표로 맞춘다 (지시서 GR3-1). revision은 올리지 않는다
+        conn.execute("""UPDATE graph_relation_type SET description=?, source_entity_types=?, target_entity_types=?, extract=?
+          WHERE key=? AND builtin=1 AND revision=1
+            AND (description!=? OR source_entity_types!=? OR target_entity_types!=? OR extract!=?)""",
+          (item["description"], source, target, item["extract"], item["key"],
+           item["description"], source, target, item["extract"]))
 
 
 def remove_system_concepts(conn):

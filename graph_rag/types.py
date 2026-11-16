@@ -13,15 +13,6 @@ RELATION_TYPES: dict[str, str] = {r["key"]: r["description"] for r in DEFAULT_RE
 # 기본 관계 중 문서 추출에 쓰지 않는 것 (사양 DB에서만 만든다)
 NON_EXTRACT_RELATIONS = frozenset(r["key"] for r in DEFAULT_RELATION_TYPES if not r["extract"])
 
-# 관계 양 끝의 개체 종류. LLM이 관계에는 썼지만 entities에서 빠뜨린 이름을 채울 때 쓴다 (None이면 추론하지 않음)
-RELATION_ENDPOINT_TYPES: dict[str, tuple[str | None, str]] = {
-    "has_component": ("product", "component"),
-    "has_certification": ("product", "certification"),
-    "has_number": (None, "cert_number"),
-    "issued_by": (None, "organization"),
-    "complies_with": (None, "standard"),
-}
-
 _NORM_STRIP = re.compile(r"[\s\-_·.,/()\[\]{}:;'\"]+")
 
 

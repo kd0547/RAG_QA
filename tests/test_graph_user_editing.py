@@ -194,10 +194,10 @@ def test_merge_preserves_ids_events_aliases_blocks_and_conflicts(env):
 def test_auto_claim_scopes_and_rename_keep_exclusion(env):
     db,graph,edit,_,_ = env
     file_page(db,'f1'); file_page(db,'f2')
-    page = PageGraph(entities=[ExtractedEntity(type='product',name='Alpha'),ExtractedEntity(type='component',name='Chip')],
-        relations=[ExtractedRelation(source='Alpha',target='Chip',type='has_component')])
+    page = PageGraph(entities=[ExtractedEntity(type='product',name='Alpha100'),ExtractedEntity(type='component',name='Chip200')],
+        relations=[ExtractedRelation(source='Alpha100',target='Chip200',type='has_component')])
     graph.replace_page('f1',1,page); graph.replace_page('f2',1,page)
-    a = graph.find_entities('Alpha')[0]
+    a = graph.find_entities('Alpha100')[0]
     claims = graph.get_entity(a['id'])['relations']
     edit.execute('delete_relation',claims[0]['id'],{'expected_revision':1,'scope':'source'})
     graph.replace_page('f1',1,page)
@@ -325,10 +325,10 @@ def test_spec_exclusion_preserves_source_and_different_refs_cannot_merge(env):
 def test_same_type_auto_replacement_keeps_original_claim_excluded(env):
     db,graph,edit,_,_=env
     file_page(db)
-    page=PageGraph(entities=[ExtractedEntity(type='product',name='Alpha'),ExtractedEntity(type='component',name='Chip')],
-        relations=[ExtractedRelation(source='Alpha',target='Chip',type='has_component')])
+    page=PageGraph(entities=[ExtractedEntity(type='product',name='Alpha100'),ExtractedEntity(type='component',name='Chip200')],
+        relations=[ExtractedRelation(source='Alpha100',target='Chip200',type='has_component')])
     graph.replace_page('f1',1,page)
-    e=graph.find_entities('Alpha')[0]
+    e=graph.find_entities('Alpha100')[0]
     r=graph.get_entity(e['id'])['relations'][0]
     manual=edit.execute('update_relation',r['id'],{'expected_revision':1,'source':{'reason':'담당자 확인'}})
     graph.replace_page('f1',1,page)

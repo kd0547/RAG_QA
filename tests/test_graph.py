@@ -81,7 +81,7 @@ def test_extractor_drops_names_not_on_page_and_adds_kc_number():
     assert product.aliases == ["N 5800"]
 
 
-def test_extractor_fills_relation_endpoints_and_has_no_concepts():
+def test_extractor_does_not_create_relation_endpoints_and_has_no_concepts():
     page = "A650 구성: NVIDIA GeForce RTX 5070. 인증: KC 안전확인"
     llm = FakeLLM(PageGraph(
         entities=[_entity("product", "A650"), _entity("certification", "KC 안전확인")],
@@ -91,7 +91,8 @@ def test_extractor_fills_relation_endpoints_and_has_no_concepts():
     graph = extract_page_graph(page, llm=llm)
 
     by_name = {e.name: e for e in graph.entities}
-    assert by_name["NVIDIA GeForce RTX 5070"].type == "component"
+    # 관계에만 나온 이름으로 개체를 만들지 않는다 (GR3-2). 저장 전 검사가 그 관계를 버린다
+    assert "NVIDIA GeForce RTX 5070" not in by_name
     assert not hasattr(by_name["KC 안전확인"], "concept")
     system_prompt = llm.calls[0][0]["content"]
     assert "상위 개념" not in system_prompt and "concept" not in system_prompt
