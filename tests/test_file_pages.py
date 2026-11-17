@@ -174,3 +174,85 @@ def test_edit_and_import_schedule_graph_extraction(env, monkeypatch):
     monkeypatch.setattr(module.config, "GRAPH_EXTRACT_ENABLED", False)
     assert client.put(f"/file/{file.file_id}/pages/{page2['page_id']}", json={"text": "또 고침"}).status_code == 200
     assert calls == [(file.file_id, 2)]
+
+
+# ---------- 검수 대기 → 검수 완료 ----------
+
+def _pending_file(file_repo, page_repo, original, pages):
+    pending = create_file(original_name="new.pdf", stored_path=str(original), review_status="pending", chunk_count=None)
+    file_repo.file_save(pending)
+    page_repo.save_pages(pending.file_id, [PageText(page=p, text=t) for p, t in pages])
+    return pending
+
+
+def test_pending_edit_saves_text_without_indexing(env, monkeypatch):
+    client, _, file_repo, page_repo, replaced, module, original = env
+    graph = []
+    monkeypatch.setattr(module, "_graph_index", lambda file_id, page=None: graph.append(file_id))
+    pending = _pending_file(file_repo, page_repo, original, [(1, "환각 텍스트")])
+    page = page_repo.list_pages(pending.file_id)[0]
+
+    response = client.put(f"/file/{pending.file_id}/pages/{page['page_id']}", json={"text": "바로잡은 텍스트"})
+
+    assert response.status_code == 200
+    assert response.json()["chunk_count"] is None
+    assert response.json()["page"]["text"] == "바로잡은 텍스트"
+    assert replaced == [] and graph == []
+    assert client.get(f"/file/{pending.file_id}/pages").json()["review_status"] == "pending"
+
+
+def test_complete_review_indexes_reviewed_text_and_schedules_graph(env, monkeypatch):
+    client, _, file_repo, page_repo, _, module, original = env
+    saved, deleted, graph = [], [], []
+    monkeypatch.setattr(module, "save_embeddings", lambda chunks: saved.append(chunks))
+    monkeypatch.setattr(module, "delete_embeddings", lambda file_id: deleted.append(file_id))
+    monkeypatch.setattr(module, "_graph_index", lambda file_id, page=None: graph.append((file_id, page)))
+    pending = _pending_file(file_repo, page_repo, original, [(1, "첫 쪽"), (2, "오타")])
+    page2 = page_repo.list_pages(pending.file_id)[1]
+    client.put(f"/file/{pending.file_id}/pages/{page2['page_id']}", json={"text": "고친 둘째 쪽"})
+
+    response = client.post(f"/file/{pending.file_id}/review/complete")
+
+    assert response.status_code == 200
+    assert response.json() == {"file_id": pending.file_id, "review_status": "done", "chunk_count": 2}
+    [chunks] = saved
+    assert [(c.id, c.text) for c in chunks] == [
+        (f"{pending.file_id}-p1-c0", "첫 쪽"), (f"{pending.file_id}-p2-c0", "고친 둘째 쪽"),
+    ]
+    assert deleted == [pending.file_id]
+    assert graph == [(pending.file_id, None)]
+    done = file_repo.get_file_by_id(pending.file_id)
+    assert (done.review_status, done.chunk_count, done.error_message) == ("done", 2, None)
+    assert client.post(f"/file/{pending.file_id}/review/complete").status_code == 409
+    assert client.post("/file/unknown/review/complete").status_code == 404
+
+
+def test_complete_review_failure_stays_pending_and_can_retry(env, monkeypatch):
+    client, _, file_repo, page_repo, _, module, original = env
+    pending = _pending_file(file_repo, page_repo, original, [(1, "본문")])
+
+    def broken(chunks):
+        raise RuntimeError("임베딩 서버 응답 없음")
+
+    monkeypatch.setattr(module, "embed_chunks", broken)
+    response = client.post(f"/file/{pending.file_id}/review/complete")
+    assert response.status_code == 503
+    failed = file_repo.get_file_by_id(pending.file_id)
+    assert failed.review_status == "pending"
+    assert "임베딩 서버 응답 없음" in failed.error_message
+
+    monkeypatch.setattr(
+        module, "embed_chunks",
+        lambda chunks: [EmbeddedChunk(**{**c.__dict__, "embedding": [0.1]}) for c in chunks],
+    )
+    assert client.post(f"/file/{pending.file_id}/review/complete").status_code == 200
+    done = file_repo.get_file_by_id(pending.file_id)
+    assert (done.review_status, done.error_message) == ("done", None)
+
+
+def test_pending_file_is_hidden_from_page_search(env):
+    _, file, file_repo, page_repo, _, _, original = env
+    page_repo.save_pages(file.file_id, [PageText(page=1, text="KC 인증 번호")])
+    _pending_file(file_repo, page_repo, original, [(1, "KC 인증 번호 (검수 전)")])
+
+    assert [r["file_id"] for r in page_repo.search_text("KC 인증")] == [file.file_id]

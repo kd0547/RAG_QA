@@ -291,8 +291,11 @@ def rebuild_graph(background: BackgroundTasks, file_id: str | None = None) -> di
     if file_id is None:
         background.add_task(index_all)
         return {"scheduled": "all"}
-    if file_repo.get_file_by_id(file_id) is None:
+    file = file_repo.get_file_by_id(file_id)
+    if file is None:
         raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+    if file.review_status != "done":
+        raise HTTPException(status_code=409, detail="검수 대기 파일입니다. 파일 검수에서 [검수 완료]를 누르면 그래프를 뽑습니다.")
     if not page_repo.has_pages(file_id):
         raise HTTPException(status_code=409, detail="페이지 텍스트가 없는 파일입니다. 먼저 POST /file/{file_id}/pages/import를 실행하세요.")
     background.add_task(index_file, file_id)

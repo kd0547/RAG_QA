@@ -40,6 +40,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE file ADD COLUMN group_id TEXT REFERENCES file_group(id) ON DELETE SET NULL")
     if "description" not in file_columns:
         conn.execute("ALTER TABLE file ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+    if "review_status" not in file_columns:
+        # 검수 단계 전에 올린 문서는 이미 색인돼 있으므로 기본값 'done'으로 채운다
+        conn.execute(
+            "ALTER TABLE file ADD COLUMN review_status TEXT NOT NULL DEFAULT 'done'"
+            " CHECK (review_status IN ('pending', 'done'))"
+        )
     # 컬럼이 생긴 뒤에 만들어야 하므로 schema.sql이 아니라 여기서 만든다
     conn.execute("CREATE INDEX IF NOT EXISTS idx_file_group_id ON file(group_id)")
     # 문서 그래프 초기 버전에는 관계 출처(origin) 컬럼이 없었다. 근거 파일이 없는 관계는 aliases.yaml에서 넣은 것이다

@@ -3,6 +3,13 @@
  * 계약: app/routers/files.py (POST /upload, GET /files), app/routers/questions.py (POST /ask, POST /ask/attachments)
  */
 
+/**
+ * 문서 검수 상태. 업로드는 파싱까지만 하고 pending으로 둔다.
+ * 파일 검수에서 [검수 완료]를 눌러야 청킹·임베딩·그래프 추출을 하고 done이 된다.
+ * pending 문서는 질의응답 검색·문서 도구·그래프에 쓰이지 않는다.
+ */
+export type ReviewStatus = 'pending' | 'done';
+
 /** GET /files 의 항목. repository/file_repository.py file_list() */
 export interface FileSummary {
     file_id: string;
@@ -10,6 +17,9 @@ export interface FileSummary {
     /** 문서 그룹(GET /groups 의 id). null 이면 아직 분류하지 않은 파일 */
     group_id: string | null;
     description: string;
+    review_status: ReviewStatus;
+    /** [검수 완료] 뒤 검색 반영이 실패했을 때의 원인. 다시 시도하면 지워진다 */
+    error_message: string | null;
 }
 
 /** GET/POST /groups 및 PATCH /groups/{id} 의 항목. 파일을 모으는 사용자 생성 그룹 */
@@ -51,34 +61,42 @@ export interface FilePage {
 export interface FilePagesResponse {
     file_id: string;
     original_name: string;
+    review_status: ReviewStatus;
+    error_message: string | null;
     pages: FilePage[];
 }
 
-/** PUT /file/{id}/pages/{page_id} — chunk_count는 다시 만든 청크 수 (내용이 같으면 null) */
+/**
+ * PUT /file/{id}/pages/{page_id} — chunk_count는 다시 만든 청크 수.
+ * 내용이 같거나 검수 대기 파일(아직 색인 전)이면 null
+ */
 export interface PageUpdateResponse {
     page: FilePage;
     chunk_count: number | null;
 }
 
-/** retrieval/type.py 의 Chunk — 응답에서는 embedding 벡터가 빠진 미리보기용으로 온다 */
-export interface ChunkPreview {
-    id: string;
-    source: string;
-    page: number;
-    chunk_index: number;
-    text: string;
-    chunk_type: string;
+/** POST /file/{id}/review/complete — 검수한 페이지 텍스트 전체를 검색에 반영한 결과 */
+export interface ReviewCompleteResponse {
+    file_id: string;
+    review_status: 'done';
+    chunk_count: number;
 }
 
-/** 파일 하나의 처리 결과. 개별 파일이 실패하면 error만 채워져서 온다 */
+/**
+ * 파일 하나의 업로드 결과. 개별 파일이 실패하면 error만 채워져서 온다.
+ * 성공하면 파싱까지만 끝난 검수 대기(review_status = pending) 상태다.
+ */
 export interface UploadResult {
     filename: string;
     error?: string;
-    /** 동일한 내용이 이미 등록된 파일은 다시 인덱싱하지 않는다. */
+    /** 동일한 내용이 이미 등록된 파일은 다시 등록하지 않는다. */
     skipped?: 'duplicate';
-    num_chunks?: number;
-    chunks_saved_to?: string;
-    chunks?: ChunkPreview[];
+    file_id?: string;
+    review_status?: 'pending';
+    /** 파싱한 페이지(시트) 수 */
+    num_pages?: number;
+    /** 파싱한 글자 수 (앞뒤 공백 제외). 0이면 텍스트를 뽑지 못했다 */
+    num_chars?: number;
 }
 
 export interface UploadResponse {

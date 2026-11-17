@@ -10,6 +10,7 @@ import type {
     FilePagesResponse,
     FileSummary,
     PageUpdateResponse,
+    ReviewCompleteResponse,
     UploadResponse,
 } from './types';
 
@@ -81,12 +82,17 @@ export const ragApi = {
         return request<FilePagesResponse>(`/file/${encodeURIComponent(fileId)}/pages/import`, { method: 'POST' });
     },
 
-    /** 파일 검수: 페이지 텍스트 수정. 서버가 그 페이지만 다시 청킹·임베딩한다 */
+    /** 파일 검수: 페이지 텍스트 수정. 검수가 끝난 파일이면 서버가 그 페이지만 다시 청킹·임베딩한다 (검수 대기면 저장만) */
     updatePageText(fileId: string, pageId: number, text: string): Promise<PageUpdateResponse> {
         return request<PageUpdateResponse>(
             `/file/${encodeURIComponent(fileId)}/pages/${pageId}`,
             { method: 'PUT', body: JSON.stringify({ text }) },
         );
+    },
+
+    /** 파일 검수: [검수 완료]. 검수한 페이지 텍스트 전체를 청킹·임베딩해 검색에 넣고 그래프 추출을 건다 */
+    completeReview(fileId: string): Promise<ReviewCompleteResponse> {
+        return request<ReviewCompleteResponse>(`/file/${encodeURIComponent(fileId)}/review/complete`, { method: 'POST' });
     },
 
     filePreviewUrl(fileId: string): string {
@@ -126,7 +132,7 @@ export const ragApi = {
         return request<unknown>(`/file/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
     },
 
-    /** 문서 업로드 → 파싱/청킹/임베딩 후 벡터 저장소에 저장. groupId 를 주면 모든 파일이 그 그룹으로 들어간다 */
+    /** 문서 업로드 → 파싱해 페이지 텍스트만 저장 (검수 대기). groupId 를 주면 모든 파일이 그 그룹으로 들어간다 */
     upload(files: File[], groupId: string | null = null, descriptions: string[] = []): Promise<UploadResponse> {
         const form = new FormData();
         for (const f of files) form.append('files', f);

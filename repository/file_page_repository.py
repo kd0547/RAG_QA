@@ -90,7 +90,8 @@ class FilePageRepository:
         잘못된 정규식이면 re.error를 그대로 던진다.
         """
         regex = re.compile(pattern, re.IGNORECASE)
-        conditions, params = [], []
+        # 검수 대기 문서는 아직 검증 전이라 답변 근거로 쓰지 않는다
+        conditions, params = ["f.review_status = 'done'"], []
         if file_id:
             conditions.append("fp.file_id = ?")
             params.append(file_id)

@@ -392,6 +392,9 @@ def read_pages(file_id: str, pages: list[int], max_chars: int = 6000, offset: in
     file = repository.file_repo.get_file_by_id(file_id)
     if file is None:
         return {"error": f"없는 file_id입니다: {file_id}. list_documents로 문서를 찾으세요."}
+    if file.review_status != "done":
+        # 파싱 결과를 사람이 아직 확인하지 않은 문서는 근거로 쓰지 않는다
+        return {"error": f"검수 대기 문서: {file.original_name}은 파일 검수가 끝나지 않아 읽을 수 없습니다."}
     if not repository.page_repo.has_pages(file_id):
         # 질의 시점에 원본을 다시 파싱하지 않는다 (페이지 텍스트는 업로드 때 저장된다)
         return {"error": f"페이지 텍스트 없음: {file.original_name}은 페이지별 텍스트가 저장돼 있지 않습니다. search_documents로 찾으세요."}
@@ -440,6 +443,8 @@ def list_documents(group_id: str | None = None, keyword: str | None = None, limi
     needle = (keyword or "").strip().lower()
     result = []
     for file in repository.file_repo.file_list():
+        if file.get("review_status", "done") != "done":  # 검수 대기 문서는 아직 근거로 쓰지 않는다
+            continue
         if group_id and file.get("group_id") != group_id:
             continue
         if needle and needle not in f"{file.get('original_name') or ''} {file.get('description') or ''}".lower():

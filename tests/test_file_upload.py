@@ -125,10 +125,10 @@ def test_duplicate_upload_has_result_for_each_file(upload_router):
     results = response["results"]
     assert len(results) == 2
     assert results[0]["filename"] == "original.pdf"
-    assert results[0]["num_chunks"] == 1
+    assert results[0]["review_status"] == "pending"
     assert results[1] == {"filename": "copy.pdf", "skipped": "duplicate"}
     assert len(file_repo.files) == 1
-    assert len(saved_chunks) == 1
+    assert saved_chunks == []  # 검수 완료 전에는 임베딩하지 않는다
     assert len(list(uploads.rglob("*.pdf"))) == 1
 
 
@@ -138,8 +138,8 @@ def test_same_name_uploads_keep_both_originals(upload_router):
     first = _upload(router_module, ("report.pdf", b"first version"))
     second = _upload(router_module, ("report.pdf", b"second version"))
 
-    assert first["results"][0]["num_chunks"] == 1
-    assert second["results"][0]["num_chunks"] == 1
+    assert first["results"][0]["review_status"] == "pending"
+    assert second["results"][0]["review_status"] == "pending"
     assert len(file_repo.files) == 2
     stored = list(file_repo.files.values())
     assert {file.original_name for file in stored} == {"report.pdf"}
@@ -147,7 +147,7 @@ def test_same_name_uploads_keep_both_originals(upload_router):
     assert Path(stored[0].stored_path).read_bytes() == b"first version"
     assert Path(stored[1].stored_path).read_bytes() == b"second version"
     assert len(list(uploads.rglob("*.pdf"))) == 2
-    assert saved_chunks[0][0].id != saved_chunks[1][0].id
+    assert first["results"][0]["file_id"] != second["results"][0]["file_id"]
     assert router_module.preview_file(stored[0].file_id).path == Path(stored[0].stored_path)
     assert router_module.preview_file(stored[1].file_id).path == Path(stored[1].stored_path)
 
@@ -227,3 +227,25 @@ def test_file_description_rejects_invalid_requests(upload_router):
             router_module.FileDescriptionBody(description="설명"),
         )
     assert missing.value.status_code == 404
+
+
+def test_upload_parses_only_and_waits_for_review(upload_router, monkeypatch):
+    """업로드는 파싱·페이지 저장까지만. 청킹·임베딩·그래프는 [검수 완료] 때 한다."""
+    router_module, file_repo, _, saved_chunks = upload_router
+    saved_pages = {}
+    router_module.page_repo.save_pages = lambda file_id, pages: saved_pages.setdefault(file_id, pages)
+    monkeypatch.setattr(router_module, "parse_file", lambda path: [
+        router_module.PageText(page=1, text=" 표 | A | "), router_module.PageText(page=2, text="둘째"),
+    ])
+    monkeypatch.setattr(router_module, "chunk_pages", lambda *a, **k: pytest.fail("업로드에서 청킹하면 안 된다"))
+    monkeypatch.setattr(router_module, "embed_chunks", lambda *a, **k: pytest.fail("업로드에서 임베딩하면 안 된다"))
+    graph = []
+    monkeypatch.setattr(router_module, "_graph_index", lambda file_id, page=None: graph.append(file_id))
+
+    [result] = _upload(router_module, ("spec.pdf", b"spec"))["results"]
+
+    stored = file_repo.get_file_by_id(result["file_id"])
+    assert (stored.review_status, stored.chunk_count) == ("pending", None)
+    assert (result["review_status"], result["num_pages"], result["num_chars"]) == ("pending", 2, len("표 | A |") + 2)
+    assert [p.text for p in saved_pages[stored.file_id]] == [" 표 | A | ", "둘째"]
+    assert saved_chunks == [] and graph == []

@@ -95,6 +95,8 @@ def test_file_detail_for_non_pdf(preview_client):
         "updated_at": "2026-10-27 09:00:00",
         "group_id": "report",
         "description": "",
+        "review_status": "done",
+        "error_message": None,
     }
     files["office"] = SimpleNamespace(**metadata, stored_path=str(uploads / "report.docx"))
 

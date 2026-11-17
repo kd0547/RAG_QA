@@ -102,9 +102,12 @@ def index_file(file_id: str) -> dict:
 
 
 def index_all() -> list[dict]:
-    """등록된 모든 파일의 그래프를 다시 만든다. 페이지 텍스트가 없는 옛 파일은 건너뛴다."""
+    """등록된 모든 파일의 그래프를 다시 만든다. 페이지 텍스트가 없는 옛 파일과 검수 대기 파일은 건너뛴다."""
     results = []
     for file in file_repo.file_list():
+        if file.get("review_status", "done") != "done":
+            logger.info("그래프 추출 건너뜀(검수 대기): %s", file["original_name"])
+            continue
         if not page_repo.has_pages(file["file_id"]):
             logger.info("그래프 추출 건너뜀(페이지 텍스트 없음): %s", file["original_name"])
             continue

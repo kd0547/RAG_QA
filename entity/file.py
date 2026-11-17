@@ -27,6 +27,8 @@ class FileEntity:
     updated_at: datetime = field(default_factory=datetime.now)
     group_id: str | None = None   # file_group.id, 아직 분류 전이면 None
     description: str = ""         # 파일 내용 짧은 설명
+    # 문서 검수 상태. 'pending'이면 파싱만 끝났고 검색에 쓰이지 않는다. [검수 완료] 뒤 'done'
+    review_status: str = "done"
     # 연관 파일은 file_relation 테이블에 있다. FileRepository.get_related_files()로 조회한다.
 
 
@@ -39,6 +41,7 @@ def create_file(
         chunk_count: int = 0,
         group_id: str | None = None,
         description: str = "",
+        review_status: str = "done",
 ) -> FileEntity:
     """새 업로드 파일의 FileEntity를 만든다. sha256은 documents 문자열을 이어 붙여 계산한다."""
     # 구분자 없이 join하면 ["ab", "c"]와 ["a", "bc"]의 해시가 같아진다
@@ -53,4 +56,5 @@ def create_file(
         chunk_count=chunk_count,
         group_id=group_id,
         description=description,
+        review_status=review_status,
     )

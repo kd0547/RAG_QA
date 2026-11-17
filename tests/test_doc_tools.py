@@ -138,3 +138,14 @@ def test_agent_reads_pages_end_to_end(agent_env, docs):
     assert run["status"] == "ok"
     assert [(r["file_id"], r["page"]) for r in reads] == [(docs["guide"], 2)]
     assert "1.5kg" in out["answer"]
+
+
+def test_pending_review_documents_are_not_used(agent_env, docs, tmp_path, in_run):
+    """검수 대기 문서는 목록·검색·읽기 도구 모두에서 빠진다."""
+    pending = create_file(original_name="검수전.pdf", stored_path=str(tmp_path / "p.pdf"), review_status="pending")
+    agent_env.file_repo.file_save(pending)
+    agent_env.page_repo.save_pages(pending.file_id, [PageText(page=1, text="N5800 무게 9kg (OCR 환각)")])
+
+    assert pending.file_id not in [d["file_id"] for d in tools.list_documents.invoke({})]
+    assert [r["file_id"] for r in tools.grep_documents.invoke({"pattern": "무게"})] == [docs["guide"]]
+    assert "검수 대기" in tools.read_pages.invoke({"file_id": pending.file_id, "pages": [1]})["error"]

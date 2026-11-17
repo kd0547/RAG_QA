@@ -10,7 +10,7 @@ class FileRepository:
 
     def file_list(self) -> list[dict]:
         with self.db.get_conn() as conn:
-            select_sql = "SELECT file_id,original_name,group_id,description FROM file"
+            select_sql = "SELECT file_id,original_name,group_id,description,review_status,error_message FROM file"
 
             rows = conn.execute(select_sql).fetchall()
 
@@ -24,8 +24,27 @@ class FileRepository:
 
     def file_save(self,file:FileEntity):
         with self.db.get_conn() as conn:
-            insert_sql = "INSERT INTO file (file_id, original_name,stored_path,mime_type,size_bytes,sha256,chunk_count,group_id,description) VALUES (?,?,?,?,?,?,?,?,?)"
-            conn.execute(insert_sql,(file.file_id,file.original_name,file.stored_path,file.mime_type,file.size_bytes,file.sha256,file.chunk_count,file.group_id,file.description))
+            insert_sql = "INSERT INTO file (file_id, original_name,stored_path,mime_type,size_bytes,sha256,chunk_count,group_id,description,review_status) VALUES (?,?,?,?,?,?,?,?,?,?)"
+            conn.execute(insert_sql,(file.file_id,file.original_name,file.stored_path,file.mime_type,file.size_bytes,file.sha256,file.chunk_count,file.group_id,file.description,file.review_status))
+            conn.commit()
+
+    def mark_reviewed(self, file_id: str, chunk_count: int) -> None:
+        """[검수 완료] 뒤 색인이 끝난 파일을 'done'으로 바꾸고 청크 수를 채운다. 지난 실패 원인은 지운다."""
+        with self.db.get_conn() as conn:
+            conn.execute(
+                "UPDATE file SET review_status = 'done', chunk_count = ?, error_message = NULL,"
+                " updated_at = current_timestamp WHERE file_id = ?",
+                (chunk_count, file_id),
+            )
+            conn.commit()
+
+    def set_error(self, file_id: str, message: str | None) -> None:
+        """색인 실패 원인을 남긴다. None이면 지운다. 검수 상태는 바꾸지 않는다 (다시 시도할 수 있게)."""
+        with self.db.get_conn() as conn:
+            conn.execute(
+                "UPDATE file SET error_message = ?, updated_at = current_timestamp WHERE file_id = ?",
+                (message, file_id),
+            )
             conn.commit()
 
     def get_file_by_id(self,file_id:str):

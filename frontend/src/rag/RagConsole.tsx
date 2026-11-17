@@ -85,11 +85,12 @@ function formatBytes(bytes: number): string {
     return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
-function uploadOutcome(result: UploadResult): 'ready' | 'empty' | 'duplicate' | 'error' {
+/** 업로드는 파싱까지만 한다. 성공한 파일은 검수 대기(pending)이고, [검수 완료] 뒤에 검색에 쓰인다 */
+function uploadOutcome(result: UploadResult): 'pending' | 'empty' | 'duplicate' | 'error' {
     if (result.error) return 'error';
     if (result.skipped === 'duplicate') return 'duplicate';
-    if (result.num_chunks === 0) return 'empty';
-    return 'ready';
+    if (result.num_chars === 0) return 'empty';
+    return 'pending';
 }
 
 function uploadCounts(results: UploadResult[]) {
@@ -98,7 +99,7 @@ function uploadCounts(results: UploadResult[]) {
             counts[uploadOutcome(result)] += 1;
             return counts;
         },
-        { ready: 0, empty: 0, duplicate: 0, error: 0 },
+        { pending: 0, empty: 0, duplicate: 0, error: 0 },
     );
 }
 
@@ -254,7 +255,7 @@ export function RagConsole() {
             handleUploaded(groupId, results);
             if (consoleViewKey() !== `group:${groupId}`) {
                 const counts = uploadCounts(results);
-                setUploadNotice({ groupId, message: `파일 등록 결과: 완료 ${counts.ready}개 · 내용 없음 ${counts.empty}개 · 중복 ${counts.duplicate}개 · 실패 ${counts.error}개` });
+                setUploadNotice({ groupId, message: `파일 등록 결과: 검수 대기 ${counts.pending + counts.empty}개 · 중복 ${counts.duplicate}개 · 실패 ${counts.error}개` });
             }
         } catch (e) {
             const message = errMessage(e);
@@ -654,7 +655,7 @@ function UploadPanel({
                 >
                     {uploading && <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />}
                     {uploading
-                        ? '파일 분석·검색 반영 중…'
+                        ? '파일 분석 중…'
                         : busy
                             ? '다른 그룹의 파일 등록 중…'
                         : selected.length === 0
@@ -662,7 +663,7 @@ function UploadPanel({
                             : `${selected.length}개 파일 등록`}
                 </button>
                 {selected.length > 0 && !uploading && <p className="mt-1.5 text-center text-[11.5px] text-ink/70">선택한 파일 모두가 ‘{group.name}’ 그룹에 들어갑니다.</p>}
-                {uploading && <p role="status" className="mt-2 text-center text-[12px] text-ink/70">문서 내용을 추출하고 검색에 반영하고 있습니다. 완료될 때까지 기다려 주세요.</p>}
+                {uploading && <p role="status" className="mt-2 text-center text-[12px] text-ink/70">문서 내용을 추출하고 있습니다. 끝나면 파일 검수에서 확인해 주세요.</p>}
                 {error && <InlineError>{error}</InlineError>}
             </div>
         </section>
@@ -672,7 +673,7 @@ function UploadPanel({
 function UploadResultPanel({ results, onDismiss }: { results: UploadResult[]; onDismiss: () => void }) {
     const counts = uploadCounts(results);
     const summary = [
-        counts.ready > 0 ? `검색 준비 완료 ${counts.ready}개` : '',
+        counts.pending > 0 ? `검수 대기 ${counts.pending}개` : '',
         counts.empty > 0 ? `내용 없음 ${counts.empty}개` : '',
         counts.duplicate > 0 ? `중복 ${counts.duplicate}개` : '',
         counts.error > 0 ? `실패 ${counts.error}개` : '',
@@ -684,6 +685,9 @@ function UploadResultPanel({ results, onDismiss }: { results: UploadResult[]; on
                 <div role="status" aria-live="polite" className="min-w-0 flex-1">
                     <h2 className="text-[12.5px] font-bold">파일 등록 결과</h2>
                     <p className="mt-0.5 text-[11.5px] text-ink/80">{summary}</p>
+                    {counts.pending + counts.empty > 0 && (
+                        <p className="mt-0.5 text-[11.5px] text-ink/80">파일마다 [검수하기]로 파싱 결과를 확인하고 [검수 완료]를 눌러야 질의응답에 쓰입니다.</p>
+                    )}
                 </div>
                 <button type="button" onClick={onDismiss} aria-label="파일 등록 결과 닫기" className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted hover:bg-white hover:text-ink">
                     <CloseIcon />
@@ -782,6 +786,7 @@ function FileDetailPanel({
     const fields = [
         ['파일 형식', fileExt(doc.original_name).slice(1).toUpperCase() || '—'],
         ['파일 크기', sizeLabel],
+        ['검수', !detail ? '—' : detail.review_status === 'pending' ? (detail.error_message ? '검수 대기 · 검색 반영 실패' : '검수 대기 (검색에 쓰이지 않음)') : '검수 완료'],
         ['청크 수', detail?.chunk_count == null ? '—' : `${detail.chunk_count.toLocaleString()}개`],
         ['등록일', detail?.created_at?.replace('T', ' ').slice(0, 16) || '—'],
         ['수정일', detail?.updated_at?.replace('T', ' ').slice(0, 16) || '—'],
@@ -893,7 +898,7 @@ function FileDetailPanel({
                         </button>
                     )}
                     <a {...linkProps(reviewPath(doc.file_id))} className={`h-9 inline-flex items-center justify-center rounded-lg bg-brand text-[12px] font-bold text-white hover:bg-brand-hover ${fileExt(doc.original_name) === '.pdf' ? '' : 'col-span-2'}`}>
-                        파일 검수
+                        {doc.review_status === 'pending' ? '검수하기' : '파일 검수'}
                     </a>
                 </div>
             </div>
@@ -1306,14 +1311,14 @@ function EmptyWorkspace({
         return (
             <div className="mx-auto w-full max-w-[760px] px-5 sm:px-10 pt-8 pb-4">
                 <h2 className="text-[18px] font-bold">
-                    {counts.ready > 0 ? '문서에 대해 질문해 보세요' : '등록 결과를 확인해 주세요'}
+                    {counts.pending + counts.empty > 0 ? '파일 검수를 마치면 질문에 쓰입니다' : '등록 결과를 확인해 주세요'}
                 </h2>
                 <p className="mt-1 text-[12px] text-muted">
-                    검색 준비 완료 {counts.ready}개 · 내용 없음 {counts.empty}개 · 중복 {counts.duplicate}개 · 실패 {counts.error}개
+                    검수 대기 {counts.pending}개 · 내용 없음 {counts.empty}개 · 중복 {counts.duplicate}개 · 실패 {counts.error}개
                 </p>
                 <ul className="mt-4 divide-y divide-divide">
                     {lastUpload.map((r, i) => (
-                        <UploadResultRow key={`${r.filename}-${i}`} result={r} showPreview />
+                        <UploadResultRow key={`${r.filename}-${i}`} result={r} />
                     ))}
                 </ul>
             </div>
@@ -1605,14 +1610,15 @@ function SourceList({ sources }: { sources: AskSource[] }) {
 /*  공용 조각                                                          */
 /* ================================================================== */
 
-function UploadResultRow({ result, showPreview = false }: { result: UploadResult; showPreview?: boolean }) {
+function UploadResultRow({ result }: { result: UploadResult }) {
     const outcome = uploadOutcome(result);
     const status = {
-        ready: { label: '완료', tone: 'bg-brand-pale text-brand-hover', message: '질의응답에서 검색할 수 있습니다.' },
-        empty: { label: '내용 없음', tone: 'bg-warn-soft text-warn', message: '텍스트를 추출하지 못해 검색에 사용되지 않습니다.' },
+        pending: { label: '검수 대기', tone: 'bg-warn-soft text-warn', message: `${result.num_pages ?? 0}쪽을 읽었습니다. 검수를 마쳐야 질의응답에서 검색할 수 있습니다.` },
+        empty: { label: '내용 없음', tone: 'bg-warn-soft text-warn', message: '텍스트를 추출하지 못했습니다. 검수에서 원본과 비교해 내용을 넣어 주세요.' },
         duplicate: { label: '중복', tone: 'bg-chip text-muted', message: '같은 내용의 파일이 이미 등록되어 있습니다. 필요한 경우 기존 파일을 이 그룹으로 옮겨 주세요.' },
         error: { label: '실패', tone: 'bg-danger-surface text-danger', message: result.error ?? '처리하지 못했습니다.' },
     }[outcome];
+    const canReview = (outcome === 'pending' || outcome === 'empty') && !!result.file_id;
     return (
         <li className="py-2.5">
             <div className="flex items-start gap-2">
@@ -1621,20 +1627,15 @@ function UploadResultRow({ result, showPreview = false }: { result: UploadResult
                     <p className="break-all text-[11.5px] font-semibold">{result.filename || '(파일명 없음)'}</p>
                     <p className={`mt-0.5 break-words text-[11px] leading-relaxed ${outcome === 'error' ? 'text-danger' : 'text-muted'}`}>{status.message}</p>
                 </div>
+                {canReview && (
+                    <a
+                        {...linkProps(reviewPath(result.file_id!))}
+                        className="shrink-0 h-7 inline-flex items-center rounded-lg bg-brand px-2.5 text-[11px] font-bold text-white hover:bg-brand-hover"
+                    >
+                        검수하기
+                    </a>
+                )}
             </div>
-            {showPreview && outcome === 'ready' && !!result.chunks?.length && (
-                <details className="ml-[66px] mt-1.5">
-                    <summary className="cursor-pointer text-[11.5px] font-semibold text-brand-hover hover:underline">추출 내용 미리보기</summary>
-                    <ul className="mt-1 divide-y divide-divide">
-                        {result.chunks.slice(0, 3).map((chunk) => (
-                            <li key={chunk.id} className="py-1.5 text-[11.5px] leading-relaxed">
-                                <span className="mr-1 text-muted tabular-nums">{chunk.page}쪽</span>
-                                <span className="whitespace-pre-wrap break-words">{truncate(chunk.text)}</span>
-                            </li>
-                        ))}
-                    </ul>
-                </details>
-            )}
         </li>
     );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { AlertIcon, DocumentIcon } from '../components/icons';
 import { ApiError } from '../lib/http';
@@ -12,7 +12,9 @@ import type { FilePage, FilePagesResponse } from './types';
  * 파일 검수 (/review?file_id=…&return=…)
  *
  * OCR 도구와 같은 배치로, 왼쪽에는 원본(PDF 페이지), 오른쪽에는 업로드 때 파싱해 DB에 저장한 그 페이지의 텍스트를 보여준다.
- * 텍스트를 고쳐 저장하면 서버가 그 페이지만 다시 청킹·임베딩한다.
+ * 업로드한 파일은 검수 대기(pending)로 시작한다. 이때는 고쳐 저장해도 텍스트만 바뀌고,
+ * [검수 완료]를 눌러야 서버가 전체 페이지를 청킹·임베딩해 검색에 넣고 그래프 추출을 건다.
+ * 검수가 끝난 파일은 텍스트를 고쳐 저장하면 서버가 그 페이지만 다시 청킹·임베딩한다.
  * 업로드 원본 파일과 처음 파싱 결과(original_text)는 서버가 바꾸지 않는다.
  * 원본 미리보기는 서버가 PDF만 내려주므로, 다른 형식은 텍스트 검수만 할 수 있다.
  */
@@ -43,8 +45,13 @@ export function FileReview() {
     const [importError, setImportError] = useState('');
     const [pdfUrl, setPdfUrl] = useState('');
     const [pdfError, setPdfError] = useState('');
+    const [editingIds, setEditingIds] = useState<Set<number>>(new Set());
+    const [completing, setCompleting] = useState(false);
+    const [completeError, setCompleteError] = useState('');
+    const [completeNotice, setCompleteNotice] = useState('');
 
     const fileId = target?.fileId ?? '';
+    const pending = data?.review_status === 'pending';
     const isPdf = /\.pdf$/i.test(data?.original_name ?? '');
 
     // 저장된 페이지 텍스트
@@ -89,6 +96,33 @@ export function FileReview() {
             ...current,
             pages: current.pages.map((p) => (p.page_id === updated.page_id ? updated : p)),
         });
+    };
+
+    const setEditing = (pageId: number, editing: boolean) => {
+        setEditingIds((current) => {
+            if (current.has(pageId) === editing) return current;
+            const next = new Set(current);
+            if (editing) next.add(pageId);
+            else next.delete(pageId);
+            return next;
+        });
+    };
+
+    const completeReview = async () => {
+        if (!data || completing || editingIds.size > 0) return;
+        if (!window.confirm(`'${data.original_name}' 검수를 마치고 질의응답 검색에 반영할까요?\n지금 저장된 페이지 텍스트로 청크를 만들고 그래프를 추출합니다.`)) return;
+        setCompleting(true);
+        setCompleteError('');
+        try {
+            const result = await ragApi.completeReview(fileId);
+            setData((current) => current && { ...current, review_status: 'done', error_message: null });
+            setCompleteNotice(`검수 완료: 청크 ${result.chunk_count.toLocaleString()}개를 검색에 반영했습니다. 그래프 추출은 뒤에서 이어집니다.`);
+        } catch (e) {
+            // 서버 메시지가 이미 "검색 반영 실패: …"로 시작한다
+            setCompleteError(`${errorText(e)} — 다시 눌러 재시도할 수 있습니다.`);
+        } finally {
+            setCompleting(false);
+        }
     };
 
     const importPages = async () => {
@@ -166,6 +200,36 @@ export function FileReview() {
                     )}
                 </header>
 
+                {/* 검수 상태 */}
+                {data && pending && (
+                    <div className="shrink-0 px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-divide bg-warn-soft">
+                        <div className="min-w-0 flex-1">
+                            <p className="text-[13px] font-bold text-warn">검수 대기 · 아직 질의응답 검색에 쓰이지 않습니다</p>
+                            <p className="mt-0.5 text-[12px] leading-relaxed text-ink/80">
+                                모든 페이지를 원본과 비교해 확인하고, 표가 깨지거나 이미지 글자가 틀린 곳은 고쳐 저장한 뒤 [검수 완료]를 눌러 주세요.
+                            </p>
+                            {(completeError || data.error_message) && (
+                                <p role="alert" className="mt-1 break-words text-[12px] text-danger">{completeError || `지난 시도 — ${data.error_message}`}</p>
+                            )}
+                        </div>
+                        <div className="shrink-0 flex items-center gap-2">
+                            {editingIds.size > 0 && <span className="text-[11.5px] text-muted">수정 중인 페이지를 저장하거나 취소해 주세요</span>}
+                            <button
+                                type="button"
+                                onClick={() => void completeReview()}
+                                disabled={completing || editingIds.size > 0}
+                                className="h-9 inline-flex items-center gap-2 rounded-lg bg-brand px-4 text-[12.5px] font-bold text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {completing && <span className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />}
+                                {completing ? '검색에 반영하는 중…' : '검수 완료'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {completeNotice && (
+                    <p role="status" className="shrink-0 px-5 py-2.5 border-b border-divide bg-brand-tint text-[12.5px] font-semibold text-brand-hover">{completeNotice}</p>
+                )}
+
                 {/* 본문 */}
                 <div className="flex-1 min-h-0">
                     {loadError ? (
@@ -220,7 +284,9 @@ export function FileReview() {
                             <div className="flex-1 flex flex-col min-w-0 bg-white border-l border-divide">
                                 <div className="h-14 shrink-0 px-5 flex items-center justify-between border-b border-divide">
                                     <span className="text-[14px] font-bold">페이지 텍스트</span>
-                                    <span className="text-[12px] text-muted">저장하면 이 페이지만 다시 청킹·임베딩합니다</span>
+                                    <span className="text-[12px] text-muted">
+                                        {pending ? '고친 내용은 [검수 완료] 때 검색에 반영됩니다' : '저장하면 이 페이지만 다시 청킹·임베딩합니다'}
+                                    </span>
                                 </div>
                                 <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
                                     {pageRows.map((row, i) => (
@@ -229,7 +295,10 @@ export function FileReview() {
                                             fileId={fileId}
                                             row={row}
                                             label={pageRows.length > 1 ? `Page ${row.page} · 블록 ${i + 1}` : `Page ${row.page}`}
+                                            pending={pending}
+                                            locked={completing}
                                             onSaved={onSaved}
+                                            onEditingChange={(editing) => setEditing(row.page_id, editing)}
                                         />
                                     ))}
                                 </div>
@@ -246,14 +315,32 @@ function PageCard({
     fileId,
     row,
     label,
+    pending,
+    locked,
     onSaved,
+    onEditingChange,
 }: {
     fileId: string;
     row: FilePage;
     label: string;
+    /** 검수 대기 파일이면 저장해도 텍스트만 바뀐다 (색인은 [검수 완료] 때) */
+    pending: boolean;
+    /** [검수 완료] 처리 중에는 수정을 시작하지 못하게 한다 */
+    locked: boolean;
     onSaved: (row: FilePage) => void;
+    onEditingChange: (editing: boolean) => void;
 }) {
-    const [editing, setEditing] = useState(false);
+    const [editing, setEditingState] = useState(false);
+    const setEditing = (value: boolean) => {
+        setEditingState(value);
+        onEditingChange(value);
+    };
+    // 수정 중에 다른 페이지로 넘어가 카드가 사라지면 [검수 완료]가 계속 잠기지 않게 풀어 준다
+    const editingChangeRef = useRef(onEditingChange);
+    useEffect(() => {
+        editingChangeRef.current = onEditingChange;
+    });
+    useEffect(() => () => editingChangeRef.current(false), []);
     const [draft, setDraft] = useState('');
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -273,7 +360,8 @@ function PageCard({
             const result = await ragApi.updatePageText(fileId, row.page_id, draft);
             onSaved(result.page);
             setEditing(false);
-            if (result.chunk_count !== null) setStatus(`저장했습니다. 검색용 청크 ${result.chunk_count}개를 다시 만들었습니다.`);
+            if (pending) setStatus('저장했습니다. [검수 완료]를 누르면 검색에 반영됩니다.');
+            else if (result.chunk_count !== null) setStatus(`저장했습니다. 검색용 청크 ${result.chunk_count}개를 다시 만들었습니다.`);
         } catch (e) {
             setError(`저장 실패: ${errorText(e)}`);
         } finally {
@@ -305,7 +393,8 @@ function PageCard({
                                 setShowOriginal(false);
                                 setEditing(true);
                             }}
-                            className="text-[12px] font-bold text-brand-hover hover:underline"
+                            disabled={locked}
+                            className="text-[12px] font-bold text-brand-hover hover:underline disabled:opacity-50"
                         >
                             수정
                         </button>

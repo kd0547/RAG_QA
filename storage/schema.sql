@@ -125,7 +125,12 @@ create table if not exists file (
     status        text not null default 'processing'
                   check (status in ('processing', 'ready', 'failed', 'deleting')),
     chunk_count   integer,                       -- 인덱싱이 끝나면 채움
-    error_message text,                          -- 실패 원인
+    error_message text,                          -- 실패 원인 (검수 완료 뒤 색인 실패 포함)
+    -- 문서 검수: 업로드는 파싱까지만 하고 'pending'으로 둔다. 파일 검수에서 [검수 완료]를 눌러야
+    -- 청킹·임베딩·그래프 추출을 하고 'done'이 된다. 'pending' 문서는 검색·문서 도구·그래프에 쓰이지 않는다.
+    -- 이 단계가 생기기 전에 올린 문서는 이미 색인돼 있어 'done'이다 (repo_connect._migrate).
+    review_status text not null default 'done'
+                  check (review_status in ('pending', 'done')),
     created_at    text not null default current_timestamp,
     updated_at    text not null default current_timestamp,
     -- 소속 그룹. 아직 분류 전이면 NULL, 그룹이 지워지면 NULL로 돌아간다.

@@ -1,11 +1,14 @@
-"""문서 업로드 라우터: 파싱 -> 청킹 -> 임베딩 -> 저장소 저장."""
+"""문서 업로드 라우터.
+
+업로드: 파싱 -> 페이지 텍스트 저장 (검수 대기, 검색에 쓰이지 않음)
+검수 완료: 페이지 텍스트 -> 청킹 -> 임베딩 -> 벡터 저장 -> 그래프 추출(백그라운드)
+"""
 from __future__ import annotations
 
 import hashlib
 import logging
 import re
 import time
-from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
@@ -173,6 +176,8 @@ def get_file_detail(file_id: str) -> dict:
         "updated_at": file.updated_at,
         "group_id": file.group_id,
         "description": file.description,
+        "review_status": file.review_status,
+        "error_message": file.error_message,
     }
 
 
@@ -192,7 +197,13 @@ def get_file_pages(file_id: str) -> dict:
     file = file_repo.get_file_by_id(file_id)
     if file is None:
         raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
-    return {"file_id": file_id, "original_name": file.original_name, "pages": page_repo.list_pages(file_id)}
+    return {
+        "file_id": file_id,
+        "original_name": file.original_name,
+        "review_status": file.review_status,
+        "error_message": file.error_message,
+        "pages": page_repo.list_pages(file_id),
+    }
 
 
 @router.post("/file/{file_id}/pages/import")
@@ -216,7 +227,8 @@ def import_file_pages(file_id: str, background: BackgroundTasks) -> dict:
         logger.exception("페이지 텍스트 가져오기 실패: file_id=%s", file_id)
         raise HTTPException(status_code=500, detail=f"원본 파싱 실패: {exc}") from exc
     page_repo.save_pages(file_id, pages)
-    _schedule_graph_index(background, file_id)
+    if file.review_status == "done":  # 검수 대기 파일은 [검수 완료] 때 뽑는다
+        _schedule_graph_index(background, file_id)
     logger.info("페이지 텍스트 가져오기: file_id=%s, pages=%d, %.1f초", file_id, len(pages), time.perf_counter() - started)
     return {"file_id": file_id, "original_name": file.original_name, "pages": page_repo.list_pages(file_id)}
 
@@ -229,6 +241,7 @@ class PageTextBody(BaseModel):
 def set_page_text(file_id: str, page_id: int, body: PageTextBody, background: BackgroundTasks) -> dict:
     """파일 검수에서 고친 페이지 텍스트를 저장하고, 그 페이지만 다시 청킹·임베딩한다.
 
+    검수 대기 파일은 아직 색인 전이라 텍스트만 저장한다 (chunk_count는 None). [검수 완료] 때 전체를 색인한다.
     업로드 원본 파일과 original_text(처음 파싱 결과)는 바꾸지 않는다.
     """
     file = file_repo.get_file_by_id(file_id)
@@ -242,6 +255,10 @@ def set_page_text(file_id: str, page_id: int, body: PageTextBody, background: Ba
         raise HTTPException(status_code=400, detail=f"페이지 텍스트는 {MAX_PAGE_TEXT:,}자 이하여야 합니다.")
     if text == row["text"]:
         return {"page": row, "chunk_count": None}
+    if file.review_status == "pending":
+        page_repo.update_text(page_id, text)
+        logger.info("검수 대기 페이지 저장: file_id=%s, page=%s, %d자 -> %d자", file_id, row["page"], len(row["text"]), len(text))
+        return {"page": page_repo.get_page(file_id, page_id), "chunk_count": None}
 
     # 같은 페이지 번호의 블록을 모두 모아 다시 청킹해야 청크 번호가 업로드 때와 같은 규칙으로 이어진다
     siblings = page_repo.pages_with_number(file_id, row["page"])
@@ -262,6 +279,42 @@ def set_page_text(file_id: str, page_id: int, body: PageTextBody, background: Ba
         file_id, row["page"], len(row["text"]), len(text), removed, len(embedded),
     )
     return {"page": page_repo.get_page(file_id, page_id), "chunk_count": len(embedded)}
+
+
+@router.post("/file/{file_id}/review/complete")
+def complete_review(file_id: str, background: BackgroundTasks) -> dict:
+    """[검수 완료]: 저장된(검수로 고친) 페이지 텍스트 전체를 청킹·임베딩해 검색에 넣고, 그래프 추출을 건다.
+
+    실패하면 검수 대기로 남기고 error_message에 원인을 적는다. 같은 요청으로 다시 시도할 수 있다.
+    """
+    file = file_repo.get_file_by_id(file_id)
+    if file is None:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+    if file.review_status != "pending":
+        raise HTTPException(status_code=409, detail="이미 검수가 끝난 파일입니다.")
+
+    started = time.perf_counter()
+    pages = [PageText(page=p["page"], text=p["text"]) for p in page_repo.list_pages(file_id)]
+    try:
+        chunks = _chunk_ids(file_id, chunk_pages(Path(file.stored_path), pages, file_id=file_id, group_id=file.group_id))
+        embedded = embed_chunks(chunks)
+        # 앞선 시도가 벡터 저장 뒤에 실패했을 수 있으니 이 파일의 청크를 비우고 넣는다
+        delete_embeddings(file_id)
+        save_embeddings(embedded)
+    except Exception as exc:
+        logger.exception("검수 완료 색인 실패: file_id=%s", file_id)
+        message = f"검색 반영 실패: {exc}"
+        file_repo.set_error(file_id, message)
+        status = 503 if isinstance(exc, RuntimeError) else 500
+        raise HTTPException(status_code=status, detail=message) from exc
+
+    file_repo.mark_reviewed(file_id, len(embedded))
+    _schedule_graph_index(background, file_id)
+    logger.info(
+        "검수 완료: %s, file_id=%s, pages=%d, chunks=%d, %.1f초",
+        file.original_name, file_id, len(pages), len(embedded), time.perf_counter() - started,
+    )
+    return {"file_id": file_id, "review_status": "done", "chunk_count": len(embedded)}
 
 
 class FileGroupBody(BaseModel):
@@ -329,10 +382,12 @@ async def upload_files(
     files: list[UploadFile],
     group_id: Annotated[str | None, Form()] = None,
     descriptions: Annotated[list[str] | None, Form()] = None,
-    # FastAPI는 타입으로 주입한다. 기본값 None은 라우터 함수를 직접 부르는 테스트용이다.
-    background: BackgroundTasks = None,  # type: ignore[assignment]
 ) -> dict:
-    """여러 파일을 올린다. group_id는 소속 그룹, descriptions는 파일 순서에 맞춘 간단한 설명이다."""
+    """여러 파일을 올린다. group_id는 소속 그룹, descriptions는 파일 순서에 맞춘 간단한 설명이다.
+
+    파싱해서 페이지 텍스트까지만 저장하고 검수 대기로 둔다. 검색 반영(청킹·임베딩·그래프)은
+    파일 검수에서 [검수 완료]를 누를 때 한다 (POST /file/{file_id}/review/complete).
+    """
     if not files:
         raise HTTPException(status_code=400, detail="업로드된 파일이 없습니다.")
     group_id = group_id or None  # 폼에서 빈 문자열로 오면 미분류
@@ -381,50 +436,35 @@ async def upload_files(
                 sha256=sha256,
                 group_id=group_id,
                 description=description,
+                # 파싱 결과(OCR 환각, 표 깨짐)를 사람이 확인하기 전에는 검색에 넣지 않는다
+                review_status="pending",
+                chunk_count=None,
             )
 
-            #파싱 후 청킹을 진행
             pages = parse_file(dest_path)
-            chunks: list[Chunk] = chunk_pages(dest_path, pages, file_id=db_file.file_id, group_id=group_id)
-            _chunk_ids(db_file.file_id, chunks)
-            #dump_chunks_markdown(dest_path, chunks)
-
-            db_file.chunk_count = len(chunks)
-
-            #임베딩 된 청크를 반환
-            embedded_chunks = embed_chunks(chunks)
-
 
         except Exception as exc:  # 개별 파일 실패는 건너뛰고 나머지는 계속 처리
             logger.exception("업로드 처리 실패: %s", file.filename)
             results.append({"filename": file.filename, "error": f"처리 실패: {exc}"})
             continue
 
-        #임베딩 저장
-
-        saved_path = save_embeddings(embedded_chunks)
         file_repo.file_save(db_file)
         # 검수용 페이지 텍스트. 파일 행이 먼저 있어야 외래키가 맞는다
         page_repo.save_pages(db_file.file_id, pages)
-        _schedule_graph_index(background, db_file.file_id)
+        num_chars = sum(len(p.text.strip()) for p in pages)
         logger.info(
-            "문서 업로드 완료: %s, file_id=%s, group=%s, pages=%d, chunks=%d, size=%d, %.1f초",
-            file.filename, db_file.file_id, group_id, len(pages), len(embedded_chunks), len(content),
+            "문서 업로드(검수 대기): %s, file_id=%s, group=%s, pages=%d, chars=%d, size=%d, %.1f초",
+            file.filename, db_file.file_id, group_id, len(pages), num_chars, len(content),
             time.perf_counter() - started,
         )
-
-
-        # 응답에는 임베딩 벡터는 빼고 미리보기용 필드만 담는다
-        preview_chunks = [
-            {k: v for k, v in asdict(c).items() if k != "embedding"} for c in embedded_chunks
-        ]
 
         results.append(
             {
                 "filename": file.filename,
-                "num_chunks": len(embedded_chunks),
-                "chunks_saved_to": str(saved_path.relative_to(BASE_DIR)),
-                "chunks": preview_chunks,
+                "file_id": db_file.file_id,
+                "review_status": "pending",
+                "num_pages": len({p.page for p in pages}),
+                "num_chars": num_chars,
             }
         )
 
