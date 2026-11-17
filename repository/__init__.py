@@ -19,6 +19,7 @@ from repository.spec_repository import SpecRepository
 from repository.email_repository import EmailRepository
 from repository.evidence_repository import EvidenceRepository
 from repository.prompt_repository import PromptRepository
+from repository.qa_log_repository import QaLogRepository
 from repository.task_repository import TaskRepository
 
 db = Database(str(Path(__file__).resolve().parent.parent / "storage" / "mail.db"))
@@ -35,3 +36,4 @@ evidence_repo = EvidenceRepository(db)
 customer_repo = CustomerRepository(db)
 customer_history_repo = CustomerHistoryRepository(db)
 skill_repo = SkillRepository(db)
+qa_log_repo = QaLogRepository(db)

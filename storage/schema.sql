@@ -355,6 +355,37 @@ create table if not exists access_log (
 CREATE INDEX IF NOT EXISTS idx_access_log_ts ON access_log(ts);
 CREATE INDEX IF NOT EXISTS idx_access_log_ip ON access_log(client_ip);
 
+-- qa_log: 질의응답 화면(/ask, /ask/attachments)의 질문 한 건과 그 결과. 화면의 좋음/아쉬움 평가가 나중에 붙는다.
+-- 실행 기록(run)은 웹 질문이면 SESSION_EVIDENCE_RETENTION_DAYS가 지나면 지워지므로, 비교에 필요한 값
+-- (모델, 도구 호출, 토큰)은 여기에 복사해 둔다. 이 표는 자동으로 지우지 않는다.
+CREATE TABLE IF NOT EXISTS qa_log (
+    log_id           TEXT PRIMARY KEY,          -- 'q' + 짧은 uuid
+    asked_at         TEXT NOT NULL,             -- 서버 지역 시각 ISO
+    client_ip        TEXT NOT NULL DEFAULT '',
+    endpoint         TEXT NOT NULL,             -- 'ask' | 'ask_attachments'
+    mode             TEXT NOT NULL,             -- 'claude' | 'local'
+    question         TEXT NOT NULL,
+    attachments_json TEXT,                      -- [{"filename", "type"}] (첨부 질문만)
+    status           TEXT NOT NULL,             -- 'ok' | 'error'
+    answer           TEXT,
+    error            TEXT,
+    sources_json     TEXT,                      -- 화면에 보낸 출처 그대로
+    validation_json  TEXT,                      -- 답변 근거 검증 결과
+    run_id           TEXT,
+    model            TEXT,
+    prompt_id        INTEGER,
+    tools_available  TEXT,                      -- 그때 에이전트에 있던 도구 이름 (JSON 목록)
+    tool_calls_json  TEXT,                      -- run.tool_calls_json 복사
+    tokens_in        INTEGER,
+    tokens_out       INTEGER,
+    duration_ms      REAL NOT NULL,
+    rating           TEXT,                      -- 'good' | 'bad' | NULL(평가 안 함)
+    comment          TEXT,
+    rated_at         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_qa_log_asked ON qa_log(asked_at);
+CREATE INDEX IF NOT EXISTS idx_qa_log_rating ON qa_log(rating);
+
 
 -- ===== 근거(evidence)와 에이전트 실행 기록 =====
 -- evidence: 에이전트가 읽은 근거 한 조각. 답변은 evidence_id로 인용하고, 서버가 소유자(task/session)를 검증한다.

@@ -1,6 +1,7 @@
 /** RAG 업로드/질의 API 클라이언트. 베이스 URL 규칙은 lib/http.ts 참고. */
 import { API_BASE, ApiError, request } from '../lib/http';
 import type {
+    AnswerRating,
     AppConfig,
     AskRequest,
     AskResponse,
@@ -154,5 +155,18 @@ export const ragApi = {
         form.append('rerank_top_n', String(payload.rerank_top_n));
         for (const f of files) form.append('files', f);
         return request<AskResponse>('/ask/attachments', { method: 'POST', body: form });
+    },
+
+    /** 답변 평가 (좋음/아쉬움, 의견). rating=null이면 평가를 지운다 */
+    sendFeedback(logId: string, rating: AnswerRating | null, comment: string): Promise<{ log_id: string }> {
+        return request<{ log_id: string }>('/ask/feedback', {
+            method: 'POST',
+            body: JSON.stringify({ log_id: logId, rating, comment }),
+        });
+    },
+
+    /** 질의응답 로그 내려받기 주소 (CSV, 엑셀에서 열린다) */
+    qaLogCsvUrl(rating?: 'rated'): string {
+        return `${API_BASE}/ask/logs?format=csv${rating ? `&rating=${rating}` : ''}`;
     },
 };

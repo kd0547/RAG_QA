@@ -10,8 +10,8 @@ import { GroupHome } from './GroupHome';
 import { GroupInfoSidebar } from './GroupInfoSidebar';
 import { ragApi, reviewPath } from './api';
 import { qaHistory, type QaTurn, type SentAttachment } from './qaHistory';
-import type { AskMode, AskSource, FileDetail, FileGroup, FileSummary, UploadResult } from './types';
-import { AlertIcon, CloseIcon, DocumentIcon, ImageIcon, PaperclipIcon, UploadIcon } from '../components/icons';
+import type { AnswerRating, AskMode, AskSource, FileDetail, FileGroup, FileSummary, UploadResult } from './types';
+import { AlertIcon, CloseIcon, DocumentIcon, DownloadIcon, ImageIcon, PaperclipIcon, ThumbIcon, UploadIcon } from '../components/icons';
 
 /**
  * TG RAG 콘솔
@@ -1102,7 +1102,7 @@ function Workspace({
             const res = sent.length
                 ? await ragApi.askWithAttachments(payload, sent.map((a) => a.file))
                 : await ragApi.ask(payload);
-            patch({ status: 'done', answer: res.answer, sources: res.sources });
+            patch({ status: 'done', answer: res.answer, sources: res.sources, logId: res.log_id ?? null });
         } catch (e) {
             patch({ status: 'error', error: errMessage(e) });
             if (mode === 'claude' && e instanceof ApiError && e.status === 503) {
@@ -1143,6 +1143,15 @@ function Workspace({
                                     대화 초기화
                                 </button>
                             )}
+                            <a
+                                href={ragApi.qaLogCsvUrl()}
+                                download
+                                title="서버에 남은 모든 질문·답변·평가를 CSV(엑셀)로 내려받습니다"
+                                className="h-7 px-2.5 rounded-lg inline-flex items-center gap-1.5 font-semibold hover:text-ink hover:bg-chip transition-colors"
+                            >
+                                <DownloadIcon />
+                                로그 내려받기
+                            </a>
                         </div>
                         <div className="mt-4 flex flex-col gap-10">
                             {turns.map((t) => (
@@ -1387,11 +1396,125 @@ function TurnView({ turn }: { turn: QaTurn }) {
                                 <p className="text-[13px] text-muted">(답변이 비어 있습니다)</p>
                             )}
                             {!!turn.sources?.length && <SourceList sources={turn.sources} />}
+                            {turn.logId && <FeedbackBar turn={turn} logId={turn.logId} />}
                         </>
                     )}
                 </div>
             </div>
         </article>
+    );
+}
+
+const RATING_BUTTONS: { rating: AnswerRating; label: string }[] = [
+    { rating: 'good', label: '좋아요' },
+    { rating: 'bad', label: '아쉬워요' },
+];
+
+/**
+ * 답변 평가. 버튼을 누르면 바로 서버(qa_log)에 저장하고, 같은 버튼을 다시 누르면 평가를 지운다.
+ * 의견은 선택이다. 아쉬워요를 누르면 의견 칸이 바로 열린다.
+ */
+function FeedbackBar({ turn, logId }: { turn: QaTurn; logId: string }) {
+    const rating = turn.rating ?? null;
+    const [commentOpen, setCommentOpen] = useState(false);
+    const [draft, setDraft] = useState(turn.comment ?? '');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [savedNote, setSavedNote] = useState<string | null>(null);
+
+    const save = async (nextRating: AnswerRating | null, nextComment: string, note: string): Promise<boolean> => {
+        setSaving(true);
+        setError(null);
+        try {
+            await ragApi.sendFeedback(logId, nextRating, nextComment);
+            qaHistory.update((prev) => prev.map((t) => (t.id === turn.id ? { ...t, rating: nextRating, comment: nextComment } : t)));
+            setSavedNote(note);
+            return true;
+        } catch (e) {
+            setError(errMessage(e));
+            return false;
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const choose = (next: AnswerRating) => {
+        if (saving) return;
+        if (rating === next) {
+            setCommentOpen(false);
+            void save(null, draft.trim(), '평가를 지웠습니다');
+            return;
+        }
+        if (next === 'bad') setCommentOpen(true);
+        void save(next, draft.trim(), '평가를 저장했습니다');
+    };
+
+    return (
+        <div className="mt-3">
+            <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
+                <span className="mr-1 text-muted">이 답변은 어땠나요?</span>
+                {RATING_BUTTONS.map(({ rating: r, label }) => {
+                    const on = rating === r;
+                    return (
+                        <button
+                            key={r}
+                            type="button"
+                            onClick={() => choose(r)}
+                            disabled={saving}
+                            aria-pressed={on}
+                            className={`h-7 px-2.5 rounded-lg inline-flex items-center gap-1.5 font-semibold transition-colors disabled:opacity-50 ${
+                                on
+                                    ? r === 'good' ? 'bg-brand text-white' : 'bg-danger text-white'
+                                    : 'text-muted hover:text-ink hover:bg-chip'
+                            }`}
+                        >
+                            <ThumbIcon down={r === 'bad'} />
+                            {label}
+                        </button>
+                    );
+                })}
+                {!commentOpen && (
+                    <button
+                        type="button"
+                        onClick={() => setCommentOpen(true)}
+                        className="h-7 px-2 rounded-lg font-semibold text-muted hover:text-ink hover:bg-chip transition-colors"
+                    >
+                        {turn.comment ? '의견 고치기' : '의견 남기기'}
+                    </button>
+                )}
+                {savedNote && !error && <span className="text-muted">· {savedNote}</span>}
+                {error && <span role="alert" className="text-danger">· 저장 실패: {error}</span>}
+            </div>
+            {commentOpen && (
+                <div className="mt-2 flex flex-col gap-1.5">
+                    <textarea
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        rows={2}
+                        maxLength={2000}
+                        placeholder="어떤 점이 좋았거나 아쉬웠나요? (예: 사양 값이 틀림, 근거 문서가 빠짐, 너무 느림)"
+                        className="w-full rounded-lg border border-divide bg-white px-3 py-2 text-[13px] leading-[19px] outline-none focus:border-brand resize-y"
+                    />
+                    <div className="flex gap-1.5">
+                        <button
+                            type="button"
+                            onClick={async () => { if (await save(rating, draft.trim(), '의견을 저장했습니다')) setCommentOpen(false); }}
+                            disabled={saving}
+                            className="h-7 px-3 rounded-lg bg-ink text-white text-[12px] font-semibold disabled:opacity-40"
+                        >
+                            의견 저장
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => { setDraft(turn.comment ?? ''); setCommentOpen(false); }}
+                            className="h-7 px-3 rounded-lg text-[12px] font-semibold text-muted hover:text-ink hover:bg-chip"
+                        >
+                            닫기
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
     );
 }
 

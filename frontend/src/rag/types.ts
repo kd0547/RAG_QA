@@ -118,4 +118,8 @@ export interface AskResponse {
     answer: string;
     sources: AskSource[];
     attachments?: AskAttachmentInfo[];
+    /** 서버 질의응답 로그 ID. 평가(POST /ask/feedback)에 쓴다. 로그를 못 남겼으면 null */
+    log_id?: string | null;
 }
+
+export type AnswerRating = 'good' | 'bad';

@@ -2,19 +2,24 @@
 from __future__ import annotations
 
 import base64
+import csv
+import io
 import logging
 import shutil
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
 from agent.agent import get_agent, run_agent_temp_attachments
+from app import qa_log
 from entity.type import Attachment
 from parser.file_parser import SUPPORTED_EXTENSIONS
+from repository import qa_log_repo
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +40,7 @@ class QuestionRequest(BaseModel):
 from agent.agent import run_agent
 
 @router.post("/ask")
-async def ask_question(payload: QuestionRequest) -> dict:
+async def ask_question(payload: QuestionRequest, request: Request) -> dict:
     question = payload.question.strip()
     mode = payload.mode
     if not question:
@@ -47,7 +52,10 @@ async def ask_question(payload: QuestionRequest) -> dict:
     logger.debug("질문 수신: mode=%s, question=%s", mode, question[:200])
     try:
         result = run_agent(user_message, mode)
-    except RuntimeError as exc:
+    except Exception as exc:
+        qa_log.record_failure(request, "ask", mode, question, started, exc)
+        if not isinstance(exc, RuntimeError):
+            raise
         # 모델 미로드 등. 클라이언트에는 503만 가므로 원인을 남긴다
         logger.warning("질문 처리 불가(503): mode=%s, %s", mode, exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -58,12 +66,14 @@ async def ask_question(payload: QuestionRequest) -> dict:
         "질문 응답 완료: mode=%s, question_len=%d, answer_len=%d, sources=%d, %.1f초",
         mode, len(question), len(str(result["answer"])), len(sources), time.perf_counter() - started,
     )
+    log_id = qa_log.record_answer(request, "ask", mode, question, started, result, sources)
 
     return {
         "question": question,
         "answer": result["answer"],
         "sources": sources,
         "validation": result.get("validation"),
+        "log_id": log_id,
     }
 
 
@@ -130,6 +140,7 @@ async def _build_attachments(files: list[UploadFile], work_dir: Path) -> list[At
 
 @router.post("/ask/attachments")
 async def ask_question_with_attachments(
+    request: Request,
     question: Annotated[str, Form()],
     mode: Annotated[Literal["claude", "local"], Form()] = "local",
     query_top_n: Annotated[int | None, Form()] = None,   # 무시됨 (QuestionRequest 참고)
@@ -152,9 +163,13 @@ async def ask_question_with_attachments(
             "첨부 질문 수신: mode=%s, attachments=%s, question=%s",
             mode, [a.filename for a in attachments], question[:200],
         )
+        attachment_info = [{"filename": a.filename, "type": a.type} for a in attachments]
         try:
             result = run_agent_temp_attachments(question, mode, attachments=attachments)
-        except RuntimeError as exc:
+        except Exception as exc:
+            qa_log.record_failure(request, "ask_attachments", mode, question, started, exc, attachment_info)
+            if not isinstance(exc, RuntimeError):
+                raise
             logger.warning("첨부 질문 처리 불가(503): mode=%s, %s", mode, exc)
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     finally:
@@ -165,10 +180,90 @@ async def ask_question_with_attachments(
         "첨부 질문 응답 완료: mode=%s, attachments=%d, question_len=%d, answer_len=%d, sources=%d, %.1f초",
         mode, len(attachments), len(question), len(str(result["answer"])), len(sources), time.perf_counter() - started,
     )
+    log_id = qa_log.record_answer(
+        request, "ask_attachments", mode, question, started, result, sources, attachment_info,
+    )
     return {
         "question": question,
         "answer": result["answer"],
         "sources": sources,
         "validation": result.get("validation"),
-        "attachments": [{"filename": a.filename, "type": a.type} for a in attachments],
+        "attachments": attachment_info,
+        "log_id": log_id,
     }
+
+
+# ---------- 질의응답 평가와 로그 내려받기 ----------
+# 화면의 좋음/아쉬움 버튼이 /ask/feedback 으로 평가를 붙이고, 검토용으로 /ask/logs 에서 모아 내려받는다.
+
+GRAPH_TOOLS = frozenset({"graph_search", "read_graph_facts"})
+
+
+class FeedbackRequest(BaseModel):
+    log_id: str
+    rating: Literal["good", "bad"] | None = None   # None이면 평가를 지운다
+    comment: str | None = None
+
+
+@router.post("/ask/feedback")
+def ask_feedback(payload: FeedbackRequest) -> dict:
+    if not qa_log_repo.set_feedback(payload.log_id, payload.rating, payload.comment):
+        raise HTTPException(status_code=404, detail="질의응답 기록을 찾을 수 없습니다.")
+    return {"log_id": payload.log_id, "rating": payload.rating}
+
+
+@router.get("/ask/logs")
+def ask_logs(
+    since: str | None = None,
+    until: str | None = None,
+    rating: Literal["good", "bad", "rated", "unrated"] | None = None,
+    format: Literal["json", "csv"] = "json",
+):
+    """질의응답 로그. since/until은 'YYYY-MM-DD' 또는 ISO 시각 (until은 그 시각 전까지).
+
+    json: 출처 본문·도구 호출까지 전부. csv: 엑셀로 훑어보는 요약 (BOM 포함 UTF-8).
+    """
+    logs = qa_log_repo.list_logs(since=since, until=until, rating=rating)
+    if format == "json":
+        return {"count": len(logs), "logs": logs}
+    stamp = time.strftime("%Y%m%d-%H%M")
+    return Response(
+        content="﻿" + _logs_csv(logs),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="qa_log_{stamp}.csv"'},
+    )
+
+
+def _tool_summary(calls: list[dict] | None) -> tuple[int, int, str]:
+    """(도구 호출 수, 그래프 도구 호출 수, '도구×횟수' 요약)."""
+    counts = Counter(c.get("tool", "?") for c in calls or [] if isinstance(c, dict))
+    graph = sum(n for name, n in counts.items() if name in GRAPH_TOOLS)
+    return sum(counts.values()), graph, ", ".join(f"{name}×{n}" for name, n in counts.most_common())
+
+
+_CSV_HEADER = [
+    "질문 시각", "접속 주소", "평가", "의견", "질문", "답변", "상태", "오류", "모드", "모델",
+    "걸린 시간(초)", "도구 호출 수", "그래프 도구 호출 수", "도구 호출", "인용 출처 수", "읽은 출처 수",
+    "입력 토큰", "출력 토큰", "첨부", "log_id", "run_id",
+]
+_RATING_LABEL = {"good": "좋음", "bad": "아쉬움"}
+
+
+def _logs_csv(logs: list[dict]) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(_CSV_HEADER)
+    for log in logs:
+        total, graph, summary = _tool_summary(log.get("tool_calls"))
+        sources = log.get("sources") or []
+        writer.writerow([
+            log["asked_at"], log["client_ip"], _RATING_LABEL.get(log.get("rating") or "", ""), log.get("comment") or "",
+            log["question"], log.get("answer") or "", log["status"], log.get("error") or "", log["mode"],
+            log.get("model") or "", round((log.get("duration_ms") or 0) / 1000, 1), total, graph, summary,
+            sum(1 for s in sources if s.get("cited")), len(sources),
+            log.get("tokens_in") if log.get("tokens_in") is not None else "",
+            log.get("tokens_out") if log.get("tokens_out") is not None else "",
+            ", ".join(a.get("filename", "") for a in log.get("attachments") or []),
+            log["log_id"], log.get("run_id") or "",
+        ])
+    return buffer.getvalue()

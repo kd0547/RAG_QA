@@ -7,7 +7,7 @@
  * - 답을 기다리던 중 새로고침하면 그 질문은 실패로 표시한다
  * - 저장소는 각자의 브라우저다. 서버에는 저장하지 않는다
  */
-import type { AskMode, AskSource } from './types';
+import type { AnswerRating, AskMode, AskSource } from './types';
 
 /** 보낸 질문에 붙였던 파일. previewUrl은 이 페이지를 연 동안만 있다 (이미지 object URL) */
 export interface SentAttachment {
@@ -30,6 +30,11 @@ export interface QaTurn {
     answer?: string;
     sources?: AskSource[];
     error?: string;
+    /** 서버 질의응답 로그 ID. 있으면 답변 아래에 평가 버튼이 나온다 */
+    logId?: string | null;
+    /** 서버에 저장된 평가 (화면에 다시 그리기 위한 사본) */
+    rating?: AnswerRating | null;
+    comment?: string;
 }
 
 const STORAGE_KEY = 'tg-rag.qa-turns.v1';

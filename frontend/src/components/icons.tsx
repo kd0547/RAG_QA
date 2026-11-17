@@ -148,3 +148,14 @@ export function ImageIcon({ className = 'w-4 h-4' }: IconProps) {
         </svg>
     );
 }
+
+/** 답변 평가 엄지. down이면 아래로 뒤집는다 */
+export function ThumbIcon({ className = 'w-3.5 h-3.5', down = false }: IconProps & { down?: boolean }) {
+    return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"
+            style={down ? { transform: 'scaleY(-1)' } : undefined}>
+            <path strokeLinejoin="round" d="M7.5 10.5v9h-3a1 1 0 01-1-1v-7a1 1 0 011-1h3z" />
+            <path strokeLinejoin="round" d="M7.5 10.5l3.6-6.3a1.6 1.6 0 012.95 1.05l-.55 3.75h5.1a2 2 0 011.97 2.34l-1.2 6.6a2 2 0 01-1.97 1.66H7.5" />
+        </svg>
+    );
+}
