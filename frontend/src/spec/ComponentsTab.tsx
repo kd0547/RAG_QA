@@ -20,6 +20,7 @@ export function ComponentsTab({
     components,
     onChanged,
     onAddDefaultAttributes,
+    onAttributesChanged,
 }: {
     meta: SpecMeta | null;
     attributes: SpecAttribute[];
@@ -27,6 +28,8 @@ export function ComponentsTab({
     components: Component[] | null;
     onChanged: () => Promise<void>;
     onAddDefaultAttributes: () => Promise<void>;
+    /** 사양 표에서 새 속성을 만들면 속성 사전을 다시 받는다 */
+    onAttributesChanged: () => Promise<void>;
 }) {
     const [activeId, setActiveId] = useState<ActiveId>(() => new URLSearchParams(window.location.search).get('component'));
     const [detail, setDetail] = useState<ComponentDetail | null>(null);
@@ -223,12 +226,16 @@ export function ComponentsTab({
                                 title="부품 정보"
                                 aside={
                                     <div className="flex items-center gap-2">
-                                        {!isNew && detail && (
-                                            <button type="button" onClick={() => void remove()} disabled={busy || detail.product_count > 0} title={detail.product_count > 0 ? '제품에 연결된 부품은 지울 수 없습니다. 제품에서 먼저 빼세요.' : undefined} className={btnDanger}><TrashIcon />삭제</button>
+                                        {!isNew && detail && (detail.product_count > 0 ? (
+                                            <span className="text-[11.5px] text-muted">제품에 연결돼 있어 삭제할 수 없습니다</span>
+                                        ) : (
+                                            <button type="button" onClick={() => void remove()} disabled={busy} className={btnDanger}><TrashIcon />삭제</button>
+                                        ))}
+                                        {(isNew || dirty) && (
+                                            <button type="button" onClick={() => void save()} disabled={!canSave} className={btnPrimary}>
+                                                {busy ? '저장 중…' : isNew ? '등록' : '저장'}
+                                            </button>
                                         )}
-                                        <button type="button" onClick={() => void save()} disabled={!canSave} className={btnPrimary}>
-                                            {busy ? '저장 중…' : isNew ? '등록' : '저장'}
-                                        </button>
                                     </div>
                                 }
                             >
@@ -252,33 +259,35 @@ export function ComponentsTab({
 
                             {!isNew && detail && (
                                 <>
-                                    <Card title="부품 사양">
+                                    <section aria-label="부품 사양" className="rounded-2xl border border-divide bg-white pb-2">
                                         <SpecValuesEditor
+                                            key={detail.id}
                                             ownerType="component"
                                             ownerId={detail.id}
+                                            title="부품 사양"
                                             specs={detail.specs}
                                             attributes={attributes}
                                             meta={meta}
                                             scope={detail.kind}
                                             onChanged={refreshDetail}
                                             onAddDefaultAttributes={onAddDefaultAttributes}
+                                            onAttributesChanged={onAttributesChanged}
                                         />
-                                    </Card>
+                                    </section>
+                                    {/* 부품 DB는 승인 부품 카탈로그라 보통 제품 연결이 없다. 있을 때만 보여준다 */}
+                                    {detail.products.length > 0 && (
                                     <Card title="사용 제품">
-                                        {detail.products.length === 0 ? (
-                                            <p className="text-[12.5px] text-muted py-1">이 부품을 쓰는 제품이 없습니다. 제품 탭의 구성 부품에서 연결합니다.</p>
-                                        ) : (
-                                            <ul className="flex flex-wrap gap-2">
+                                            <ul className="flex flex-wrap gap-x-4 gap-y-1.5">
                                                 {detail.products.map((p) => (
-                                                    <li key={p.id} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12.5px]">
+                                                    <li key={p.id} className="inline-flex items-center gap-1.5 text-[12.5px]">
                                                         <span className="font-semibold">{p.model}</span>
                                                         {p.name && <span className="text-muted">{p.name}</span>}
                                                         <Pill tone={p.is_option ? 'warn' : 'brand'}>{p.is_option ? '옵션' : '기본'}</Pill>
                                                     </li>
                                                 ))}
                                             </ul>
-                                        )}
                                     </Card>
+                                    )}
                                 </>
                             )}
 

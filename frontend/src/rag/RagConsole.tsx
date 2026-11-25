@@ -281,6 +281,22 @@ export function RagConsole() {
         refreshDocs();
     };
 
+    /**
+     * 그룹 삭제. 서버는 빈 그룹만 지우므로, 남은 파일은 먼저 미분류로 옮긴다
+     * (그룹 옮기기 API가 검색 청크의 group_id도 함께 바꾼다). 옮길 파일은 서버 목록을 새로 받아 정한다.
+     */
+    const deleteGroup = async (groupId: string) => {
+        try {
+            const files = await ragApi.listFiles();
+            const fileIds = files.filter((file) => file.group_id === groupId).map((file) => file.file_id);
+            if (fileIds.length > 0) await ragApi.setFilesGroup(fileIds, null);
+            await ragApi.deleteGroup(groupId);
+        } finally {
+            // 파일만 옮겨지고 삭제가 실패해도 화면이 서버 상태와 맞도록 다시 불러온다
+            refreshDocs();
+        }
+    };
+
     const updateGroupDescription = async (groupId: string, description: string) => {
         const updated = await ragApi.updateGroup(groupId, { description });
         setGroups((current) => current.map((group) => group.id === groupId ? updated : group));
@@ -376,6 +392,7 @@ export function RagConsole() {
                             error={groupsError || docsError}
                             onCreate={createGroup}
                             onUpdate={updateGroup}
+                            onDelete={deleteGroup}
                             onOpenGroup={(id) => navigate(`/?group=${encodeURIComponent(id)}`)}
                             onOpenUngrouped={() => navigate('/?unassigned=1')}
                             onRefresh={refreshDocs}

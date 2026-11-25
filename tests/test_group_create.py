@@ -13,7 +13,12 @@ from app.routers import group as group_router  # noqa: E402
 from entity.file import create_file  # noqa: E402
 from entity.group import DEFAULT_GROUPS  # noqa: E402
 from repository.file_repository import FileRepository  # noqa: E402
-from repository.group_repository import DuplicateGroupNameError, GroupNotFoundError, GroupRepository  # noqa: E402
+from repository.group_repository import (  # noqa: E402
+    DuplicateGroupNameError,
+    GroupNotEmptyError,
+    GroupNotFoundError,
+    GroupRepository,
+)
 from repository.repo_connect import Database  # noqa: E402
 
 
@@ -185,3 +190,45 @@ def test_editing_legacy_default_keeps_it_on_prune(repos):
     with db.get_conn() as conn:
         row = conn.execute("SELECT created_at, updated_at FROM file_group WHERE id = 'manual'").fetchone()
     assert row["updated_at"] != row["created_at"]
+
+
+def test_delete_group_only_when_empty(repos):
+    _, groups, files = repos
+    empty = groups.create("빈 그룹")
+    used = groups.create("파일 있는 그룹")
+    file = create_file(original_name="spec.pdf", stored_path="uploads/spec.pdf", sha256="spec", group_id=used["id"])
+    files.file_save(file)
+
+    groups.delete(empty["id"])
+    assert not groups.exists(empty["id"])
+    with pytest.raises(GroupNotFoundError):
+        groups.delete(empty["id"])
+    with pytest.raises(GroupNotEmptyError, match="1개"):
+        groups.delete(used["id"])
+    assert groups.exists(used["id"])
+    assert files.get_file_by_id(file.file_id).group_id == used["id"]
+
+    # 파일을 미분류로 옮기면 지울 수 있다
+    files.update_group([file.file_id], None)
+    groups.delete(used["id"])
+    assert groups.list_all() == []
+    assert files.get_file_by_id(file.file_id).group_id is None
+
+
+def test_delete_group_api_contract(repos, monkeypatch):
+    _, groups, files = repos
+    monkeypatch.setattr(group_router, "group_repo", groups)
+    empty = groups.create("빈 그룹")
+    used = groups.create("파일 있는 그룹")
+    files.file_save(create_file(original_name="a.pdf", stored_path="uploads/a.pdf", sha256="a", group_id=used["id"]))
+
+    assert group_router.delete_group(empty["id"]) is None
+    for group_id, status in ((empty["id"], 404), (used["id"], 409)):
+        with pytest.raises(HTTPException) as error:
+            group_router.delete_group(group_id)
+        assert error.value.status_code == status
+    assert [group["id"] for group in group_router.list_groups()] == [used["id"]]
+
+    delete_route = next(route for route in group_router.router.routes if "DELETE" in route.methods)
+    assert delete_route.path == "/groups/{group_id}"
+    assert delete_route.status_code == 204

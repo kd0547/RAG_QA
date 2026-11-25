@@ -10,6 +10,8 @@ interface GroupHomeProps {
     error: string;
     onCreate: (name: string, description: string) => Promise<void>;
     onUpdate: (groupId: string, name: string, description: string) => Promise<void>;
+    /** 그룹 삭제. 남은 파일은 미분류로 옮긴 뒤 지운다 */
+    onDelete: (groupId: string) => Promise<void>;
     onOpenGroup: (id: string) => void;
     onOpenUngrouped: () => void;
     onRefresh: () => void;
@@ -22,6 +24,7 @@ export function GroupHome({
     error,
     onCreate,
     onUpdate,
+    onDelete,
     onOpenGroup,
     onOpenUngrouped,
     onRefresh,
@@ -36,6 +39,8 @@ export function GroupHome({
     const [editDescription, setEditDescription] = useState('');
     const [updating, setUpdating] = useState(false);
     const [updateError, setUpdateError] = useState('');
+    const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [deleteError, setDeleteError] = useState<{ groupId: string; message: string } | null>(null);
 
     const closeForm = () => {
         setFormOpen(false);
@@ -93,6 +98,28 @@ export function GroupHome({
             setUpdateError(cause instanceof Error ? cause.message : '문서 그룹을 수정하지 못했습니다. 다시 시도해 주세요.');
         } finally {
             setUpdating(false);
+        }
+    };
+
+    const deleteGroup = async (group: FileGroup) => {
+        if (deletingId) return;
+        const message = group.file_count > 0
+            ? `'${group.name}' 그룹을 삭제할까요?
+
+그룹의 파일 ${group.file_count.toLocaleString('ko-KR')}개는 지우지 않고 미분류로 옮깁니다.`
+            : `'${group.name}' 그룹을 삭제할까요?`;
+        if (!window.confirm(message)) return;
+        setDeletingId(group.id);
+        setDeleteError(null);
+        try {
+            await onDelete(group.id);
+        } catch (cause) {
+            setDeleteError({
+                groupId: group.id,
+                message: cause instanceof Error ? cause.message : '문서 그룹을 삭제하지 못했습니다. 다시 시도해 주세요.',
+            });
+        } finally {
+            setDeletingId(null);
         }
     };
 
@@ -254,7 +281,19 @@ export function GroupHome({
                                                 >
                                                     수정
                                                 </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void deleteGroup(group)}
+                                                    disabled={updating || deletingId !== null}
+                                                    aria-label={`${group.name} 그룹 삭제`}
+                                                    className="-ml-1.5 rounded-lg px-2 py-1 text-[11.5px] font-semibold text-ink/70 hover:bg-danger-surface hover:text-danger focus-visible:outline-2 focus-visible:outline-danger disabled:opacity-50"
+                                                >
+                                                    {deletingId === group.id ? '삭제 중…' : '삭제'}
+                                                </button>
                                             </div>
+                                            {deleteError?.groupId === group.id && (
+                                                <p role="alert" className="mt-2 break-words text-[11.5px] text-danger">{deleteError.message}</p>
+                                            )}
                                             <button
                                                 type="button"
                                                 onClick={() => onOpenGroup(group.id)}

@@ -57,6 +57,11 @@ export const ragApi = {
         });
     },
 
+    /** 빈 문서 그룹 삭제. 파일이 남아 있으면 서버가 409로 거부한다 (먼저 setFilesGroup으로 옮긴다) */
+    deleteGroup(groupId: string): Promise<void> {
+        return request<void>(`/groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' });
+    },
+
     updateFileDescription(fileId: string, description: string): Promise<{ file_id: string; description: string }> {
         return request(`/file/${encodeURIComponent(fileId)}/description`, {
             method: 'PATCH',

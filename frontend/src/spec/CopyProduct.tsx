@@ -120,7 +120,7 @@ export function CopyProductDialog({ source, products, onDone, onCancel }: {
                 </p>
 
                 <div className="mt-4 flex flex-col gap-3.5">
-                    <Field label="새 모델명" htmlFor="copy-model" hint={duplicate ? '이미 있는 모델명입니다.' : '예: A650-GA70-PU03'}>
+                    <Field label="새 모델명" htmlFor="copy-model" hint={duplicate ? '이미 있는 모델명입니다.' : trimmed === `${source.model}-` || !trimmed ? `'${source.model}-' 뒤에 붙일 이름을 입력하세요. 예: ${source.model}-GA70-PU03` : undefined}>
                         <input id="copy-model" ref={modelRef} value={model} onChange={(e) => setModel(e.target.value)} disabled={busy} maxLength={50} className={inputCls} />
                     </Field>
                     <Field label="제품 이름" htmlFor="copy-name">

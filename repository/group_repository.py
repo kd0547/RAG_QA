@@ -15,6 +15,10 @@ class GroupNotFoundError(Exception):
     """수정할 문서 그룹이 없을 때 발생한다."""
 
 
+class GroupNotEmptyError(Exception):
+    """파일이 남아 있는 문서 그룹을 지우려 할 때 발생한다."""
+
+
 def _normalize_name(name: str) -> str:
     name = " ".join(name.split())
     if not name:
@@ -152,6 +156,25 @@ class GroupRepository:
             "updated_at": timestamps["updated_at"],
             "file_count": file_count,
         }
+
+    def delete(self, group_id: str) -> None:
+        """빈 문서 그룹을 지운다.
+
+        파일이 남아 있으면 지우지 않는다. 그대로 지우면 DB의 file.group_id는 NULL이 되지만
+        검색 청크(Chroma) 메타데이터에는 지운 group_id가 남아 그룹 필터 검색이 어긋난다.
+        파일은 먼저 PUT /files/group 으로 옮겨야 한다 (청크 메타데이터도 함께 바뀐다).
+        """
+        with self.db.transaction() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM file_group WHERE id = ?", (group_id,)).fetchone() is None:
+                raise GroupNotFoundError("문서 그룹을 찾을 수 없습니다.")
+            file_count = conn.execute(
+                "SELECT COUNT(*) FROM file WHERE group_id = ?",
+                (group_id,),
+            ).fetchone()[0]
+            if file_count:
+                raise GroupNotEmptyError(f"그룹에 파일 {file_count}개가 남아 있습니다. 파일을 먼저 다른 그룹이나 미분류로 옮겨 주세요.")
+            conn.execute("DELETE FROM file_group WHERE id = ?", (group_id,))
 
     def prune_unused_defaults(self) -> int:
         """수정도 사용도 되지 않은 과거 자동 생성 그룹만 제거한다."""

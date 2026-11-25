@@ -35,6 +35,17 @@ export function SpecSection() {
     const [attributes, setAttributes] = useState<SpecAttribute[] | null>(null);
     const [components, setComponents] = useState<Component[] | null>(null);
     const [loadError, setLoadError] = useState('');
+    /** 한 번 연 탭은 숨겨 두고 다시 그리지 않는다 (속성 탭에 다녀와도 고르던 제품·입력 중인 값이 남는다) */
+    const [visited, setVisited] = useState<Set<Tab>>(() => new Set([tab]));
+
+    function openTab(next: Tab) {
+        setTab(next);
+        setVisited((prev) => (prev.has(next) ? prev : new Set([...prev, next])));
+        // 탭도 주소에 남긴다 (새로고침해도 같은 탭)
+        const url = new URL(window.location.href);
+        if (next === 'products') url.searchParams.delete('tab'); else url.searchParams.set('tab', next);
+        window.history.replaceState(window.history.state, '', url);
+    }
 
     const reloadAttributes = useCallback(async () => {
         setAttributes(await specApi.listAttributes());
@@ -72,7 +83,7 @@ export function SpecSection() {
                             type="button"
                             role="tab"
                             aria-selected={tab === t.key}
-                            onClick={() => setTab(t.key)}
+                            onClick={() => openTab(t.key)}
                             className={`h-7 px-3 rounded-md text-[12px] font-semibold transition-colors ${
                                 tab === t.key ? 'bg-white text-ink shadow-[0_1px_2px_rgba(20,28,43,0.10)]' : 'text-muted hover:text-ink'
                             }`}
@@ -87,35 +98,51 @@ export function SpecSection() {
 
             {loadError ? (
                 <div className="p-6"><Notice kind="error">{loadError}</Notice></div>
-            ) : tab === 'products' ? (
-                <ProductsTab
-                    meta={meta}
-                    attributes={attributes ?? []}
-                    components={components ?? []}
-                    onAddDefaultAttributes={addDefaultAttributes}
-                    onComponentsChanged={() => void reloadComponents()}
-                />
-            ) : tab === 'components' ? (
-                <ComponentsTab
-                    meta={meta}
-                    attributes={attributes ?? []}
-                    components={components}
-                    onChanged={reloadComponents}
-                    onAddDefaultAttributes={addDefaultAttributes}
-                />
-            ) : tab === 'attributes' ? (
-                <AttributesTab meta={meta} attributes={attributes} onChanged={reloadAttributes} onAddDefaults={addDefaultAttributes} />
             ) : (
-                <ImportTab
-                    meta={meta}
-                    attributes={attributes ?? []}
-                    onImported={async (ownerType) => {
-                        // 새 속성·부품이 생겼을 수 있으니 공유 목록을 다시 받는다
-                        await reloadAttributes();
-                        if (ownerType === 'component') await reloadComponents();
-                    }}
-                    onOpenTab={(next) => setTab(next)}
-                />
+                <>
+                    {visited.has('products') && (
+                        <div className={tab === 'products' ? 'contents' : 'hidden'}>
+                            <ProductsTab
+                                meta={meta}
+                                attributes={attributes ?? []}
+                                onAddDefaultAttributes={addDefaultAttributes}
+                                onAttributesChanged={reloadAttributes}
+                                onComponentsChanged={() => void reloadComponents()}
+                            />
+                        </div>
+                    )}
+                    {visited.has('components') && (
+                        <div className={tab === 'components' ? 'contents' : 'hidden'}>
+                            <ComponentsTab
+                                meta={meta}
+                                attributes={attributes ?? []}
+                                components={components}
+                                onChanged={reloadComponents}
+                                onAddDefaultAttributes={addDefaultAttributes}
+                                onAttributesChanged={reloadAttributes}
+                            />
+                        </div>
+                    )}
+                    {visited.has('attributes') && (
+                        <div className={tab === 'attributes' ? 'contents' : 'hidden'}>
+                            <AttributesTab meta={meta} attributes={attributes} onChanged={reloadAttributes} onAddDefaults={addDefaultAttributes} />
+                        </div>
+                    )}
+                    {visited.has('import') && (
+                        <div className={tab === 'import' ? 'contents' : 'hidden'}>
+                            <ImportTab
+                                meta={meta}
+                                attributes={attributes ?? []}
+                                onImported={async (ownerType) => {
+                                    // 새 속성·부품이 생겼을 수 있으니 공유 목록을 다시 받는다
+                                    await reloadAttributes();
+                                    if (ownerType === 'component') await reloadComponents();
+                                }}
+                                onOpenTab={(next) => openTab(next)}
+                            />
+                        </div>
+                    )}
+                </>
             )}
         </div>
     );

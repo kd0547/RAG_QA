@@ -1,9 +1,9 @@
-"""문서 그룹 목록·생성·수정 API. 파일 등록과 그룹 이동은 app/routers/files.py가 담당한다."""
+"""문서 그룹 목록·생성·수정·삭제 API. 파일 등록과 그룹 이동은 app/routers/files.py가 담당한다."""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from repository import group_repo
-from repository.group_repository import DuplicateGroupNameError, GroupNotFoundError
+from repository.group_repository import DuplicateGroupNameError, GroupNotEmptyError, GroupNotFoundError
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 
@@ -49,3 +49,14 @@ def update_group(group_id: str, body: GroupUpdateBody) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/{group_id}", status_code=204)
+def delete_group(group_id: str) -> None:
+    """빈 문서 그룹을 지운다. 파일이 남아 있으면 409 (화면이 파일을 먼저 미분류로 옮긴다)."""
+    try:
+        group_repo.delete(group_id)
+    except GroupNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GroupNotEmptyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

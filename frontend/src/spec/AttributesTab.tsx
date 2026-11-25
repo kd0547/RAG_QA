@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { TrashIcon } from '../components/icons';
 import { specApi, type AttributeInput, type DataType, type GraphMode, type SpecAttribute, type SpecMeta } from './api';
 import { GraphModeCell, type GraphChoices } from './GraphModeCell';
-import { btnGhost, btnPrimary, btnTiny, errorMessage, labelOf, smallInputCls } from './styles';
+import { autoAttributeKey, btnGhost, btnPrimary, btnTiny, errorMessage, labelOf, nextSortOrder, sameNameAttribute, smallInputCls } from './styles';
 import { Notice } from './ui';
 
 const EMPTY: AttributeInput = { key: '', name: '', category: 'other', data_type: 'text', unit: '', description: '', sort_order: 0 };
@@ -25,6 +25,8 @@ export function AttributesTab({
 }) {
     const [adding, setAdding] = useState(false);
     const [draft, setDraft] = useState<AttributeInput>(EMPTY);
+    /** 키를 직접 정할 때만 연다. 평소에는 이름에서 자동으로 만든다 */
+    const [customKey, setCustomKey] = useState(false);
     const [editingKey, setEditingKey] = useState<string | null>(null);
     const [editDraft, setEditDraft] = useState<Editable>(EMPTY);
     const [busy, setBusy] = useState(false);
@@ -55,10 +57,11 @@ export function AttributesTab({
 
     const create = async () => {
         const ok = await run(async () => {
-            const saved = await specApi.createAttribute({ ...draft, key: draft.key.trim().toLowerCase(), sort_order: Number(draft.sort_order) || 0 });
+            const key = customKey && draft.key.trim() ? draft.key.trim().toLowerCase() : autoAttributeKey(draft.name.trim(), (attributes ?? []).map((a) => a.key));
+            const saved = await specApi.createAttribute({ ...draft, key, name: draft.name.trim(), unit: draft.data_type === 'number' ? draft.unit.trim() : '', sort_order: nextSortOrder(attributes ?? [], draft.category) });
             return `'${saved.name}' 속성을 추가했습니다.`;
         }, '속성을 추가하지 못했습니다.');
-        if (ok) { setDraft(EMPTY); setAdding(false); }
+        if (ok) { setDraft(EMPTY); setCustomKey(false); setAdding(false); }
     };
 
     const saveEdit = async () => {
@@ -103,7 +106,9 @@ export function AttributesTab({
     const grouped = new Map<string, SpecAttribute[]>();
     for (const a of attributes ?? []) grouped.set(a.category, [...(grouped.get(a.category) ?? []), a]);
 
-    const canCreate = !busy && /^[a-z][a-z0-9_]{1,49}$/.test(draft.key.trim().toLowerCase()) && draft.name.trim().length > 0;
+    const duplicate = sameNameAttribute(attributes ?? [], draft.name);
+    const keyOk = !customKey || /^[a-z][a-z0-9_]{1,49}$/.test(draft.key.trim().toLowerCase());
+    const canCreate = !busy && keyOk && draft.name.trim().length > 0 && !duplicate;
 
     return (
         <main className="flex-1 min-w-0 md:overflow-y-auto bg-surface px-4 py-6 sm:p-8">
@@ -134,22 +139,32 @@ export function AttributesTab({
                 {adding && (
                     <section aria-label="새 속성" className="mt-4 rounded-2xl border border-brand/25 bg-brand-tint px-4 py-4">
                         <p className="text-[12px] font-semibold">새 속성</p>
-                        <div className="mt-2 grid grid-cols-2 md:grid-cols-[1.2fr_1.4fr_1fr_1fr_0.7fr_1.6fr_0.6fr] gap-2">
-                            <input value={draft.key} onChange={(e) => setDraft((d) => ({ ...d, key: e.target.value }))} placeholder="키 (예: ram_max_gb)" aria-label="속성 키" className={`${smallInputCls} font-mono`} />
-                            <input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} placeholder="이름 (예: 메모리 최대 용량)" aria-label="속성 이름" className={smallInputCls} />
-                            <select value={draft.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))} aria-label="분류" className={smallInputCls}>
+                        <form onSubmit={(e) => { e.preventDefault(); if (canCreate) void create(); }} className="mt-2 flex flex-wrap items-center gap-2">
+                            <input autoFocus value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} placeholder="이름 (예: 메모리 최대 용량)" aria-label="속성 이름" className={`${smallInputCls} !w-[220px]`} />
+                            <select value={draft.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))} aria-label="분류" className={`${smallInputCls} !w-[130px]`}>
                                 {categories.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                             </select>
-                            <select value={draft.data_type} onChange={(e) => setDraft((d) => ({ ...d, data_type: e.target.value as DataType }))} aria-label="자료형" className={smallInputCls}>
+                            <select value={draft.data_type} onChange={(e) => setDraft((d) => ({ ...d, data_type: e.target.value as DataType }))} aria-label="값 종류" className={`${smallInputCls} !w-[110px]`}>
                                 {dataTypes.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                             </select>
-                            <input value={draft.unit} onChange={(e) => setDraft((d) => ({ ...d, unit: e.target.value }))} placeholder="단위" aria-label="단위" className={smallInputCls} />
-                            <input value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))} placeholder="설명 (입력 예시 등)" aria-label="설명" className={smallInputCls} />
-                            <input type="number" value={draft.sort_order} onChange={(e) => setDraft((d) => ({ ...d, sort_order: Number(e.target.value) }))} placeholder="순서" aria-label="정렬 순서" className={smallInputCls} />
-                        </div>
-                        <div className="mt-2 flex items-center justify-between gap-2">
-                            <p className="text-[11px] text-muted">키는 영문 소문자로 시작하고 영문 소문자·숫자·_ 만 씁니다. 저장 후에는 바꿀 수 없습니다.</p>
-                            <button type="button" onClick={() => void create()} disabled={!canCreate} className={`${btnPrimary} !h-8`}>{busy ? '저장 중…' : '추가'}</button>
+                            {draft.data_type === 'number' && (
+                                <input value={draft.unit} onChange={(e) => setDraft((d) => ({ ...d, unit: e.target.value }))} placeholder="단위 (예: GB)" aria-label="단위" className={`${smallInputCls} !w-[100px]`} />
+                            )}
+                            <input value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))} placeholder="입력 예시 (선택)" aria-label="설명" className={`${smallInputCls} !w-[200px]`} />
+                            {customKey && (
+                                <input value={draft.key} onChange={(e) => setDraft((d) => ({ ...d, key: e.target.value }))} placeholder="키 (예: ram_max_gb)" aria-label="속성 키" className={`${smallInputCls} !w-[160px] font-mono ${keyOk ? '' : 'border-danger'}`} />
+                            )}
+                            <button type="submit" disabled={!canCreate} className={`${btnPrimary} !h-8`}>{busy ? '저장 중…' : '추가'}</button>
+                        </form>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
+                            {duplicate ? (
+                                <span className="text-warn">이미 '{duplicate.name}' 속성이 있습니다. 같은 항목이면 그 속성을 쓰세요.</span>
+                            ) : (
+                                <span>숫자로 고르면 입찰 조건의 "이상·이하" 비교에 쓰입니다. 분류 맨 뒤에 붙습니다.</span>
+                            )}
+                            <button type="button" onClick={() => setCustomKey((v) => !v)} className={`${btnTiny} ml-auto`}>
+                                {customKey ? '키 자동으로' : '키 직접 정하기'}
+                            </button>
                         </div>
                     </section>
                 )}
@@ -168,8 +183,7 @@ export function AttributesTab({
                             <table className="w-full min-w-[960px] text-[12.5px]">
                                 <thead className="bg-surface text-left text-[11px] text-muted">
                                     <tr>
-                                        <th className="px-4 py-2.5 font-semibold">키</th>
-                                        <th className="px-3 py-2.5 font-semibold">이름</th>
+                                        <th className="px-4 py-2.5 font-semibold">이름</th>
                                         <th className="px-3 py-2.5 font-semibold">자료형</th>
                                         <th className="px-3 py-2.5 font-semibold">단위</th>
                                         <th className="px-3 py-2.5 font-semibold">설명</th>
@@ -242,7 +256,7 @@ function AttributeGroup({
     return (
         <>
             <tr className="border-t border-divide">
-                <td colSpan={9} className="px-4 pt-3 pb-1 text-[11px] font-bold text-muted">{title}</td>
+                <td colSpan={8} className="px-4 pt-3 pb-1 text-[11px] font-bold text-muted">{title}</td>
             </tr>
             {rows.map((a) => {
                 const editing = editingKey === a.key;
@@ -252,10 +266,9 @@ function AttributeGroup({
                 </>;
                 return (
                     <tr key={a.key} className="border-t border-divide align-top">
-                        <td className="px-4 py-2 font-mono text-[11.5px] text-muted whitespace-nowrap">{a.key}</td>
                         {editing ? (
                             <>
-                                <td className="px-3 py-1.5">
+                                <td className="px-4 py-1.5">
                                     <input value={editDraft.name} onChange={(e) => onEditChange({ name: e.target.value })} disabled={busy} aria-label="이름" className={smallInputCls} />
                                     <select value={editDraft.category} onChange={(e) => onEditChange({ category: e.target.value })} disabled={busy} aria-label="분류" className={`${smallInputCls} mt-1.5`}>
                                         {categories.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -266,11 +279,11 @@ function AttributeGroup({
                                         {dataTypes.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                                     </select>
                                 </td>
-                                <td className="px-3 py-1.5"><input value={editDraft.unit} onChange={(e) => onEditChange({ unit: e.target.value })} disabled={busy} aria-label="단위" className={`${smallInputCls} w-[72px]`} /></td>
+                                <td className="px-3 py-1.5"><input value={editDraft.unit} onChange={(e) => onEditChange({ unit: e.target.value })} disabled={busy} aria-label="단위" className={`${smallInputCls} !w-[72px]`} /></td>
                                 <td className="px-3 py-1.5">
                                     <input value={editDraft.description} onChange={(e) => onEditChange({ description: e.target.value })} disabled={busy} aria-label="설명" className={smallInputCls} />
                                     <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted">정렬
-                                        <input type="number" value={editDraft.sort_order} onChange={(e) => onEditChange({ sort_order: Number(e.target.value) })} disabled={busy} aria-label="정렬 순서" className={`${smallInputCls} w-[64px]`} />
+                                        <input type="number" value={editDraft.sort_order} onChange={(e) => onEditChange({ sort_order: Number(e.target.value) })} disabled={busy} aria-label="정렬 순서" className={`${smallInputCls} !w-[64px]`} />
                                     </label>
                                 </td>
                                 {inheritCell}
@@ -282,7 +295,10 @@ function AttributeGroup({
                             </>
                         ) : (
                             <>
-                                <td className="px-3 py-2 font-semibold">{a.name}</td>
+                                <td className="px-4 py-2">
+                                    <span className="font-semibold">{a.name}</span>
+                                    <span className="block font-mono text-[10.5px] text-muted">{a.key}</span>
+                                </td>
                                 <td className="px-3 py-2 text-muted">{labelOf(meta?.data_types, a.data_type)}</td>
                                 <td className="px-3 py-2 text-muted">{a.unit || '—'}</td>
                                 <td className="px-3 py-2 text-muted break-words">{a.description || '—'}</td>

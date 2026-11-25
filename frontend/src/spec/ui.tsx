@@ -48,7 +48,7 @@ export function ListItem({ active, title, subtitle, badge, onClick }: { active: 
             type="button"
             aria-pressed={active}
             onClick={onClick}
-            className={`w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-brand ${
+            className={`w-full flex items-center gap-3 rounded-lg border px-2.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-brand ${
                 active ? 'border-brand/25 bg-brand-tint' : 'border-transparent hover:bg-chip'
             }`}
         >

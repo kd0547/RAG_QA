@@ -54,3 +54,39 @@ export function attributesFor<T extends { category: string }>(attributes: T[], s
 export function labelOf(map: Record<string, string> | undefined, key: string): string {
     return map?.[key] ?? key;
 }
+
+/** 이름 비교용: 대소문자·공백·기호를 무시한다 ("TG승인 여부" = "TG 승인 여부") */
+export function normalizeName(value: string): string {
+    return value.toLowerCase().replace(/[\s_\-·.()/]+/g, '');
+}
+
+/** 이름이 같은(정규화 기준) 속성. 새 속성을 만들기 전에 중복을 막는 데 쓴다 */
+export function sameNameAttribute<T extends { name: string; key: string }>(attributes: T[], name: string): T | undefined {
+    const n = normalizeName(name);
+    if (!n) return undefined;
+    return attributes.find((a) => normalizeName(a.name) === n || normalizeName(a.key) === n);
+}
+
+const ATTRIBUTE_KEY_RE = /^[a-z][a-z0-9_]{1,49}$/;
+
+/** 속성 키를 이름에서 자동으로 만든다. 영문 이름이면 그대로 바꾸고, 한글이면 attr_시각 형태로 만든다 */
+export function autoAttributeKey(name: string, existingKeys: Iterable<string>): string {
+    const taken = new Set(existingKeys);
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+    let base = ATTRIBUTE_KEY_RE.test(slug) ? slug : `attr_${Date.now().toString(36)}`;
+    if (!ATTRIBUTE_KEY_RE.test(base)) base = `attr_${Date.now().toString(36)}`;
+    let key = base;
+    for (let i = 2; taken.has(key); i++) key = `${base}_${i}`;
+    return key;
+}
+
+/** 분류의 맨 뒤 정렬 순서 (새 속성을 분류 끝에 둔다) */
+export function nextSortOrder(attributes: { category: string; sort_order: number }[], category: string): number {
+    const orders = attributes.filter((a) => a.category === category).map((a) => a.sort_order);
+    return orders.length ? Math.max(...orders) + 1 : 0;
+}
+
+/** 부품 종류에 맞는 첫 분류 (새 속성의 기본 분류). 제품이면 '기타' */
+export function defaultCategoryFor(scope: string | null): string {
+    return (scope && KIND_CATEGORIES[scope]?.[0]) || 'other';
+}
