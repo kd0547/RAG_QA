@@ -50,10 +50,8 @@ def test_first_and_rejected_drafts_both_kept(agent_env, tmp_path, monkeypatch):
     assert [r["answer"] for r in runs] == ["| 항목 | 값 |\n| 무게 | 1.5kg |", "무게는 1.5kg입니다."]
     assert all("근거:" not in r["answer"] for r in runs)
     assert runs[1]["answer"] == agent_env.task_repo.get_task(task_id).draft_answer
-    # D4: 서버가 적용한 절차 (1차는 답장 문체, 반려 반영 실행은 반려 절차까지)
-    assert [[s["name"] for s in r["skills"]] for r in runs] == [
-        ["mail-reply-style"], ["mail-reply-style", "revise-after-reject"],
-    ]
+    # 서버가 강제로 붙이는 SKILL은 없다 (모델이 load_skill로 골라 읽는다)
+    assert [r["skills"] for r in runs] == [[], []]
 
 
 def test_session_run_has_no_answer(agent_env):

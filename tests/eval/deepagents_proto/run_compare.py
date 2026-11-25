@@ -83,11 +83,10 @@ def build_proto():
     import repository
     from agent.prompt import render_prompt
 
-    # 현재 엔진의 메일 실행과 같은 시스템 프롬프트 (선택 프롬프트 + 서버 적용 절차 + 문서 그룹). 선택 절차 목록은
+    # 현재 엔진의 메일 실행과 같은 시스템 프롬프트 (선택 프롬프트 + 문서 그룹). SKILL 목록은
     # deepagents의 SkillsMiddleware가 붙인다
     system = render_prompt(
-        repository.prompt_repo.get_system_prompt(), repository.group_repo.list_all(),
-        applied_skills=skills.applied_skills("mail", rejecting=False), optional_skills=None,
+        repository.prompt_repo.get_system_prompt(), repository.group_repo.list_all(), optional_skills=None,
     )
     agent = create_deep_agent(model=model, tools=tools, system_prompt=system, middleware=middleware,
                               skills=["/skills/"], backend=backend)
@@ -100,7 +99,6 @@ def run_proto(agent, backend, case: dict, question: str, attachments: list) -> d
 
     import config
     from agent import agent as agent_module
-    from agent import skills
     from agent.evidence_context import Owner, owner_scope, run_scope
     from agent.validation import validate_answer
 
@@ -108,9 +106,8 @@ def run_proto(agent, backend, case: dict, question: str, attachments: list) -> d
     started = time.perf_counter()
     messages: list = []
     with owner_scope(owner):
-        applied = skills.applied_skills("mail", rejecting=False)
         run_id = repository.evidence_repo.start_run(owner.type, owner.id, config.LLM_MODEL, None,
-                                                    label="deepagents 시제품", skills=[s.ref() for s in applied])
+                                                    label="deepagents 시제품", skills=[])
         preread: list[str] = []
         content: list[dict] = [{"type": "text", "text": question}]
         for index, attachment in enumerate(attachments, start=1):

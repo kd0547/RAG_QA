@@ -115,18 +115,14 @@ def test_disabled_repository_skill_is_left_out_but_keeps_its_name(tmp_path):
     assert skills.db_skill_problem("off-one", "설명", "본문") == "저장소 절차와 이름이 같습니다"
 
 
-def test_disabled_or_missing_server_skill_is_skipped_quietly(tmp_path, caplog):
+def test_mail_skills_can_be_removed_without_errors(tmp_path, caplog):
+    """예전에 서버가 붙이던 SKILL도 이제 다른 SKILL과 같다: 꺼지거나 파일이 없어도 오류가 없다."""
     write_skill(tmp_path, "mail-reply-style", channels="mail")
     skills.reload_skills(tmp_path)
     skills.set_disabled_source(lambda: {"mail-reply-style"})
     with caplog.at_level(logging.WARNING, logger="agent.skills"):
-        assert skills.applied_skills("mail", rejecting=True) == []
-        skills.applied_skills("mail", rejecting=True)
-    messages = [r.getMessage() for r in caplog.records]
-    assert not [r for r in caplog.records if r.levelname == "ERROR"]
-    # 꺼진 mail-reply-style은 말없이, 파일이 없는 revise-after-reject는 경고 한 번
-    assert len([m for m in messages if "revise-after-reject" in m]) == 1
-    assert not [m for m in messages if "mail-reply-style" in m]
+        assert skills.selectable_skills("mail") == []
+    assert not [r for r in caplog.records if r.levelname in ("ERROR", "WARNING")]
 
 
 def test_disabled_lookup_failure_keeps_everything_on(tmp_path):
@@ -150,8 +146,9 @@ def test_search_ranks_repository_skills_by_question_words():
     assert top[0][0].name == "spec-compare"
     assert skills.search_skills("KC 인증서 보내 주세요", web)[0][0].name == "certification-bundle"
     assert skills.search_skills("", web) == []
-    # 메일 채널 전용·서버 적용 절차는 검색되지 않는다
-    assert all(s.name not in skills.SERVER_CHOSEN for s, _ in skills.search_skills("메일 답장 문체", web))
+    # 메일 채널 전용 SKILL은 웹에서 검색되지 않고, 메일에서는 검색된다
+    assert all(s.name != "mail-reply-style" for s, _ in skills.search_skills("메일 답장 문체", web))
+    assert skills.search_skills("메일 답장 문체", skills.selectable_skills("mail"))[0][0].name == "mail-reply-style"
 
 
 def test_search_skills_tool_output():

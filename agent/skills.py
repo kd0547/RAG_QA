@@ -15,10 +15,8 @@
 사용 중지(끄기): 저장소 절차는 화면에서 끌 수 있다 (skill_disabled 테이블). 파일은 그대로 두고 답변·초안 생성에서만 뺀다.
 꺼진 절차도 이름은 저장소 절차로 남는다 (DB 절차가 그 이름을 가져가지 못한다).
 
-누가 고르는가 (설계 결정, 지시서 D 5-3)
-- 서버가 고른다: 메일 채널의 모든 실행에 ALWAYS_FOR_MAIL, 반려를 반영하는 실행에 ON_REJECT. 본문을 시스템 프롬프트에 붙인다.
-  서버가 고르는 절차는 저장소 절차에서만 찾는다. 꺼져 있거나 파일이 없으면 붙이지 않고 넘어간다.
-- 모델이 고른다: 그 밖의 절차. 시스템 프롬프트에는 이름·설명만 있고, 모델이 load_skill로 본문을, search_skills로 검색을 한다.
+누가 고르는가: 모델이 고른다 (Claude Code·Hermes agent와 같다. 서버가 본문을 강제로 붙이는 SKILL은 없다).
+- 시스템 프롬프트에는 이름·설명만 있고, 모델이 load_skill로 본문을, search_skills로 검색을 한다.
   load_skill(name, file)로 SKILL 폴더의 다른 파일(references/·scripts/·assets/ 등 본문이 상대 경로로 가리키는 파일)도 읽는다.
   읽기 횟수·파일 수·길이 제한은 없다 (실행 전체의 도구 호출·모델 호출 한도만 적용된다).
 - 한 실행 안에서는 실행을 시작할 때 잡은 목록(catalog_scope)을 쓴다. 실행 도중 파일이 바뀌어도 프롬프트 목록과 도구가 어긋나지 않는다.
@@ -47,11 +45,6 @@ import yaml
 logger = logging.getLogger(__name__)
 
 SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
-
-# 서버가 고르는 절차
-ALWAYS_FOR_MAIL = ("mail-reply-style",)
-ON_REJECT = ("revise-after-reject",)
-SERVER_CHOSEN = ALWAYS_FOR_MAIL + ON_REJECT
 
 # 답변 채널(mail·web)과 절차 작성 채널(author)
 ANSWER_CHANNELS = ("mail", "web")
@@ -358,7 +351,7 @@ def db_skill_problem(name: str, description: str | None, body: str | None) -> st
     """DB 절차로 쓸 수 없는 이유. 쓸 수 있으면 None (승인 전 검사와 별개로 읽을 때 한 번 더 막는다)."""
     if not isinstance(name, str) or not NAME_PATTERN.match(name):
         return f"name 형식이 아닙니다: {name!r}"
-    if name in repo_skills() or name in SERVER_CHOSEN or name == AUTHOR_SKILL:
+    if name in repo_skills() or name == AUTHOR_SKILL:
         return "저장소 절차와 이름이 같습니다"
     if name in RESERVED_NAMES:
         return "예약어 이름입니다"
@@ -431,25 +424,8 @@ def channel_for(owner) -> str:
     return "mail" if owner is not None and owner.type == "task" else "web"
 
 
-def applied_skills(channel: str, rejecting: bool) -> list[Skill]:
-    """서버가 이번 실행에 붙일 절차 (메일 채널에서만, 켜진 저장소 절차에서만 찾는다).
-
-    꺼진 절차는 조용히 건너뛴다. 파일이 없는 절차는 경고를 한 번만 남긴다 (일부러 지웠을 수 있다).
-    """
-    if channel != "mail":
-        return []
-    names = ALWAYS_FOR_MAIL + (ON_REJECT if rejecting else ())
-    everything = repo_skills()
-    enabled = enabled_repo_skills()
-    for name in names:
-        if name not in everything:
-            _report_once(("server-missing", name), "서버가 적용할 업무 절차가 없어 붙이지 않음: %s", name,
-                         level=logging.WARNING)
-    return [enabled[n] for n in names if n in enabled and channel in enabled[n].channels]
-
-
 def selectable_skills(channel: str) -> list[Skill]:
-    """모델이 load_skill로 고를 수 있는 절차: 현재 답변 채널에서 쓸 수 있고 서버가 고르는 절차가 아닌 것.
+    """모델이 load_skill로 고를 수 있는 SKILL: 현재 답변 채널에서 쓸 수 있는 것 전부.
 
     author 채널 절차와 꺼진 절차는 나오지 않는다. DB 승인본은 여기서 함께 나온다.
     """
@@ -457,7 +433,7 @@ def selectable_skills(channel: str) -> list[Skill]:
         return []
     return [
         s for s in get_skills().values()
-        if channel in s.channels and AUTHOR_CHANNEL not in s.channels and s.name not in SERVER_CHOSEN
+        if channel in s.channels and AUTHOR_CHANNEL not in s.channels
     ]
 
 

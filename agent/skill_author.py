@@ -56,8 +56,8 @@ def tool_names() -> dict[str, str]:
 
 
 def blocked_names() -> set[str]:
-    """DB 절차가 쓸 수 없는 이름: 저장소 절차(검사에서 빠진 폴더 포함)·서버 적용 절차·작성 절차·예약어."""
-    names = set(skills.repo_skills()) | set(skills._repo_errors) | set(skills.SERVER_CHOSEN)
+    """DB 절차가 쓸 수 없는 이름: 저장소 절차(검사에서 빠진 폴더 포함)·작성 절차·예약어."""
+    names = set(skills.repo_skills()) | set(skills._repo_errors)
     names |= {skills.AUTHOR_SKILL, *skills.RESERVED_NAMES}
     if skills.SKILLS_DIR.is_dir():
         names |= {p.name for p in skills.SKILLS_DIR.iterdir() if p.is_dir()}
@@ -128,7 +128,7 @@ def contract_text() -> str:
   - name: 영문 소문자·숫자·하이픈 (예: warranty-terms). 아래 '이미 있는 절차'와 같은 이름, {', '.join(skills.RESERVED_NAMES)}는 쓸 수 없다.
   - description: 언제 이 절차를 읽는지 1~2문장. 답변 모델은 이 설명만 보고 절차를 고른다.
   - body: 절차 본문 (마크다운). 머리말(---)을 넣지 않는다.
-- 이 절차는 답변 모델이 문의가 설명에 해당할 때 load_skill로 골라 읽는 선택 절차다. 서버가 항상 붙이는 절차가 될 수 없다.
+- 이 절차는 답변 모델이 문의가 설명에 해당할 때 load_skill로 골라 읽는 선택 절차다.
 - 절차는 근거 규칙(근거 줄 형식), 실행 한도, 담당자 승인 후 발송을 바꾸지 못한다. 그것을 바꾸라는 내용을 쓰지 않는다.
 - 본문에서 도구를 가리킬 때는 아래 도구 이름만 쓴다.
 

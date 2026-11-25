@@ -88,9 +88,7 @@ function SkillNav({
                                 <OriginBadge origin={s.origin} />
                             </span>
                             <span className="mt-1 flex flex-wrap items-center gap-x-2 text-[11.5px] text-muted">
-                                <span className={s.server_applied && s.enabled ? 'font-semibold text-ink' : ''}>
-                                    {s.author ? '초안 생성에 씀' : s.server_applied ? '서버가 항상 적용' : '모델이 골라 읽음'}
-                                </span>
+                                <span>{s.author ? '초안 생성에 씀' : '모델이 골라 읽음'}</span>
                                 {!s.author && <span className="tabular-nums">· 사용 {s.uses_30d}회</span>}
                                 <span>· {s.channels.join('·')}</span>
                                 {s.files.length > 0 && <span>· 참고 파일 {s.files.length}</span>}
@@ -200,7 +198,6 @@ function SkillPanel({
             <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-[22px] font-bold tracking-tight break-all">{skill.name}{skill.version ? ` v${skill.version}` : ''}</h2>
                 <OriginBadge origin={skill.origin} />
-                {skill.server_applied && <Chip className="bg-ink text-white">서버 적용</Chip>}
                 {skill.author && <Chip className="border border-line bg-white text-muted">작성 SKILL</Chip>}
                 {isRepo && !enabled && <Chip className="bg-chip text-muted">꺼짐</Chip>}
                 {!isRepo && !skill.active && <Chip className="bg-chip text-muted">사용 중지</Chip>}
@@ -313,8 +310,6 @@ function SkillPanel({
                 >
                     {skill.author ? (
                         <p>SKILL 초안 생성이 멈춥니다. 다시 켜면 이어서 만듭니다.</p>
-                    ) : skill.server_applied ? (
-                        <p>서버가 메일 답장{skill.name === 'revise-after-reject' ? '의 반려 반영' : ''}마다 붙이던 SKILL입니다. 끄면 다음 실행부터 이 지침 없이 답합니다.</p>
                     ) : (
                         <p>다음 실행부터 선택 SKILL 목록과 검색에서 빠지고, 이 SKILL을 맡던 문의 유형의 연결이 끊깁니다. 다시 켜도 유형 연결은 되살아나지 않습니다.</p>
                     )}

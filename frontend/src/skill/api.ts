@@ -28,7 +28,6 @@ export interface SkillItem {
     origin: SkillOrigin;
     version: number | null;
     digest: string;
-    server_applied: boolean;
     author: boolean;          // 작성 SKILL(author 채널, create-skill). 답변 SKILL이 아니다
     enabled: boolean;         // 저장소 SKILL을 끄면 false (DB SKILL은 늘 true — 멈출 때는 사용 중지)
     disabled_at: string | null;
@@ -68,7 +67,6 @@ export interface SkillDetail {
     digest: string | null;
     body: string | null;
     read_only: boolean;
-    server_applied: boolean;
     active: boolean;
     doc_id?: number;
     type?: TypeRef | null;

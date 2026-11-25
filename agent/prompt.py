@@ -142,13 +142,6 @@ def strip_legacy_concepts(content: str) -> str:
     return _LEGACY_CONCEPT_RULE.sub(BUNDLE_RULE, content)
 
 
-def render_applied_skills(skills: list) -> str:
-    """서버가 이번 실행에 붙인 절차 본문."""
-    parts = ["**적용 절차 (서버가 붙임)**\n아래 절차를 따른다. 근거 규칙과 마지막 줄 형식은 이 절차보다 우선한다."]
-    parts += [f"[{skill.name}]\n{skill.body}" for skill in skills]
-    return "\n\n".join(parts)
-
-
 def render_optional_skills(skills: list) -> str:
     """모델이 load_skill로 고를 수 있는 절차 목록 (이름·설명만, 본문 없음)."""
     lines = "\n".join(f"- {skill.name}: {skill.description}" for skill in skills)
@@ -164,20 +157,16 @@ def render_optional_skills(skills: list) -> str:
 def render_prompt(
     content: str,
     groups: list[dict] | None = None,
-    applied_skills: list | None = None,
     optional_skills: list | None = None,
 ) -> str:
     """선택된 프롬프트에 업무 절차와 현재 문서 그룹의 검색용 메타데이터를 더한다.
 
-    붙이는 순서: 프롬프트 본문 → 적용 절차 → 선택 절차 목록 → 문서 그룹 힌트.
+    붙이는 순서: 프롬프트 본문 → 선택 SKILL 목록 → 문서 그룹 힌트.
     DB에 저장된 프롬프트 본문은 바꾸지 않는다. 옛 본문에 남은 용어 별칭·상위 개념 문구는 렌더링할 때 지운다 (지시서 GR1).
     절차가 없으면 그 절을 붙이지 않는다.
-    applied_skills: 서버가 고른 절차(agent.skills.Skill) — 본문을 붙인다.
     optional_skills: 모델이 고를 수 있는 절차 — 이름·설명만 붙인다.
     """
     rendered = strip_legacy_concepts(content)
-    if applied_skills:
-        rendered += f"\n\n{render_applied_skills(applied_skills)}"
     if optional_skills:
         rendered += f"\n\n{render_optional_skills(optional_skills)}"
     if not groups:

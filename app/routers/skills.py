@@ -109,7 +109,6 @@ def list_skills() -> dict:
         items.append({
             "name": skill.name, "description": skill.description, "channels": list(skill.channels),
             "origin": skill.origin, "version": skill.version, "digest": skill.digest,
-            "server_applied": skill.name in skills.SERVER_CHOSEN and skill.origin == "repo",
             "author": skills.AUTHOR_CHANNEL in skill.channels,
             "enabled": off is None, "disabled_at": off["disabled_at"] if off else None,
             "files": list(skill.files),
@@ -117,7 +116,7 @@ def list_skills() -> dict:
             "doc_id": doc["doc_id"] if doc else None, "type": _type_ref(doc.get("type_id")) if doc else None,
             "approved_at": doc.get("reviewed_at") if doc else None,
         })
-    items.sort(key=lambda i: (i["author"], not i["enabled"], i["origin"] != "repo", not i["server_applied"], i["name"]))
+    items.sort(key=lambda i: (i["author"], not i["enabled"], i["origin"] != "repo", i["name"]))
     return {
         "items": items,
         "load_errors": [{"folder": folder, "reason": reason} for folder, reason in sorted(skills.repo_errors().items())],
@@ -310,7 +309,7 @@ def get_skill(name: str) -> dict:
         return {
             "name": repo.name, "description": repo.description, "channels": list(repo.channels), "origin": "repo",
             "version": None, "digest": repo.digest, "body": repo.body, "read_only": True,
-            "server_applied": repo.name in skills.SERVER_CHOSEN, "active": off is None, "history": [],
+            "active": off is None, "history": [],
             "author": skills.AUTHOR_CHANNEL in repo.channels, "enabled": off is None,
             "disabled_at": off["disabled_at"] if off else None, "disabled_by": off["disabled_by"] if off else None,
             "files": list(repo.files),
@@ -323,7 +322,7 @@ def get_skill(name: str) -> dict:
     return {
         "name": name, "description": shown.get("description"), "channels": list(skills.DB_CHANNELS), "origin": "db",
         "version": shown["version"], "digest": shown.get("digest"), "body": shown.get("body"), "read_only": False,
-        "server_applied": False, "active": active is not None, "doc_id": shown["doc_id"],
+        "active": active is not None, "doc_id": shown["doc_id"],
         "type": _type_ref(shown.get("type_id")),
         "open_draft": (lambda d: d and {"doc_id": d["doc_id"], "version": d["version"]})(skill_repo.open_draft_for_name(name)),
         "history": [_history_item(d) for d in history],
@@ -363,7 +362,7 @@ def _repo_skill_or_error(name: str) -> None:
 
 @router.post("/skills/{name}/disable")
 def disable_repo_skill(name: str, request: Request) -> dict:
-    """저장소 절차를 끈다: 답변(서버 적용·선택 목록·load_skill)과 초안 생성에서 빠진다. 파일은 그대로다. 이미 꺼져 있으면 그대로 돌려준다."""
+    """저장소 절차를 끈다: 답변(선택 목록·load_skill·search_skills)과 초안 생성에서 빠진다. 파일은 그대로다. 이미 꺼져 있으면 그대로 돌려준다."""
     _repo_skill_or_error(name)
     skill_repo.disable_skill(name, _client_ip(request))
     return get_skill(name)

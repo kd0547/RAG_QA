@@ -214,7 +214,6 @@ def run_agent(
         with owner_scope(owner or new_session_owner()) as current:
             result = _invoke_logged(
                 agent, [{"role": "user", "content": question}], mode, label="질문", thread_id=thread_id,
-                applied_skills=skills.applied_skills(skills.channel_for(current), rejecting=False),
             )
             return _finish_answer(result, current)
     finally:
@@ -272,11 +271,7 @@ def run_agent_temp_attachments(
                     messages.append(_review_message(thread_id, review))
                 label = f"메일(첨부 {len(attachments or [])}건, 반려 {'있음, 대화 기록 없음' if review else '없음'})"
 
-            # 서버가 고르는 절차: 메일이면 답장 문체, 이번 실행이 반려를 반영하면 반려 반영 절차도
-            applied = skills.applied_skills(skills.channel_for(current), rejecting=review is not None)
-            result = _invoke_logged(
-                agent, messages, mode, label=label, preread=preread, thread_id=thread_id, applied_skills=applied,
-            )
+            result = _invoke_logged(agent, messages, mode, label=label, preread=preread, thread_id=thread_id)
             return _finish_answer(result, current)
     finally:
         _cleanup_ask_thread(agent, thread_id)
@@ -403,7 +398,6 @@ def _selected_prompt_id() -> int | None:
 def _invoke_logged(
         agent, messages: list[dict] | None, mode: str, label: str,
         preread: list[str] | None = None, thread_id: str | None = None,
-        applied_skills: list | None = None,
 ) -> dict:
     """에이전트를 실행하고 실행 기록(run)과 소요시간·도구 호출 수 로그를 남긴다.
 
@@ -411,7 +405,6 @@ def _invoke_logged(
     preread: 실행 전에 모델에 이미 보여 준 근거 (이미지 첨부). 이번 실행에서 읽은 것으로 기록한다.
     thread_id: 대화 기록(checkpoint)의 키. 같은 thread_id면 이전 메시지에 이어서 실행한다.
     messages가 None이면 새 메시지 없이 마지막 checkpoint에서 이어 간다.
-    applied_skills: 서버가 이번 실행에 붙이는 업무 절차. 본문을 시스템 프롬프트에 넣고 run.skills_json에 남긴다.
     모델이 고를 수 있는 절차(이름·설명)는 근거 소유자의 채널로 정해 프롬프트에 목록만 넣는다.
     예외는 실행 기록을 error로 남긴 뒤 호출부가 처리하도록 다시 던진다.
     """
@@ -419,14 +412,12 @@ def _invoke_logged(
     if owner is None:
         raise RuntimeError("근거 소유자 없이 에이전트를 실행할 수 없습니다 (owner_scope 안에서 호출)")
     started = time.perf_counter()
-    applied_skills = list(applied_skills or [])
-    applied_names = {s.name for s in applied_skills}
     channel = skills.channel_for(owner)
     # 이번 실행의 선택 절차 목록을 한 번 잡아 프롬프트와 load_skill·search_skills가 같이 쓴다
-    optional_skills = [s for s in skills.selectable_skills(channel) if s.name not in applied_names]
+    optional_skills = skills.selectable_skills(channel)
     run_id = repository.evidence_repo.start_run(
         owner.type, owner.id, _model_name(mode), _selected_prompt_id(), label=label,
-        skills=[s.ref() for s in applied_skills],
+        skills=[],  # 서버가 강제로 붙이는 SKILL은 없다 (모델이 읽은 SKILL은 load_skill 호출 기록에 남는다)
     )
     for evidence_id in preread or []:
         repository.evidence_repo.record_use(run_id, evidence_id, "read")
@@ -441,7 +432,7 @@ def _invoke_logged(
                 {"messages": messages} if messages is not None else None,
                 context=AgentContext(system_prompt=render_prompt(
                     prompt_repo.get_system_prompt(), groups,
-                    applied_skills=applied_skills, optional_skills=optional_skills,
+                    optional_skills=optional_skills,
                 )),
                 config=config)
     except Exception as exc:

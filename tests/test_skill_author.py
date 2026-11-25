@@ -163,7 +163,7 @@ def test_unapproved_drafts_are_never_selectable(env, agent_env):
     env.skill_repo.create_generating(type_id=1)
 
     names = {s.name for channel in ("mail", "web") for s in skills.selectable_skills(channel)}
-    assert names == {"spec-compare", "certification-bundle"}
+    assert names == {"spec-compare", "certification-bundle", "mail-reply-style", "revise-after-reject"}
     from tools.tool import load_skill
     for owner in (Owner("task", "t1"), Owner("session", "s1")):
         with owner_scope(owner):
@@ -199,8 +199,9 @@ def test_material_instruction_cannot_make_server_applied_skill(env):
 
     assert (doc["status"], doc["name"]) == ("draft", "warranty-terms")
     assert user_text(llm).count("</사례>") == 3  # 자료 안의 닫는 표시는 지운다
-    assert [s.name for s in skills.applied_skills("mail", rejecting=True)] == ["mail-reply-style", "revise-after-reject"]
-    assert all(s.origin == "repo" for s in skills.applied_skills("mail", rejecting=True))
+    # 저장소 SKILL 이름은 그대로 저장소 것이다 (초안이 이름을 가져가지 못한다)
+    mail = {s.name: s for s in skills.selectable_skills("mail")}
+    assert mail["mail-reply-style"].origin == "repo" and mail["revise-after-reject"].origin == "repo"
     assert env.skill_repo.active_skill_docs() == []  # 승인 전이라 쓰이지 않는다
 
 

@@ -75,11 +75,11 @@ def test_db_skill_appears_and_disappears_without_reload(tmp_path):
     rows = []
     skills.set_db_source(lambda: rows)
 
-    assert [s.name for s in skills.selectable_skills("mail")] == ["spec-compare"]
+    assert [s.name for s in skills.selectable_skills("mail")] == ["mail-reply-style", "revise-after-reject", "spec-compare"]
     rows.append(db_row("warranty-terms", version=2))
 
     listed = {s.name: s for s in skills.selectable_skills("mail")}
-    assert set(listed) == {"spec-compare", "warranty-terms"}
+    assert set(listed) == {"mail-reply-style", "revise-after-reject", "spec-compare", "warranty-terms"}
     db = listed["warranty-terms"]
     assert (db.origin, db.version, db.channels) == ("db", 2, ("mail", "web"))
     assert db.digest == skills.body_digest(db.body)
@@ -113,14 +113,12 @@ def test_db_skill_with_repo_or_reserved_name_is_ignored(tmp_path, caplog):
     assert len([r for r in caplog.records if "DB 업무 절차를 읽지 않음" in r.getMessage()]) == 5
 
 
-def test_db_skill_cannot_become_server_applied(tmp_path):
-    """저장소의 서버 적용 절차가 빠져 있어도 같은 이름의 DB 절차가 그 자리를 채우지 못한다."""
-    write_skill(tmp_path, "spec-compare", body="대조")
-    skills.reload_skills(tmp_path)
+def test_db_skill_cannot_take_a_repository_name(tmp_path):
+    """저장소 SKILL과 같은 이름의 DB 절차는 읽지 않는다 (저장소 것이 그대로 쓰인다)."""
+    make_repo(tmp_path)
     skills.set_db_source(lambda: [db_row("mail-reply-style", body="DB 문체"), db_row("revise-after-reject")])
 
-    assert skills.applied_skills("mail", rejecting=True) == []
-    assert "mail-reply-style" not in skills.get_skills()
+    assert skills.get_skills()["mail-reply-style"].body == "문체"
     assert all(s.origin == "repo" for s in skills.selectable_skills("mail"))
 
 
@@ -133,7 +131,7 @@ def test_db_failure_falls_back_to_repository(tmp_path):
     skills.set_db_source(broken)
 
     assert [s.name for s in skills.selectable_skills("web")] == ["spec-compare"]
-    assert [s.name for s in skills.applied_skills("mail", rejecting=False)] == ["mail-reply-style"]
+    assert [s.name for s in skills.selectable_skills("mail")] == ["mail-reply-style", "revise-after-reject", "spec-compare"]
 
 
 def test_approved_db_skill_is_listed_in_agent_prompt_not_body(agent_env, tmp_path):
@@ -148,5 +146,6 @@ def test_approved_db_skill_is_listed_in_agent_prompt_not_body(agent_env, tmp_pat
     prompt = next(m.content for m in model.calls[0] if isinstance(m, SystemMessage))
     assert "- warranty-terms: 보증 조건 문의" in prompt and "보증 본문 비밀" not in prompt
     assert "create-skill" not in prompt and "절차를 이렇게 쓴다" not in prompt
+    assert "- mail-reply-style: 설명" in prompt  # 메일 SKILL도 목록으로만 보인다
     run = agent_env.evidence_repo.runs_for_owner("task", "t1")[0]
-    assert [s["name"] for s in run["skills"]] == ["mail-reply-style"]
+    assert run["skills"] == []  # 서버가 강제로 붙이는 SKILL은 없다

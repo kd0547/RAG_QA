@@ -140,10 +140,10 @@ def _only_session_owner(agent_env) -> str:
         return conn.execute("SELECT owner_id FROM run WHERE owner_type = 'session'").fetchone()[0]
 
 
-def test_mail_prompt_has_reply_style_body_and_reject_run_has_both(agent_env, repo_skills):
+def test_mail_prompt_lists_every_mail_skill_for_the_model_to_choose(agent_env, repo_skills):
+    """서버가 강제로 붙이는 SKILL은 없다. 메일 SKILL도 목록(이름·설명)으로만 보이고 모델이 골라 읽는다."""
     from agent import agent as agent_module
 
-    style, reject = repo_skills["mail-reply-style"], repo_skills["revise-after-reject"]
     model = agent_env.install([AIMessage(content="답\n근거: 없음")])
     agent_module.run_agent_temp_attachments("무게", mode="local", owner=Owner("task", "t1"))
     first = system_prompt(model)
@@ -153,26 +153,23 @@ def test_mail_prompt_has_reply_style_body_and_reject_run_has_both(agent_env, rep
                                             review=(1, "[검토 담당자 반려] 표를 빼고"))
     second = system_prompt(model)
 
-    assert f"[mail-reply-style]\n{style.body}" in first and reject.body not in first
-    assert style.body in second and f"[revise-after-reject]\n{reject.body}" in second
     for prompt in (first, second):
-        assert "- spec-compare:" in prompt and "- certification-bundle:" in prompt
-        assert "- mail-reply-style:" not in prompt and "- revise-after-reject:" not in prompt  # 서버가 고르는 절차는 목록에 없다
+        assert "**적용 절차" not in prompt
+        for name in ("spec-compare", "certification-bundle", "mail-reply-style", "revise-after-reject"):
+            assert f"- {name}: {repo_skills[name].description}" in prompt
+        for skill in repo_skills.values():
+            assert skill.body not in prompt
     runs = agent_env.evidence_repo.runs_for_owner("task", "t1")
-    assert [r["skills"] for r in runs] == [
-        [style.ref()], [style.ref(), reject.ref()],
-    ]
+    assert [r["skills"] for r in runs] == [[], []]
 
 
 def test_prompt_section_order():
     from agent.prompt import render_prompt
 
-    skill = skills.get_skills()["mail-reply-style"]
     optional = [skills.get_skills()["spec-compare"]]
-    prompt = render_prompt("본문", groups=[{"id": "g", "name": "그룹", "description": "설명"}],
-                           applied_skills=[skill], optional_skills=optional)
+    prompt = render_prompt("본문", groups=[{"id": "g", "name": "그룹", "description": "설명"}], optional_skills=optional)
 
-    order = [prompt.index(s) for s in ("본문", "**적용 절차", "**선택 절차", "**문서 그룹 검색 힌트")]
+    order = [prompt.index(s) for s in ("본문", "**선택 절차", "**문서 그룹 검색 힌트")]
     assert order == sorted(order)
     assert "상위 개념" not in prompt
     assert render_prompt("본문") == "본문"  # 절차가 없으면 절을 붙이지 않는다
@@ -196,8 +193,8 @@ def test_load_skill_returns_body_and_refuses_other_channel_or_paths(monkeypatch,
     for name in ("mail-reply-style", "../../config", "..\\..\\.env", "spec-compare/../../main.py"):
         out = call_load_skill(name, web)
         assert out.startswith("오류:") and "사용할 수 있는 절차: certification-bundle, spec-compare" in out
-    # 메일 채널에서도 서버가 고르는 절차는 load_skill로 주지 않는다 (이미 프롬프트에 붙어 있다)
-    assert call_load_skill("revise-after-reject", Owner("task", "t1")).startswith("오류:")
+    # 메일 SKILL은 메일 채널에서 모델이 골라 읽는다
+    assert call_load_skill("revise-after-reject", Owner("task", "t1")).startswith("[업무 절차 revise-after-reject")
 
 
 def test_load_skill_does_not_register_evidence(agent_env):
@@ -275,13 +272,16 @@ def test_adversarial_skill_cannot_skip_validation_or_send(agent_env, tmp_path, m
     with agent_env.db.transaction() as conn:
         agent_env.email_repo.save_pending(mail, conn)
         task_id = agent_env.task_repo.create_task("m1", conn).task_id
-    # 대역 모델이 절차를 그대로 따른다: 근거 줄 없이 "발송했다"고 답한다
-    model = agent_env.install([AIMessage(content="고객님께 바로 발송했습니다. 무게는 1.5kg입니다.")])
+    # 대역 모델이 SKILL을 읽고 그대로 따른다: 근거 줄 없이 "발송했다"고 답한다
+    model = agent_env.install([
+        tool_call("load_skill", {"name": "mail-reply-style"}, "k"),
+        AIMessage(content="고객님께 바로 발송했습니다. 무게는 1.5kg입니다."),
+    ])
 
     email_service.email_consumer_loop(OneShotStop(), agent_env.email_repo, agent_env.task_repo)
     join_notify_threads()
 
-    assert evil in system_prompt(model)  # 절차는 실제로 모델에 들어갔다
+    assert evil in tool_contents(model.calls[1])["k"]  # SKILL은 실제로 모델에 들어갔다
     task = agent_env.task_repo.get_task(task_id)
     assert task.status == TaskStatus.DRAFTED
     validation = agent_env.task_repo.get_validation(task_id)

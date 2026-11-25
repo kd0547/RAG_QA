@@ -65,7 +65,6 @@ def test_list_shows_repository_skills_and_author_status(env):
     assert items["create-skill"]["author"] is True and items["spec-compare"]["author"] is False
     assert data["items"][-1]["name"] == "create-skill"  # 작성 절차는 답변 절차 뒤에
     assert all(i["enabled"] for i in data["items"]) and data["load_errors"] == [] and data["loaded_at"]
-    assert items["mail-reply-style"]["server_applied"] is True and items["spec-compare"]["server_applied"] is False
     assert items["spec-compare"]["origin"] == "repo" and items["spec-compare"]["version"] is None
     assert data["author"]["available"] is True and data["settings"]["min_cases"] == config.SKILL_DRAFT_MIN_CASES
 
@@ -88,9 +87,9 @@ def test_disable_and_enable_repository_skill(env):
     assert load("spec-compare").startswith("[업무 절차 spec-compare")
 
 
-def test_disabled_server_skill_and_author_skill(env):
+def test_disabled_mail_skill_and_author_skill(env):
     env.client.post("/skills/mail-reply-style/disable")
-    assert skills.applied_skills("mail", rejecting=False) == []
+    assert "mail-reply-style" not in [s.name for s in skills.selectable_skills("mail")]
 
     env.client.post("/skills/create-skill/disable")
     status = env.client.get("/skills").json()["author"]
@@ -117,7 +116,7 @@ def test_approve_makes_skill_selectable_without_restart(env):
     doc = response.json()
     assert (doc["status"], doc["reviewed_by"], doc["review_note"]) == ("approved", "testclient", "확인함")
     listed = names(env)["warranty-terms"]
-    assert (listed["origin"], listed["version"], listed["server_applied"]) == ("db", 1, False)
+    assert (listed["origin"], listed["version"]) == ("db", 1)
     assert load("warranty-terms").startswith("[업무 절차 warranty-terms")
     assert load("warranty-terms", Owner("session", "s1")).startswith("[업무 절차 warranty-terms")
     assert env.skill_repo.find_type_by_label("보증 기간 문의")["skill_name"] == "warranty-terms"
@@ -287,7 +286,7 @@ def test_adversarial_db_skill_cannot_change_server_policy(env, monkeypatch):
     assert validation["ok"] is False and "근거 줄 없음" in validation["warnings"]
     assert sent_to == [config.REVIEWER_EMAIL]
     run = env.evidence_repo.runs_for_owner("task", task_id)[0]
-    assert [s["name"] for s in run["skills"]] == ["mail-reply-style"]  # DB 절차는 서버 적용 절차가 아니다
+    assert run["skills"] == []  # 서버가 강제로 붙이는 SKILL은 없다
     assert [c["tool"] for c in run["tool_calls"]] == ["load_skill"]
     with env.db.get_conn() as conn:
         assert conn.execute("SELECT COUNT(*) FROM task_send").fetchone()[0] == 0
