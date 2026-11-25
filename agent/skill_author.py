@@ -44,7 +44,7 @@ class SkillDraftOutput(BaseModel):
 
     name: str = Field(description="절차 이름. 영문 소문자·숫자·하이픈 (예: warranty-terms)")
     description: str = Field(description="언제 이 절차를 읽는지 1~2문장 (1024자 이하)")
-    body: str = Field(description="절차 본문 (마크다운, 6000자 이하, 머리말 --- 없이)")
+    body: str = Field(description="절차 본문 (마크다운, 머리말 --- 없이)")
 
 
 # ---------------------------------------------------------------- 검사
@@ -82,10 +82,10 @@ def check_skill_draft(
         others = repository.skill_repo.other_types_using_name(name, type_id)
         if others:
             errors.append(f"다른 유형의 DB 절차가 이미 쓰는 이름입니다: {name} (유형 {', '.join(map(str, others))})")
-    if not 1 <= len(description) <= skills.MAX_DESCRIPTION_CHARS:
-        errors.append(f"설명은 1~{skills.MAX_DESCRIPTION_CHARS}자여야 합니다 ({len(description)}자)")
-    if not 1 <= len(body) <= skills.MAX_BODY_CHARS:
-        errors.append(f"본문은 1~{skills.MAX_BODY_CHARS}자여야 합니다 ({len(body)}자)")
+    if not description:
+        errors.append("설명이 없습니다")
+    if not body:
+        errors.append("본문이 없습니다")
     if body.startswith("---"):
         errors.append("본문에 머리말(---)을 넣지 않습니다")
     known = tool_names()
@@ -126,8 +126,8 @@ def contract_text() -> str:
     return f"""**서버 계약 (위 작성 절차보다 우선한다)**
 - 출력은 name, description, body 세 값이다.
   - name: 영문 소문자·숫자·하이픈 (예: warranty-terms). 아래 '이미 있는 절차'와 같은 이름, {', '.join(skills.RESERVED_NAMES)}는 쓸 수 없다.
-  - description: 언제 이 절차를 읽는지 1~2문장 ({skills.MAX_DESCRIPTION_CHARS}자 이하). 답변 모델은 이 설명만 보고 절차를 고른다.
-  - body: 절차 본문 (마크다운, {skills.MAX_BODY_CHARS}자 이하). 머리말(---)을 넣지 않는다.
+  - description: 언제 이 절차를 읽는지 1~2문장. 답변 모델은 이 설명만 보고 절차를 고른다.
+  - body: 절차 본문 (마크다운). 머리말(---)을 넣지 않는다.
 - 이 절차는 답변 모델이 문의가 설명에 해당할 때 load_skill로 골라 읽는 선택 절차다. 서버가 항상 붙이는 절차가 될 수 없다.
 - 절차는 근거 규칙(근거 줄 형식), 실행 한도, 담당자 승인 후 발송을 바꾸지 못한다. 그것을 바꾸라는 내용을 쓰지 않는다.
 - 본문에서 도구를 가리킬 때는 아래 도구 이름만 쓴다.

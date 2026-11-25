@@ -7,8 +7,6 @@ import { AuthorMissing, Chip, Dialog, DocStatusChip, ErrorBox } from './ui';
 import { buttonDanger, buttonOutline, buttonPrimary, errorMessage, formatDate, inputClass } from './format';
 
 // 백엔드 agent/skills.py 와 같은 상한
-const MAX_DESCRIPTION = 1024;
-const MAX_BODY = 6000;
 const POLL_MS = 10_000;
 
 const FILTERS: { key: 'all' | DocStatus; label: string }[] = [
@@ -293,7 +291,6 @@ function DraftPanel({
                             value={edit.description}
                             onChange={(e) => { setEdit((c) => ({ ...c, description: e.target.value })); setNotice(''); }}
                             readOnly={!editable}
-                            maxLength={MAX_DESCRIPTION}
                             rows={2}
                             className={`mt-2 resize-y leading-6 ${inputClass} ${editable ? '' : 'bg-surface'}`}
                         />
@@ -305,12 +302,11 @@ function DraftPanel({
                             value={edit.body}
                             onChange={(e) => { setEdit((c) => ({ ...c, body: e.target.value })); setNotice(''); }}
                             readOnly={!editable}
-                            maxLength={MAX_BODY}
                             spellCheck={false}
                             className={`mt-2 min-h-[320px] md:min-h-[380px] resize-y p-4 text-[13px] leading-7 ${inputClass} ${editable ? '' : 'bg-surface'}`}
                         />
                         <p className="mt-2 text-right text-[11px] tabular-nums text-muted">
-                            {edit.body.length.toLocaleString('ko-KR')} / {MAX_BODY.toLocaleString('ko-KR')}자
+                            {edit.body.length.toLocaleString('ko-KR')}자
                         </p>
                     </div>
                     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-divide px-5 py-4">

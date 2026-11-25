@@ -57,26 +57,51 @@ def test_repository_skills_all_load_and_pass_checks(repo_skills):
     answer_skills = {n: s for n, s in repo_skills.items() if skills.AUTHOR_CHANNEL not in s.channels}
     assert sorted(answer_skills) == list(REPO_SKILLS)
     for skill in repo_skills.values():
-        assert skill.description and len(skill.body) <= skills.MAX_BODY_CHARS
+        assert skill.description and skill.body
         assert re.fullmatch(r"[0-9a-f]{8}", skill.digest)
         assert not skill.body.startswith("---")
     assert repo_skills["mail-reply-style"].channels == ("mail",)
     assert repo_skills["spec-compare"].channels == ("mail", "web")
 
 
-def test_invalid_documents_are_skipped_others_load(tmp_path, caplog):
+def test_documents_load_without_project_specific_limits(tmp_path, caplog):
+    """Claude Code·Hermes처럼 길이·이름 형식·필수 머리말 제한 없이 읽는다."""
     write_skill(tmp_path, "good")
-    write_skill(tmp_path, "renamed", name="other-name")
-    write_skill(tmp_path, "too-long", body="가" * (skills.MAX_BODY_CHARS + 1))
-    write_skill(tmp_path, "no-header", header=False, body="# 머리말 없음")
-    write_skill(tmp_path, "bad-channel", channels="mail,sms")
-    write_skill(tmp_path, "Bad_Name")
+    write_skill(tmp_path, "renamed", name="other-name")                    # name이 폴더와 달라도 된다
+    write_skill(tmp_path, "too-long", body="가" * 50000)                    # 본문 길이 제한 없음
+    write_skill(tmp_path, "no-header", header=False, body="# 제목\n머리말 없이 쓴 첫 줄")
+    write_skill(tmp_path, "odd-channel", channels="mail,sms")              # 모르는 채널은 무시
+    write_skill(tmp_path, "Bad_Name")                                     # 이름 형식 제한 없음
+    write_skill(tmp_path, "long-desc", description="설" * 3000)            # 설명 길이 제한 없음
+    plain = tmp_path / "plain" / "SKILL.md"
+    plain.parent.mkdir()
+    plain.write_text("---\nname: plain\ndescription: 표준 형식, channels 없음\n---\n본문\n", encoding="utf-8")
 
     loaded = skills.reload_skills(tmp_path)
 
-    assert list(loaded) == ["good"]
-    errors = [r for r in caplog.records if r.levelname == "ERROR"]
-    assert len(errors) == 5
+    assert sorted(loaded) == ["Bad_Name", "good", "long-desc", "no-header", "odd-channel", "other-name", "plain", "too-long"]
+    assert len(loaded["too-long"].body) == 50000 and len(loaded["long-desc"].description) == 3000
+    assert (loaded["no-header"].description, loaded["no-header"].channels) == ("머리말 없이 쓴 첫 줄", ("mail", "web"))
+    assert loaded["odd-channel"].channels == ("mail",)
+    assert loaded["plain"].channels == ("mail", "web")
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]
+
+
+def test_unreadable_or_duplicate_documents_are_skipped(tmp_path, caplog):
+    write_skill(tmp_path, "aaa", name="same")
+    write_skill(tmp_path, "bbb", name="same")
+    broken = tmp_path / "broken" / "SKILL.md"
+    broken.parent.mkdir()
+    broken.write_text("---\nname: [닫히지 않은\n---\n본문\n", encoding="utf-8")
+    binary = tmp_path / "binary" / "SKILL.md"
+    binary.parent.mkdir()
+    binary.write_bytes(b"\xff\xfe\x00\x01")
+
+    loaded = skills.reload_skills(tmp_path)
+
+    assert list(loaded) == ["same"] and loaded["same"].folder.name == "aaa"
+    assert set(skills.repo_errors()) == {"bbb", "broken", "binary"}
+    assert len([r for r in caplog.records if r.levelname == "ERROR"]) == 3
 
 
 def test_crlf_document_reads_with_same_digest(tmp_path):
@@ -216,20 +241,19 @@ def test_load_skill_result_survives_tool_result_clearing(agent_env, tmp_path, mo
     assert fifth["k"].startswith("[업무 절차 spec-compare")
 
 
-def test_load_skill_calls_over_limit_are_refused(agent_env):
+def test_load_skill_has_no_skill_specific_call_limit(agent_env):
+    """SKILL 읽기에는 따로 횟수 한도가 없다 (일반 에이전트와 같이 실행 전체의 도구 한도만)."""
     from agent import agent as agent_module
 
-    limit = agent_module.SKILL_CALLS_PER_RUN
     model = agent_env.install(
-        [tool_call("load_skill", {"name": "spec-compare"}, f"k{i}") for i in range(limit + 1)]
+        [tool_call("load_skill", {"name": "spec-compare"}, f"k{i}") for i in range(8)]
         + [AIMessage(content="답\n근거: 없음")]
     )
 
     agent_module.run_agent_temp_attachments("x", mode="local", owner=Owner("session", "s1"))
 
     contents = tool_contents(model.calls[-1])
-    assert all(contents[f"k{i}"].startswith("[업무 절차") for i in range(limit))
-    assert "Tool call limit exceeded" in contents[f"k{limit}"]
+    assert all(contents[f"k{i}"].startswith("[업무 절차") for i in range(8))
 
 
 # ---------------------------------------------------------------- 절차가 서버 정책을 바꾸지 못한다

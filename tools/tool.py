@@ -641,7 +641,9 @@ def load_skill(name: str, file: str | None = None) -> str:
     # 이름·경로는 이번 실행의 목록에서만 찾는다. 모델이 준 문자열로 파일 경로를 만들지 않는다. 근거로 등록하지 않는다.
     channel = skills.channel_for(current_owner())
     available = skills.run_selectable(channel)
-    found = next((s for s in available if s.name == name), None)
+    # 머리말 name과 폴더 이름이 다르면 둘 다 받는다 (Claude Code와 같다)
+    found = next((s for s in available if s.name == name), None) or next(
+        (s for s in available if s.folder is not None and s.folder.name == name), None)
     if found is None:
         names = ", ".join(s.name for s in available) or "없음"
         logger.info("[load_skill] 없는 절차: %r (channel=%s)", name[:80], channel)

@@ -1,7 +1,11 @@
 """업무 절차(skill) 로더.
 
 절차는 두 곳에서 온다.
-- 저장소 절차(origin="repo"): skills/<name>/SKILL.md (Agent Skills 형식: YAML 머리말 + 본문).
+- 저장소 절차(origin="repo"): skills/<폴더>/SKILL.md (Agent Skills 형식: YAML 머리말 + 본문).
+  Claude Code·Hermes agent처럼 이 시스템만의 제한을 두지 않는다: 본문·설명 길이 제한 없음, 머리말도 선택.
+  name이 없으면 폴더 이름, description이 없으면 본문의 첫 줄(제목 줄 제외)을 쓴다. 그 밖의 머리말 필드는 무시한다.
+  이 시스템이 쓰는 값 metadata.channels("mail,web" / "author")도 선택이고, 없으면 답변 채널 전체(mail·web)다.
+  검사로 빼는 문서는 읽을 수 없는 것(인코딩·머리말 YAML이 깨진 것)과 이름이 겹치는 것뿐이다.
   부를 때마다 폴더의 서명(SKILL.md·참고 파일의 경로·수정 시각·크기)을 보고, 바뀌었으면 다시 읽는다.
   파일을 넣거나 고치거나 지우면 서버를 다시 시작하지 않아도 다음 실행부터 반영된다 (Hermes agent의 목록 캐시 방식).
   테스트는 reload_skills(directory)로 다른 폴더를 읽는다.
@@ -15,7 +19,8 @@
 - 서버가 고른다: 메일 채널의 모든 실행에 ALWAYS_FOR_MAIL, 반려를 반영하는 실행에 ON_REJECT. 본문을 시스템 프롬프트에 붙인다.
   서버가 고르는 절차는 저장소 절차에서만 찾는다. 꺼져 있거나 파일이 없으면 붙이지 않고 넘어간다.
 - 모델이 고른다: 그 밖의 절차. 시스템 프롬프트에는 이름·설명만 있고, 모델이 load_skill로 본문을, search_skills로 검색을 한다.
-  load_skill(name, file)로 절차 폴더의 참고 파일(references/·templates/)도 읽는다 (본문 6000자 제한을 넘는 자료).
+  load_skill(name, file)로 SKILL 폴더의 다른 파일(references/·scripts/·assets/ 등 본문이 상대 경로로 가리키는 파일)도 읽는다.
+  읽기 횟수·파일 수·길이 제한은 없다 (실행 전체의 도구 호출·모델 호출 한도만 적용된다).
 - 한 실행 안에서는 실행을 시작할 때 잡은 목록(catalog_scope)을 쓴다. 실행 도중 파일이 바뀌어도 프롬프트 목록과 도구가 어긋나지 않는다.
 
 author 채널 절차(create-skill)는 절차 초안 생성 작업(agent/skill_author.py)의 시스템 프롬프트로만 쓴다.
@@ -59,15 +64,11 @@ DB_CHANNELS = ANSWER_CHANNELS
 # API 고정 경로(/skills/drafts 등)와 겹치는 이름은 DB 절차에 쓸 수 없다
 RESERVED_NAMES = ("drafts", "types", "analysis")
 
+# DB 절차(생성 초안) 이름 형식. 저장소 SKILL 이름에는 쓰지 않는다
 NAME_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-MAX_DESCRIPTION_CHARS = 1024
-MAX_BODY_CHARS = 6000
 
-# 참고 파일: 절차 폴더 아래 이 하위 폴더의 텍스트 파일만 읽는다 (스크립트·실행 파일은 읽지 않는다)
-SUPPORT_DIRS = ("references", "templates")
-SUPPORT_SUFFIXES = (".md", ".txt", ".csv")
-MAX_SUPPORT_FILES = 20
-MAX_SUPPORT_FILE_CHARS = 20000
+# 참고 파일 목록에서 빼는 폴더 (숨김 폴더도 뺀다). 파일 종류·개수·길이 제한은 없다
+SKIPPED_DIRS = ("__pycache__", "node_modules")
 
 # 폴더 서명을 다시 보는 최소 간격(초). 한 실행 안에서 여러 번 불러도 파일 시스템을 매번 훑지 않게 한다.
 CHECK_INTERVAL_SECONDS = 1.0
@@ -104,71 +105,70 @@ def body_digest(body: str) -> str:
 
 
 def _support_paths(folder: Path) -> list[Path]:
-    """절차 폴더의 참고 파일 후보 (references/·templates/ 아래 텍스트 파일, 심볼릭 링크 제외, 이름 순)."""
+    """SKILL 폴더의 다른 파일 전부 (SKILL.md 제외, 하위 폴더 포함, 숨김·캐시 폴더와 심볼릭 링크 제외, 경로 순)."""
     found: list[Path] = []
-    for sub in SUPPORT_DIRS:
-        root = folder / sub
-        if not root.is_dir() or root.is_symlink():
+    for path in sorted(folder.rglob("*")):
+        relative = path.relative_to(folder)
+        if relative.as_posix() == "SKILL.md" or any(p.startswith(".") or p in SKIPPED_DIRS for p in relative.parts):
             continue
-        for path in sorted(root.rglob("*")):
-            if path.is_file() and not path.is_symlink() and path.suffix.lower() in SUPPORT_SUFFIXES:
-                found.append(path)
+        if path.is_symlink() or not path.is_file():
+            continue
+        if any(parent.is_symlink() for parent in path.parents if folder in parent.parents):
+            continue
+        found.append(path)
     return found
 
 
-def parse_skill(path: Path) -> Skill:
-    """SKILL.md 하나를 읽어 검사한다. 어기면 SkillError."""
-    text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
-    text = text.removeprefix("﻿")  # BOM
+def _split_front_matter(text: str) -> tuple[dict, str]:
+    """(머리말 사전, 본문). 머리말이 없으면 ({}, 전체). YAML이 깨졌거나 키-값이 아니면 SkillError."""
     if not text.startswith("---\n"):
-        raise SkillError("머리말(---)이 없습니다")
+        return {}, text
     end = text.find("\n---", 4)
     if end < 0:
-        raise SkillError("머리말이 닫히지 않았습니다")
-    header_text = text[4:end]
-    rest = text[end + len("\n---"):]
-    if rest and not rest.startswith("\n"):
-        raise SkillError("머리말 닫는 줄(---) 뒤에 글자가 있습니다")
+        return {}, text  # 닫히지 않은 --- 는 머리말이 아니라 본문으로 본다
+    header_text, rest = text[4:end], text[end + len("\n---"):]
+    rest = rest.split("\n", 1)[1] if "\n" in rest else ""  # 닫는 줄의 나머지(---- 등)는 버린다
     try:
         header = yaml.safe_load(header_text) or {}
     except yaml.YAMLError as exc:
         raise SkillError(f"머리말 YAML을 읽지 못했습니다: {exc}") from exc
     if not isinstance(header, dict):
         raise SkillError("머리말이 키-값 형식이 아닙니다")
+    return header, rest
 
-    folder = path.parent.name
-    name = header.get("name")
-    if not isinstance(name, str) or name != folder:
-        raise SkillError(f"name({name!r})이 폴더 이름({folder!r})과 다릅니다")
-    if not NAME_PATTERN.match(name):
-        raise SkillError(f"name 형식이 아닙니다: {name!r}")
-    description = header.get("description")
-    if not isinstance(description, str) or not 1 <= len(description.strip()) <= MAX_DESCRIPTION_CHARS:
-        raise SkillError(f"description은 1~{MAX_DESCRIPTION_CHARS}자여야 합니다")
-    metadata = header.get("metadata") or {}
-    if not isinstance(metadata, dict):
-        raise SkillError("metadata가 키-값 형식이 아닙니다")
-    raw_channels = metadata.get("channels")
-    if not isinstance(raw_channels, str):
-        raise SkillError("metadata.channels가 없습니다 (예: \"mail,web\")")
-    channels = tuple(c.strip() for c in raw_channels.split(",") if c.strip())
-    if not channels or any(c not in CHANNELS for c in channels):
-        raise SkillError(f"channels는 {'·'.join(CHANNELS)}만 쓸 수 있습니다: {raw_channels!r}")
-    if AUTHOR_CHANNEL in channels and len(channels) > 1:
-        # 작성 절차가 답변 채널에 섞여 모델에 읽히지 않게 한다
-        raise SkillError(f"{AUTHOR_CHANNEL} 채널은 다른 채널과 함께 쓸 수 없습니다: {raw_channels!r}")
+
+def _first_line(body: str) -> str:
+    """description이 없을 때 쓰는 본문의 첫 줄 (제목 줄 제외)."""
+    return next((line.strip() for line in body.splitlines() if line.strip() and not line.lstrip().startswith("#")), "")
+
+
+def _channels(metadata) -> tuple[str, ...]:
+    """metadata.channels. 없거나 알 수 없는 값뿐이면 답변 채널 전체. author가 있으면 작성 SKILL로만 쓴다."""
+    raw = metadata.get("channels") if isinstance(metadata, dict) else None
+    values = [c.strip() for c in str(raw).split(",")] if raw is not None else []
+    if AUTHOR_CHANNEL in values:
+        return (AUTHOR_CHANNEL,)  # 작성 SKILL이 답변 채널에 섞여 모델에 읽히지 않게 한다
+    channels = tuple(c for c in ANSWER_CHANNELS if c in values)
+    return channels or ANSWER_CHANNELS
+
+
+def parse_skill(path: Path) -> Skill:
+    """SKILL.md 하나를 읽는다. 읽을 수 없으면(인코딩·머리말 YAML) SkillError."""
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    text = text.removeprefix("﻿")  # BOM
+    header, rest = _split_front_matter(text)
     body = normalize_body(rest)
-    if not body:
-        raise SkillError("본문이 없습니다")
-    if len(body) > MAX_BODY_CHARS:
-        raise SkillError(f"본문이 {MAX_BODY_CHARS}자를 넘습니다 ({len(body)}자). 긴 자료는 references/ 참고 파일로 나눕니다")
-    files = tuple(p.relative_to(path.parent).as_posix() for p in _support_paths(path.parent)[:MAX_SUPPORT_FILES])
-    return Skill(name=name, description=description.strip(), channels=channels, body=body, digest=body_digest(body),
-                 files=files, folder=path.parent)
+    name = header.get("name")
+    name = name.strip() if isinstance(name, str) and name.strip() else path.parent.name
+    description = header.get("description")
+    description = description.strip() if isinstance(description, str) and description.strip() else _first_line(body) or name
+    files = tuple(p.relative_to(path.parent).as_posix() for p in _support_paths(path.parent))
+    return Skill(name=name, description=description, channels=_channels(header.get("metadata")), body=body,
+                 digest=body_digest(body), files=files, folder=path.parent)
 
 
 def load_skills(directory: Path | str = SKILLS_DIR, errors: dict[str, str] | None = None) -> dict[str, Skill]:
-    """*/SKILL.md를 읽어 이름 → Skill. 검사를 어긴 문서는 ERROR 로그를 남기고 뺀다 (서버는 계속 뜬다).
+    """*/SKILL.md를 읽어 이름 → Skill. 읽을 수 없거나 이름이 앞 문서와 겹치는 문서는 ERROR 로그를 남기고 뺀다 (서버는 계속 뜬다).
 
     errors를 주면 뺀 문서의 폴더 이름 → 사유를 채운다 (화면에 '불러오지 못한 문서'로 보이려고).
     """
@@ -184,6 +184,12 @@ def load_skills(directory: Path | str = SKILLS_DIR, errors: dict[str, str] | Non
             logger.error("업무 절차 문서를 뺌: %s — %s", path, exc)
             if errors is not None:
                 errors[path.parent.name] = str(exc)
+            continue
+        if skill.name in skills:
+            reason = f"name {skill.name!r}이 skills/{skills[skill.name].folder.name}와 겹칩니다"
+            logger.error("업무 절차 문서를 뺌: %s — %s", path, reason)
+            if errors is not None:
+                errors[path.parent.name] = reason
             continue
         skills[skill.name] = skill
     return skills
@@ -270,7 +276,10 @@ def loaded_at() -> str | None:
 
 
 def read_support_file(skill: Skill, relative: str) -> str | None:
-    """참고 파일 본문. 절차가 가진 목록(skill.files)에 있는 경로만 읽는다. 없거나 폴더 밖이면 None."""
+    """참고 파일 전체 (길이 제한 없음). SKILL이 가진 목록(skill.files)에 있는 경로만 읽는다. 없거나 폴더 밖이면 None.
+
+    글자가 아닌 파일(이미지·글꼴 등)은 내용 대신 그런 파일이라는 안내를 돌려준다.
+    """
     if skill.folder is None or relative not in skill.files:
         return None
     folder = skill.folder.resolve()
@@ -278,12 +287,12 @@ def read_support_file(skill: Skill, relative: str) -> str | None:
     if not path.is_relative_to(folder) or not path.is_file():
         return None
     try:
-        text = path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+        data = path.read_bytes()
     except OSError:
         return None
-    if len(text) > MAX_SUPPORT_FILE_CHARS:
-        text = text[:MAX_SUPPORT_FILE_CHARS] + f"\n…(이하 생략: {len(text)}자 중 {MAX_SUPPORT_FILE_CHARS}자까지)"
-    return text
+    if b"\x00" in data[:8192]:
+        return f"(글자가 아닌 파일입니다: {relative}, {len(data):,}바이트. 내용은 읽지 않았습니다)"
+    return data.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
 # ---------------------------------------------------------------- 사용 중지 (실행마다 조회)
@@ -353,11 +362,11 @@ def db_skill_problem(name: str, description: str | None, body: str | None) -> st
         return "저장소 절차와 이름이 같습니다"
     if name in RESERVED_NAMES:
         return "예약어 이름입니다"
-    if not isinstance(description, str) or not 1 <= len(description.strip()) <= MAX_DESCRIPTION_CHARS:
-        return f"description은 1~{MAX_DESCRIPTION_CHARS}자여야 합니다"
+    if not isinstance(description, str) or not description.strip():
+        return "description이 없습니다"
     body = normalize_body(body or "")
-    if not body or len(body) > MAX_BODY_CHARS:
-        return f"본문은 1~{MAX_BODY_CHARS}자여야 합니다"
+    if not body:
+        return "본문이 없습니다"
     if body.startswith("---"):
         return "본문에 머리말(---)이 있습니다"
     return None

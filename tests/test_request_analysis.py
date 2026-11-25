@@ -197,7 +197,7 @@ def test_mail_instructions_cannot_push_values_out_of_range(env):
         assert conn.execute("SELECT COUNT(*) FROM skill_doc").fetchone()[0] == 0
     # 자료 안의 닫는 표시는 지워서 자료 밖 지시처럼 보이지 않게 한다
     assert user_text(llm.calls[0][0]).count("</메일>") == 1
-    assert "skill-creator" not in [s.name for s in skills.get_skills().values()]
+    assert "skill-creator" not in [s.name for s in skills.selectable_skills("mail")]  # 작성 SKILL은 답변에 쓰지 않는다
 
 
 def test_analyzer_thread_survives_exceptions_and_mail_loop_still_works(env, monkeypatch):

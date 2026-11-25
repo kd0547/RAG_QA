@@ -64,10 +64,12 @@ def test_added_changed_removed_documents_are_picked_up_without_restart(tmp_path,
 
 def test_broken_document_is_reported_and_fixed_document_returns(tmp_path):
     skills.reload_skills(tmp_path)
-    write_skill(tmp_path, "later", channels="mail,sms")
+    broken = tmp_path / "later" / "SKILL.md"
+    broken.parent.mkdir()
+    broken.write_text("---\nname: [깨진 YAML\n---\n본문\n", encoding="utf-8")
     assert "later" not in skills.repo_skills() and "later" in skills.repo_errors()
 
-    bump(write_skill(tmp_path, "later", channels="mail,web"))
+    bump(write_skill(tmp_path, "later"))
     assert "later" in skills.repo_skills() and skills.repo_errors() == {}
 
 
@@ -172,22 +174,38 @@ def test_prompt_mentions_search_skills(agent_env):
 # ---------------------------------------------------------------- 참고 파일
 
 def test_support_files_are_listed_and_readable(tmp_path):
+    """SKILL 폴더의 다른 파일은 폴더·종류와 관계없이 목록에 오르고 읽힌다 (표준 형식의 agents/·scripts/·assets/ 등)."""
     write_skill(tmp_path, "big", body="본문. 모델 목록은 references/models.md를 본다.")
-    (tmp_path / "big" / "references").mkdir()
-    (tmp_path / "big" / "references" / "models.md").write_text("# 모델 목록\nA-100\n", encoding="utf-8")
-    (tmp_path / "big" / "references" / "run.py").write_text("print(1)", encoding="utf-8")  # 텍스트 자료가 아님
-    (tmp_path / "big" / "scripts").mkdir()
-    (tmp_path / "big" / "scripts" / "notes.md").write_text("읽지 않는 폴더", encoding="utf-8")
+    folder = tmp_path / "big"
+    for relative, text in {"references/models.md": "# 모델 목록\nA-100\n", "scripts/run.py": "print(1)\n",
+                           "agents/grader.md": "채점", "eval-viewer/viewer.html": "<p>보기</p>"}.items():
+        (folder / relative).parent.mkdir(parents=True, exist_ok=True)
+        (folder / relative).write_text(text, encoding="utf-8")
+    (folder / "assets").mkdir()
+    (folder / "assets" / "logo.png").write_bytes(b"\x89PNG\r\n\x00\x00binary")
+    (folder / "__pycache__").mkdir()
+    (folder / "__pycache__" / "x.pyc").write_bytes(b"\x00")
+    (folder / ".git").mkdir()
+    (folder / ".git" / "HEAD").write_text("ref", encoding="utf-8")
     (tmp_path / "secret.md").write_text("폴더 밖", encoding="utf-8")
     skills.reload_skills(tmp_path)
 
-    assert skills.repo_skills()["big"].files == ("references/models.md",)
+    assert skills.repo_skills()["big"].files == (
+        "agents/grader.md", "assets/logo.png", "eval-viewer/viewer.html", "references/models.md", "scripts/run.py")
     body = load("big")
     assert "[참고 파일]" in body and "- references/models.md" in body
     assert load("big", "references/models.md").endswith("# 모델 목록\nA-100\n")
     assert load("big", "references\\models.md").startswith("[업무 절차 big 참고 파일")
-    for bad in ("../secret.md", "references/run.py", "scripts/notes.md", "/etc/passwd"):
+    assert load("big", "scripts/run.py").endswith("print(1)\n")
+    assert "글자가 아닌 파일" in load("big", "assets/logo.png")
+    for bad in ("../secret.md", "SKILL.md", "__pycache__/x.pyc", ".git/HEAD", "/etc/passwd"):
         assert load("big", bad).startswith("오류:"), bad
+
+
+def test_skill_can_be_loaded_by_folder_name(tmp_path):
+    write_skill(tmp_path, "folder-name", name="declared-name", body="본문")
+    skills.reload_skills(tmp_path)
+    assert load("declared-name").endswith("본문") and load("folder-name").endswith("본문")
 
 
 def test_new_support_file_is_picked_up(tmp_path):
@@ -199,12 +217,19 @@ def test_new_support_file_is_picked_up(tmp_path):
     assert skills.repo_skills()["big"].files == ("references/a.md",)
 
 
-def test_long_support_file_is_cut(tmp_path):
+def test_long_support_file_is_read_whole(tmp_path):
     write_skill(tmp_path, "big")
     (tmp_path / "big" / "references").mkdir()
-    (tmp_path / "big" / "references" / "long.txt").write_text("가" * (skills.MAX_SUPPORT_FILE_CHARS + 10), encoding="utf-8")
+    (tmp_path / "big" / "references" / "long.txt").write_text("가" * 100000, encoding="utf-8")
     skills.reload_skills(tmp_path)
-    assert "이하 생략" in load("big", "references/long.txt")
+    assert load("big", "references/long.txt").endswith("가" * 100000)
+
+
+def test_standard_skill_folder_loads():
+    """저장소의 skill-creator(표준 Agent Skills, 본문 3만 자대)도 읽힌다."""
+    loaded = skills.reload_skills()
+    assert "skill-creator" in loaded and len(loaded["skill-creator"].body) > 6000
+    assert "references/schemas.md" in loaded["skill-creator"].files and skills.repo_errors() == {}
 
 
 def test_repository_answer_skills_still_load():

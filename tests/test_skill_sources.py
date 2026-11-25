@@ -48,15 +48,15 @@ def test_author_skill_is_not_listed_or_loadable_in_answer_channels(tmp_path):
         assert out.startswith("오류:") and "절차를 이렇게 쓴다" not in out
 
 
-def test_author_channel_cannot_be_mixed_with_answer_channels(tmp_path, caplog):
+def test_author_channel_mixed_with_answer_channels_is_author_only(tmp_path):
     write_skill(tmp_path, "create-skill", channels="author,mail", body="섞임")
 
     loaded = skills.reload_skills(tmp_path)
 
-    assert loaded == {}
-    assert skills.author_skill() is None
-    status = skills.author_skill_status()
-    assert status["available"] is False and "검사를 통과하지 못했습니다" in status["reason"]
+    # 작성 SKILL이 답변 채널에 섞여 모델에 읽히지 않게 author로만 쓴다
+    assert loaded["create-skill"].channels == ("author",)
+    assert skills.author_skill().body == "섞임"
+    assert skills.selectable_skills("mail") == []
 
 
 def test_missing_create_skill_disables_author_only(tmp_path):
@@ -99,7 +99,8 @@ def test_db_skill_with_repo_or_reserved_name_is_ignored(tmp_path, caplog):
         db_row("create-skill", body="작성 절차 덮기"),
         db_row("drafts"),
         db_row("Bad_Name"),
-        db_row("too-long", body="가" * (skills.MAX_BODY_CHARS + 1)),
+        db_row("empty-body", body="   "),
+        db_row("long-body", body="가" * 50000),  # 길이 제한은 없다
     ])
 
     with caplog.at_level(logging.ERROR):
@@ -108,7 +109,7 @@ def test_db_skill_with_repo_or_reserved_name_is_ignored(tmp_path, caplog):
 
     assert merged["spec-compare"].body == "대조" and merged["spec-compare"].origin == "repo"
     assert skills.author_skill().body == "절차를 이렇게 쓴다"
-    assert set(merged) == {"mail-reply-style", "revise-after-reject", "spec-compare", "create-skill"}
+    assert set(merged) == {"mail-reply-style", "revise-after-reject", "spec-compare", "create-skill", "long-body"}
     assert len([r for r in caplog.records if "DB 업무 절차를 읽지 않음" in r.getMessage()]) == 5
 
 

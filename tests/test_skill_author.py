@@ -114,7 +114,6 @@ def test_sent_cases_first_and_labeled(env, monkeypatch):
     (draft(name="spec-compare"), "저장소 절차·예약어와 같은 이름입니다: spec-compare"),
     (draft(name="drafts"), "저장소 절차·예약어와 같은 이름입니다: drafts"),
     (draft(name="skill-creator"), "저장소 절차·예약어와 같은 이름입니다: skill-creator"),
-    (draft(body="가" * (skills.MAX_BODY_CHARS + 1)), "본문은 1~6000자여야 합니다"),
     (draft(body="---\nname: x\n---\n본문"), "본문에 머리말(---)을 넣지 않습니다"),
     (draft(name="Warranty_Terms"), "이름 형식이 아닙니다"),
 ])

@@ -99,8 +99,7 @@ def test_middleware_order_and_settings():
     names = [m.name for m in middleware]
     assert names[1:] == [
         "ContextEditingMiddleware", "SummarizationMiddleware", "ToolCallLimitMiddleware[search_documents]",
-        "ToolCallLimitMiddleware[load_skill]", "ToolCallLimitMiddleware[search_skills]",
-        "ToolCallLimitMiddleware", "ModelCallLimitMiddleware",
+        "ToolCallLimitMiddleware", "ModelCallLimitMiddleware",  # SKILL 도구에는 따로 한도가 없다
     ]
     summary = middleware[2]
     assert summary.trigger == ("tokens", config.CTX_SUMMARY_TRIGGER_TOKENS)  # 비율 기준이 아니다

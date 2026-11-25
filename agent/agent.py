@@ -101,8 +101,6 @@ RECURSION_LIMIT = config.AGENT_RECURSION_LIMIT
 
 # 실행 한도 (서버 코드로 강제한다. 프롬프트에는 횟수를 쓰지 않는다)
 SEARCH_CALLS_PER_RUN = 6
-SKILL_CALLS_PER_RUN = 6  # 본문과 참고 파일 읽기를 함께 센다
-SKILL_SEARCH_CALLS_PER_RUN = 3
 TOOL_CALLS_PER_RUN = 25
 MODEL_CALLS_PER_RUN = 20
 # ModelCallLimitMiddleware(exit_behavior="end")가 한도에 걸리면 마지막에 넣는 메시지의 앞부분
@@ -139,7 +137,8 @@ def build_middleware(summary_model) -> list:
       load_skill 결과도 지우지 않는다 (읽은 절차를 실행 중간에 잃지 않게).
     - Summarization: 대화가 CTX_SUMMARY_TRIGGER_TOKENS를 넘으면 앞부분 요약, 최근 12개 메시지는 그대로.
       로컬 모델에 profile이 없어 비율 기준은 쓰지 않는다.
-    - 실행당 한도: search_documents 6회, load_skill 6회, search_skills 3회, 도구 25회, 모델 호출 20회(넘으면 종료 → 답변으로 쓰지 않음).
+    - 실행당 한도: search_documents 6회, 도구 25회, 모델 호출 20회(넘으면 종료 → 답변으로 쓰지 않음).
+      SKILL(load_skill·search_skills)에는 따로 횟수 한도를 두지 않는다 (일반 에이전트와 같이 도구 전체 한도만).
     """
     return [
         _system_prompt,
@@ -156,8 +155,6 @@ def build_middleware(summary_model) -> list:
             summary_prompt=SUMMARY_PROMPT,
         ),
         ToolCallLimitMiddleware(tool_name="search_documents", run_limit=SEARCH_CALLS_PER_RUN),
-        ToolCallLimitMiddleware(tool_name="load_skill", run_limit=SKILL_CALLS_PER_RUN),
-        ToolCallLimitMiddleware(tool_name="search_skills", run_limit=SKILL_SEARCH_CALLS_PER_RUN),
         ToolCallLimitMiddleware(run_limit=TOOL_CALLS_PER_RUN),
         ModelCallLimitMiddleware(run_limit=MODEL_CALLS_PER_RUN, exit_behavior="end"),
     ]
