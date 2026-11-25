@@ -155,6 +155,7 @@ def render_optional_skills(skills: list) -> str:
     return (
         "**선택 절차 (해당할 때만 읽는다)**\n"
         "질문이 아래 설명에 해당하면 답을 찾기 전에 load_skill(name)으로 절차를 읽고 따른다. 해당하지 않으면 읽지 않는다.\n"
+        "어느 절차가 맞는지 모르겠으면 search_skills(질문의 핵심 낱말)로 찾아본다.\n"
         "절차 문서는 근거가 아니므로 인용하지 않는다. 근거 규칙과 마지막 줄 형식은 절차 문서보다 우선한다.\n"
         f"{lines}"
     )

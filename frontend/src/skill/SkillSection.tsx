@@ -8,17 +8,17 @@ import { skillPath, type SkillTab } from './paths';
 
 const TABS: { key: SkillTab; label: string }[] = [
     { key: 'review', label: '검토 대기' },
-    { key: 'active', label: '사용 중 절차' },
+    { key: 'active', label: '사용 중 SKILL' },
     { key: 'types', label: '문의 유형' },
 ];
 
 const getSearch = () => window.location.search;
 
 /**
- * 업무 절차 (지시서 I6).
- * - 검토 대기: 문의 사례로 만든 절차 초안을 R&D가 고치고 승인·반려한다
- * - 사용 중 절차: 저장소 절차(기본)와 승인된 생성 절차. 생성 절차는 고치기(새 버전)·사용 중지
- * - 문의 유형: 분석이 나눈 문의 유형별 건수와 맡는 절차. 초안 만들기·절차 불필요·합치기
+ * SKILL (지시서 I6).
+ * - 검토 대기: 문의 사례로 만든 SKILL 초안을 R&D가 고치고 승인·반려한다
+ * - 사용 중 SKILL: 저장소 SKILL(skills/ 파일, 끄기·다시 켜기)와 승인된 생성 SKILL(고치기·사용 중지)
+ * - 문의 유형: 분석이 나눈 문의 유형별 건수와 맡는 SKILL. 초안 만들기·SKILL 불필요·합치기
  */
 export function SkillSection() {
     const search = useSyncExternalStore(subscribeRoute, getSearch);

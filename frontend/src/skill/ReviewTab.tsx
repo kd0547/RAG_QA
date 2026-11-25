@@ -69,7 +69,7 @@ export function ReviewTab({ docId, onSelect }: { docId: number | null; onSelect:
             <aside className="md:w-[300px] lg:w-[320px] shrink-0 border-b md:border-b-0 md:border-r border-divide p-4 md:p-5 md:overflow-y-auto">
                 <h1 className="text-[16px] font-bold">검토 대기</h1>
                 <p className="mt-1 text-[12px] leading-5 text-muted">
-                    문의 사례로 만든 절차 초안입니다. 승인하기 전에는 어떤 답변에도 쓰이지 않습니다.
+                    문의 사례로 만든 SKILL 초안입니다. 승인하기 전에는 어떤 답변에도 쓰이지 않습니다.
                 </p>
                 {author && !author.available && <div className="mt-3"><AuthorMissing reason={author.reason} /></div>}
                 <div role="group" aria-label="상태 필터" className="mt-4 flex flex-wrap gap-1">
@@ -214,7 +214,7 @@ function DraftPanel({
         apply(d);
         setDialog(null);
         setNote('');
-        setNotice('승인했습니다. 이후 답변에서 모델이 이 절차를 골라 읽을 수 있습니다. (사용 중 절차 탭)');
+        setNotice('승인했습니다. 이후 답변에서 모델이 이 SKILL을 골라 읽을 수 있습니다. (사용 중 SKILL 탭)');
     }, '승인하지 못했습니다.');
 
     const reject = () => run('reject', () => skillApi.reject(doc.doc_id, reason.trim()), (d) => {
@@ -251,7 +251,7 @@ function DraftPanel({
                 <div role="status" className="mt-5 flex items-center gap-3 rounded-xl border border-brand/20 bg-brand-tint px-4 py-3 text-[13px] text-brand-hover">
                     <span className="w-4 h-4 rounded-full border-2 border-brand-pale border-t-brand animate-spin shrink-0" aria-hidden="true" />
                     생성 중입니다. 분석 스레드가 처리할 메일이 없을 때 만듭니다 (30초 주기).
-                    {!authorAvailable && ' 지금은 작성 절차가 없어 만들지 않습니다.'}
+                    {!authorAvailable && ' 지금은 작성 SKILL이 없어 만들지 않습니다.'}
                 </div>
             )}
             {doc.status === 'error' && doc.error && (
@@ -285,9 +285,9 @@ function DraftPanel({
             )}
 
             {doc.status !== 'generating' && (
-                <section aria-label="절차 내용" className="mt-5 overflow-hidden rounded-2xl border border-divide bg-white">
+                <section aria-label="SKILL 내용" className="mt-5 overflow-hidden rounded-2xl border border-divide bg-white">
                     <div className="border-b border-divide px-5 py-4">
-                        <label htmlFor="skill-description" className="text-[13px] font-semibold">설명 <span className="font-normal text-muted">— 답변 모델은 이 설명만 보고 절차를 고릅니다</span></label>
+                        <label htmlFor="skill-description" className="text-[13px] font-semibold">설명 <span className="font-normal text-muted">— 답변 모델은 이 설명만 보고 SKILL을 고릅니다</span></label>
                         <textarea
                             id="skill-description"
                             value={edit.description}
@@ -323,7 +323,7 @@ function DraftPanel({
                                     type="button"
                                     onClick={regenerate}
                                     disabled={!authorAvailable || Boolean(busy)}
-                                    title={authorAvailable ? '같은 유형의 사례로 새 초안을 만듭니다' : '작성 절차(create-skill)가 없어 만들 수 없습니다'}
+                                    title={authorAvailable ? '같은 유형의 사례로 새 초안을 만듭니다' : '작성 SKILL(create-skill)가 없어 만들 수 없습니다'}
                                     className={buttonOutline}
                                 >
                                     <RetryIcon />{busy === 'regen' ? '요청 중…' : '다시 생성'}
@@ -352,7 +352,7 @@ function DraftPanel({
                     </div>
                     {editable && (
                         <p className="border-t border-divide bg-brand-tint px-5 py-2.5 text-[12px] text-brand-hover">
-                            승인하면 이후 답변에서 모델이 이 절차를 골라 읽을 수 있습니다.
+                            승인하면 이후 답변에서 모델이 이 SKILL을 골라 읽을 수 있습니다.
                             {hasErrors && <span className="text-danger"> 지금은 검사 오류가 있어 승인할 수 없습니다.</span>}
                         </p>
                     )}
@@ -392,7 +392,7 @@ function DraftPanel({
                     onConfirm={() => void approve()}
                     onClose={() => setDialog(null)}
                 >
-                    <p>승인하면 이후 메일·웹 답변에서 모델이 이 절차를 골라 읽을 수 있습니다. 근거 검증·실행 한도·발송 승인은 절차 내용과 관계없이 그대로입니다.</p>
+                    <p>승인하면 이후 메일·웹 답변에서 모델이 이 SKILL을 골라 읽을 수 있습니다. 근거 검증·실행 한도·발송 승인은 SKILL 내용과 관계없이 그대로입니다.</p>
                     <label htmlFor="approve-note" className="mt-3 block text-[12px] font-semibold">메모 (선택)</label>
                     <input id="approve-note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} className={`mt-1 h-9 ${inputClass}`} />
                     <p className="mt-3 rounded-lg bg-chip px-3 py-2 text-[12px] leading-5 text-muted">

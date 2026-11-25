@@ -10,7 +10,7 @@ const APPS: { key: AppKey; label: string; path: string }[] = [
     { key: 'mail', label: '메일', path: '/mail' },
     { key: 'spec', label: '제품 사양', path: '/spec' },
     { key: 'knowledge', label: '지식 그래프', path: '/knowledge' },
-    { key: 'skill', label: '업무 절차', path: '/skill' },
+    { key: 'skill', label: 'SKILL', path: '/skill' },
     { key: 'prompt', label: '프롬프트', path: '/prompt' },
     { key: 'status', label: '서버 상태', path: '/status' },
 ];

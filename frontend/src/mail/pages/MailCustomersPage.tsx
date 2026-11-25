@@ -297,7 +297,7 @@ function EventView({ event, sender }: { event: TimelineEvent; sender: string }) 
                             <div className="mb-1 flex items-center gap-1.5 flex-wrap text-[11px] font-semibold text-brand">
                                 <span>{event.current ? 'AI 초안' : '이전 초안'}</span>
                                 {event.skills.map((s) => (
-                                    <span key={s.name} title={`적용 절차 ${s.name} · ${s.digest}`} className="px-1.5 rounded bg-white/70 font-medium">
+                                    <span key={s.name} title={`적용 SKILL ${s.name} · ${s.digest}`} className="px-1.5 rounded bg-white/70 font-medium">
                                         {s.name}
                                     </span>
                                 ))}

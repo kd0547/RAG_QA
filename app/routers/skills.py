@@ -2,7 +2,8 @@
 
 - 사용 중 절차(저장소 + DB 승인본) 조회, 생성 초안 검토(수정·승인·반려), 승인본 고치기(새 버전)·사용 중지
 - 문의 유형 관리(초안 요청, 절차 불필요 표시, 합치기)와 분석된 문의 목록
-- 저장소 절차(skills/)는 읽기 전용이다. 고치거나 사용 중지하는 요청은 400.
+- 저장소 절차(skills/)의 본문은 화면에서 고치지 않는다 (파일을 고치면 다음 실행부터 반영). 고치기·retire 요청은 400.
+  대신 끄기·다시 켜기(/skills/{name}/disable, /enable)로 답변·초안 생성에서 뺄 수 있다. 파일은 그대로 둔다.
 - 승인·반려·사용 중지는 상태 조건부 UPDATE라 두 번 눌러도 한 번만 처리된다.
 - 로그인 기능이 없어 승인자는 요청 IP(reviewed_by)로만 남는다.
 - 응답에 메일 본문 전체를 넣지 않는다. 사례는 제목과 검토 화면 링크용 task_id만.
@@ -70,7 +71,7 @@ def _history_item(doc: dict) -> dict:
 def _doc_or_404(doc_id: int) -> dict:
     doc = skill_repo.get_doc(doc_id)
     if doc is None:
-        raise HTTPException(status_code=404, detail="절차 초안을 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="SKILL 초안을 찾을 수 없습니다.")
     return doc
 
 
@@ -89,32 +90,38 @@ def _draft_detail(doc: dict) -> dict:
 
 def _repo_or_400(name: str, action: str) -> None:
     if name in skills.repo_skills() or name == skills.AUTHOR_SKILL:
-        raise HTTPException(status_code=400, detail=f"저장소 절차(skills/{name})는 {action}할 수 없습니다. 변경은 git으로 검토합니다.")
+        raise HTTPException(status_code=400, detail=f"저장소 SKILL(skills/{name})은 화면에서 {action}할 수 없습니다. 본문은 파일에서 고치고, 멈추려면 끄기를 씁니다.")
 
 
 # ---------------------------------------------------------------- 사용 중 절차
 
 @router.get("/skills")
 def list_skills() -> dict:
+    """저장소 절차(꺼진 것·작성 절차 포함) + 사용 중인 DB 절차. 화면은 enabled·author로 묶어 보인다."""
     since = (datetime.now() - timedelta(days=USAGE_DAYS)).isoformat()
     usage = skill_repo.skill_usage_since(since)
     active_docs = {d["name"]: d for d in skill_repo.active_skill_docs()}
+    disabled = skill_repo.disabled_skills()
     items = []
-    for skill in skills.get_skills().values():
-        if skills.AUTHOR_CHANNEL in skill.channels:
-            continue  # 작성 절차는 답변 절차가 아니다 (author 필드로 따로 보인다)
+    for skill in [*skills.repo_skills().values(), *skills.db_skills().values()]:
         doc = active_docs.get(skill.name) if skill.origin == "db" else None
+        off = disabled.get(skill.name) if skill.origin == "repo" else None
         items.append({
             "name": skill.name, "description": skill.description, "channels": list(skill.channels),
             "origin": skill.origin, "version": skill.version, "digest": skill.digest,
             "server_applied": skill.name in skills.SERVER_CHOSEN and skill.origin == "repo",
+            "author": skills.AUTHOR_CHANNEL in skill.channels,
+            "enabled": off is None, "disabled_at": off["disabled_at"] if off else None,
+            "files": list(skill.files),
             "uses_30d": usage.get(skill.name, 0),
             "doc_id": doc["doc_id"] if doc else None, "type": _type_ref(doc.get("type_id")) if doc else None,
             "approved_at": doc.get("reviewed_at") if doc else None,
         })
-    items.sort(key=lambda i: (i["origin"] != "repo", not i["server_applied"], i["name"]))
+    items.sort(key=lambda i: (i["author"], not i["enabled"], i["origin"] != "repo", not i["server_applied"], i["name"]))
     return {
         "items": items,
+        "load_errors": [{"folder": folder, "reason": reason} for folder, reason in sorted(skills.repo_errors().items())],
+        "loaded_at": skills.loaded_at(),
         "author": skills.author_skill_status(),
         "settings": {
             "analysis_enabled": config.REQUEST_ANALYSIS_ENABLED, "auto_draft": config.SKILL_DRAFT_AUTO,
@@ -181,7 +188,7 @@ def approve_draft(doc_id: int, request: Request, payload: ApproveBody | None = N
     if outcome == "stale":
         raise HTTPException(status_code=409, detail="같은 이름의 더 새 버전이 이미 승인되었거나 사용 중지되었습니다.")
     if outcome == "not_found":
-        raise HTTPException(status_code=404, detail="절차 초안을 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="SKILL 초안을 찾을 수 없습니다.")
     return _draft_detail(skill_repo.get_doc(doc_id))
 
 
@@ -192,7 +199,7 @@ def reject_draft(doc_id: int, payload: RejectBody, request: Request) -> dict:
         raise HTTPException(status_code=400, detail="반려 사유를 적어 주세요.")
     outcome = skill_repo.reject_doc(doc_id, _client_ip(request), reason)
     if outcome == "not_found":
-        raise HTTPException(status_code=404, detail="절차 초안을 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="SKILL 초안을 찾을 수 없습니다.")
     if outcome != "ok":
         raise HTTPException(status_code=409, detail="검토 대기(draft)·생성 실패(error) 초안만 반려할 수 있습니다.")
     return _draft_detail(skill_repo.get_doc(doc_id))
@@ -299,14 +306,18 @@ def list_analysis(
 def get_skill(name: str) -> dict:
     repo = skills.repo_skills().get(name)
     if repo is not None:
+        off = skill_repo.disabled_skills().get(name)
         return {
             "name": repo.name, "description": repo.description, "channels": list(repo.channels), "origin": "repo",
             "version": None, "digest": repo.digest, "body": repo.body, "read_only": True,
-            "server_applied": repo.name in skills.SERVER_CHOSEN, "active": True, "history": [],
+            "server_applied": repo.name in skills.SERVER_CHOSEN, "active": off is None, "history": [],
+            "author": skills.AUTHOR_CHANNEL in repo.channels, "enabled": off is None,
+            "disabled_at": off["disabled_at"] if off else None, "disabled_by": off["disabled_by"] if off else None,
+            "files": list(repo.files),
         }
     history = [d for d in skill_repo.history(name) if d["status"] != "generating"]
     if not history or skill_author.is_placeholder_name(name):
-        raise HTTPException(status_code=404, detail="업무 절차를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="SKILL을 찾을 수 없습니다.")
     active = skill_repo.active_doc(name)
     shown = active or skill_repo.latest_approved(name) or history[-1]
     return {
@@ -327,7 +338,7 @@ def new_version_draft(name: str) -> dict:
         return {**_draft_detail(existing), "already": True}
     base = skill_repo.latest_approved(name)
     if base is None:
-        raise HTTPException(status_code=404, detail="승인된 적이 있는 DB 절차가 아닙니다.")
+        raise HTTPException(status_code=404, detail="승인된 적이 있는 DB SKILL이 아닙니다.")
     check = skill_author.recheck_doc(base, base.get("description") or "", base.get("body") or "")
     doc_id = skill_repo.new_version_from_approved(name, check, skills.body_digest(base.get("body") or ""))
     return {**_draft_detail(skill_repo.get_doc(doc_id)), "already": False}
@@ -337,5 +348,30 @@ def new_version_draft(name: str) -> dict:
 def retire_skill(name: str, request: Request) -> dict:
     _repo_or_400(name, "사용 중지")
     if skill_repo.retire(name, _client_ip(request)) is None:
-        raise HTTPException(status_code=409, detail="사용 중인 DB 절차가 아닙니다 (이미 사용 중지됐거나 승인된 적이 없습니다).")
+        raise HTTPException(status_code=409, detail="사용 중인 DB SKILL이 아닙니다 (이미 사용 중지됐거나 승인된 적이 없습니다).")
+    return get_skill(name)
+
+
+def _repo_skill_or_error(name: str) -> None:
+    """끄기·켜기는 저장소 절차만. DB 절차는 사용 중지(retire)를 쓴다."""
+    if name in skills.repo_skills():
+        return
+    if skill_repo.history(name):
+        raise HTTPException(status_code=400, detail="생성 SKILL은 '사용 중지'로 멈춥니다 (끄기는 저장소 SKILL만).")
+    raise HTTPException(status_code=404, detail="SKILL을 찾을 수 없습니다.")
+
+
+@router.post("/skills/{name}/disable")
+def disable_repo_skill(name: str, request: Request) -> dict:
+    """저장소 절차를 끈다: 답변(서버 적용·선택 목록·load_skill)과 초안 생성에서 빠진다. 파일은 그대로다. 이미 꺼져 있으면 그대로 돌려준다."""
+    _repo_skill_or_error(name)
+    skill_repo.disable_skill(name, _client_ip(request))
+    return get_skill(name)
+
+
+@router.post("/skills/{name}/enable")
+def enable_repo_skill(name: str) -> dict:
+    """꺼 둔 저장소 절차를 다시 켠다. 끄면서 끊은 문의 유형 연결은 되살리지 않는다."""
+    _repo_skill_or_error(name)
+    skill_repo.enable_skill(name)
     return get_skill(name)

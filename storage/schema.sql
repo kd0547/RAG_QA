@@ -479,6 +479,13 @@ CREATE TABLE IF NOT EXISTS skill_doc (
 CREATE INDEX IF NOT EXISTS idx_skill_doc_type ON skill_doc(type_id, status);
 CREATE INDEX IF NOT EXISTS idx_skill_doc_status ON skill_doc(status);
 
+-- skill_disabled: 사용 중지한 저장소 절차(skills/ 폴더). 파일은 그대로 두고 답변·초안 생성에서만 뺀다. 다시 켜면 행을 지운다.
+CREATE TABLE IF NOT EXISTS skill_disabled (
+    name        TEXT PRIMARY KEY,
+    disabled_at TEXT NOT NULL,
+    disabled_by TEXT                            -- 요청 IP (로그인 기능이 없다)
+);
+
 
 -- ===== 고객 이력과 담당자 메모 (통합 지시서 G1) =====
 -- 고객 이력은 기존 기록(mails·tasks·request_analysis)에서 그때그때 조회한다. 사람이 남기는 메모만 여기에 둔다.

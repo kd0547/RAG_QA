@@ -91,7 +91,7 @@ export function TypesTab({ onOpenDraft }: { onOpenDraft: (docId: number) => void
                 <h1 className="text-[22px] font-bold tracking-tight">문의 유형</h1>
                 <p className="mt-2 text-[13px] leading-6 text-muted">
                     저장된 메일 문의를 답변 뒤에 따로 분석해 유형을 나눕니다 (메일 처리가 없을 때 30초마다 몇 건씩).
-                    절차가 없는 유형의 사례가 쌓이면 절차 초안이 만들어지고, R&D가 검토 대기 탭에서 승인합니다.
+                    SKILL이 없는 유형의 사례가 쌓이면 SKILL 초안이 만들어지고, R&D가 검토 대기 탭에서 승인합니다.
                     {data && <> 분석 {data.analysis.total}건{data.analysis.errors > 0 && <>, 실패 {data.analysis.errors}건</>}.</>}
                 </p>
                 {data && !data.author.available && <div className="mt-4"><AuthorMissing reason={data.author.reason} /></div>}
@@ -120,7 +120,7 @@ export function TypesTab({ onOpenDraft }: { onOpenDraft: (docId: number) => void
                                         </div>
                                         <div className="flex flex-wrap gap-4 text-[12px]">
                                             <Stat label="분석 건수" value={String(t.case_count)} />
-                                            <Stat label="맡는 절차" value={t.skill_name ?? '없음'} muted={!t.skill_name} />
+                                            <Stat label="맡는 SKILL" value={t.skill_name ?? '없음'} muted={!t.skill_name} />
                                             <Stat
                                                 label="분석·실제 사용 어긋남"
                                                 value={String(t.mismatch_count)}
@@ -132,7 +132,7 @@ export function TypesTab({ onOpenDraft }: { onOpenDraft: (docId: number) => void
 
                                     {mismatchOf === t.type_id && (
                                         <div className="mt-3 rounded-xl bg-surface px-4 py-3 text-[12px]">
-                                            <p className="text-muted">분석은 절차를 골랐는데 실제 답변 실행에서 그 절차를 읽지 않은 문의입니다.</p>
+                                            <p className="text-muted">분석은 SKILL을 골랐는데 실제 답변 실행에서 그 SKILL을 읽지 않은 문의입니다.</p>
                                             {mismatches === null ? <p className="mt-2 text-muted">불러오는 중…</p> : (
                                                 <ul className="mt-2 space-y-1">
                                                     {mismatches.map((m) => (
@@ -169,14 +169,14 @@ export function TypesTab({ onOpenDraft }: { onOpenDraft: (docId: number) => void
                                                 type="button"
                                                 onClick={() => void requestDraft(t)}
                                                 disabled={!data.author.available || busy === t.type_id}
-                                                title={data.author.available ? '이 유형의 사례로 절차 초안을 만듭니다 (건수 조건 없음)' : '작성 절차(create-skill)가 없어 만들 수 없습니다'}
+                                                title={data.author.available ? '이 유형의 사례로 SKILL 초안을 만듭니다 (건수 조건 없음)' : '작성 SKILL(create-skill)가 없어 만들 수 없습니다'}
                                                 className={buttonOutline}
                                             >
                                                 {t.has_rejected ? '초안 다시 만들기' : '초안 만들기'}
                                             </button>
                                         )}
                                         <button type="button" onClick={() => void toggleState(t)} disabled={busy === t.type_id} className={buttonOutline}>
-                                            {t.state === 'open' ? '절차 불필요로 표시' : '절차 필요로 되돌리기'}
+                                            {t.state === 'open' ? 'SKILL 불필요로 표시' : 'SKILL 필요로 되돌리기'}
                                         </button>
                                         <button
                                             type="button"

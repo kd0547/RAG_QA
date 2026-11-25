@@ -97,7 +97,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("기본 프롬프트 등록 실패")
 
-    # 업무 절차(skills/*/SKILL.md)를 한 번 읽어 둔다. 문서를 바꾸면 서버를 다시 시작해야 반영된다.
+    # 업무 절차(skills/*/SKILL.md)를 미리 읽어 둔다. 이후 문서를 넣거나 고치면 다음 실행 때 다시 읽는다 (재시작 불필요).
     # 검사를 어긴 문서는 빼고(ERROR 로그) 서버는 계속 뜬다.
     loaded_skills = reload_skills()
     logger.info("업무 절차 %d개: %s", len(loaded_skills),

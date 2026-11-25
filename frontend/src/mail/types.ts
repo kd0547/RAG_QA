@@ -68,7 +68,7 @@ export interface MailRun {
     tokens_in: number | null;
     tokens_out: number | null;
     tool_calls: MailTraceItem[];
-    skills?: AppliedSkill[];        // 서버가 이 실행에 붙인 업무 절차 (이전 버전 서버는 없음)
+    skills?: AppliedSkill[];        // 서버가 이 실행에 붙인 SKILL (이전 버전 서버는 없음)
 }
 
 /** 상세(GET /mails/{task_id}) */

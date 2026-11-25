@@ -216,19 +216,20 @@ def test_load_skill_result_survives_tool_result_clearing(agent_env, tmp_path, mo
     assert fifth["k"].startswith("[업무 절차 spec-compare")
 
 
-def test_fifth_load_skill_call_is_limited(agent_env):
+def test_load_skill_calls_over_limit_are_refused(agent_env):
     from agent import agent as agent_module
 
+    limit = agent_module.SKILL_CALLS_PER_RUN
     model = agent_env.install(
-        [tool_call("load_skill", {"name": "spec-compare"}, f"k{i}") for i in range(5)]
+        [tool_call("load_skill", {"name": "spec-compare"}, f"k{i}") for i in range(limit + 1)]
         + [AIMessage(content="답\n근거: 없음")]
     )
 
     agent_module.run_agent_temp_attachments("x", mode="local", owner=Owner("session", "s1"))
 
     contents = tool_contents(model.calls[-1])
-    assert all(contents[f"k{i}"].startswith("[업무 절차") for i in range(4))
-    assert "Tool call limit exceeded" in contents["k4"]
+    assert all(contents[f"k{i}"].startswith("[업무 절차") for i in range(limit))
+    assert "Tool call limit exceeded" in contents[f"k{limit}"]
 
 
 # ---------------------------------------------------------------- 절차가 서버 정책을 바꾸지 못한다

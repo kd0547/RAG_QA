@@ -629,23 +629,58 @@ def list_evidence() -> str:
 # ---------- 업무 절차 ----------
 
 @tool
-def load_skill(name: str) -> str:
+def load_skill(name: str, file: str | None = None) -> str:
     """업무 절차 문서(답을 찾고 쓰는 순서와 판정 기준)를 읽습니다.
 
-    name에는 시스템 프롬프트의 '선택 절차' 목록에 있는 이름만 넣습니다 (예: spec-compare).
+    name에는 시스템 프롬프트의 '선택 절차' 목록이나 search_skills 결과에 있는 이름만 넣습니다 (예: spec-compare).
     질문이 그 절차의 설명에 해당할 때만, 답을 찾기 전에 한 번 읽고 따릅니다.
+    file: 절차에 딸린 참고 파일. load_skill(name) 결과 끝의 '참고 파일' 목록에 있는 경로만 넣습니다
+    (예: references/models.md). 절차 본문이 그 파일을 보라고 할 때만 읽습니다.
     절차 문서는 근거가 아니므로 인용하지 않습니다. 근거 규칙과 마지막 줄 형식은 절차보다 우선합니다.
     """
-    # 이름으로 사전에서만 찾는다. 모델이 준 문자열로 파일 경로를 만들지 않는다. 근거로 등록하지 않는다.
+    # 이름·경로는 이번 실행의 목록에서만 찾는다. 모델이 준 문자열로 파일 경로를 만들지 않는다. 근거로 등록하지 않는다.
     channel = skills.channel_for(current_owner())
-    available = skills.selectable_skills(channel)
+    available = skills.run_selectable(channel)
     found = next((s for s in available if s.name == name), None)
     if found is None:
         names = ", ".join(s.name for s in available) or "없음"
         logger.info("[load_skill] 없는 절차: %r (channel=%s)", name[:80], channel)
         return f"오류: '{name[:80]}' 절차는 이 질문에서 쓸 수 없습니다. 사용할 수 있는 절차: {names}"
+    if file:
+        wanted = file.strip().replace("\\", "/")
+        text = skills.read_support_file(found, wanted) if wanted in found.files else None
+        if text is None:
+            listed = ", ".join(found.files) or "없음"
+            logger.info("[load_skill] 없는 참고 파일: %s / %r", found.name, file[:120])
+            return f"오류: '{found.name}' 절차에 '{file[:120]}' 참고 파일이 없습니다. 있는 파일: {listed}"
+        logger.info("[load_skill] %s 참고 파일 %s (channel=%s)", found.name, wanted, channel)
+        return f"[업무 절차 {found.name} 참고 파일 {wanted}]\n{text}"
     logger.info("[load_skill] %s · %s (channel=%s)", found.name, found.digest, channel)
-    return f"[업무 절차 {found.name} · {found.digest}]\n{found.body}"
+    text = f"[업무 절차 {found.name} · {found.digest}]\n{found.body}"
+    if found.files:
+        text += ("\n\n[참고 파일] 본문이 가리킬 때만 load_skill(name, file=경로)로 읽는다\n"
+                 + "\n".join(f"- {f}" for f in found.files))
+    return text
+
+
+@tool
+def search_skills(query: str) -> str:
+    """업무 절차를 검색합니다. '선택 절차' 목록에서 질문에 맞는 절차를 고르기 어려울 때 씁니다.
+
+    query에는 질문의 핵심 낱말을 넣습니다 (예: "입찰 사양 대조", "KC 인증서").
+    맞는 절차의 이름·설명을 점수(0~3) 높은 순으로 돌려줍니다. 본문은 load_skill(name)으로 읽습니다.
+    결과가 질문과 맞지 않으면 절차 없이 답합니다.
+    """
+    channel = skills.channel_for(current_owner())
+    available = skills.run_selectable(channel)
+    results = skills.search_skills(query or "", available)
+    logger.info("[search_skills] %r → %s (channel=%s)", (query or "")[:80],
+                ", ".join(f"{s.name}:{score}" for s, score in results) or "없음", channel)
+    if not results:
+        names = ", ".join(s.name for s in available) or "없음"
+        return f"'{(query or '')[:80]}'에 맞는 절차가 없습니다. 사용할 수 있는 절차: {names}"
+    lines = [f"- {s.name} (점수 {score}): {s.description}" for s, score in results]
+    return f"[절차 검색 '{query[:80]}'] {len(results)}건 — 본문은 load_skill(name)으로 읽는다\n" + "\n".join(lines)
 
 
 # ---------- 사양 DB (지시서 E3) ----------

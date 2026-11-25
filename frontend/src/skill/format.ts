@@ -1,4 +1,4 @@
-/** 업무 절차 화면에서 같이 쓰는 값·함수 (컴포넌트가 아닌 것) */
+/** SKILL 화면에서 같이 쓰는 값·함수 (컴포넌트가 아닌 것) */
 import { ApiError } from '../lib/http';
 import type { DocStatus, TypeState } from './api';
 
@@ -25,7 +25,7 @@ export const DOC_STATUS_META: Record<DocStatus, { label: string; chip: string }>
 
 export const TYPE_STATE_META: Record<TypeState, { label: string; chip: string }> = {
     open: { label: '열림', chip: 'bg-brand-pale text-brand-hover' },
-    no_skill_needed: { label: '절차 불필요', chip: 'bg-chip text-muted' },
+    no_skill_needed: { label: 'SKILL 불필요', chip: 'bg-chip text-muted' },
     merged: { label: '합쳐짐', chip: 'bg-chip text-muted' },
 };
 

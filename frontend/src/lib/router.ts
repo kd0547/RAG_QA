@@ -8,7 +8,7 @@
  *  - `/ocr`   OCR 도구
  *  - `/review?file_id=…`  파일 검수 (저장된 페이지 텍스트를 원본과 비교하며 수정)
  *  - `/prompt` 프롬프트 설정
- *  - `/skill?tab=…&doc=…&name=…`  업무 절차 (초안 검토·승인, 사용 중 절차, 문의 유형)
+ *  - `/skill?tab=…&doc=…&name=…`  SKILL (초안 검토·승인, 사용 중 SKILL, 문의 유형)
  *  - `/spec`   제품·부품 사양 관리
  *  - `/knowledge?entity=…`  지식 그래프 (문서에서 뽑은 개체·관계 보기와 편집)
  *  - `/status` 서버 상태 (CPU·메모리·GPU, 접속 기록)

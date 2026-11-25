@@ -178,7 +178,7 @@ def test_missing_create_skill_generates_nothing(env, tmp_path):
 
     assert skill_author.process_one(FakeStructured([])) is None
     refused = skill_author.request_draft(type_id)
-    assert refused["status_code"] == 409 and "작성 절차 없음" in refused["error"]
+    assert refused["status_code"] == 409 and "작성 SKILL 없음" in refused["error"]
 
     doc_id = env.skill_repo.create_generating(type_id)  # 예: create-skill이 빠지기 전에 생긴 요청
     result = skill_author.generate_doc(doc_id, FakeStructured([]))

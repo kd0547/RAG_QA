@@ -182,7 +182,7 @@ def generate_doc(doc_id: int, llm=None) -> dict:
         return {"status": "skipped", "doc_id": doc_id, "reason": "생성 대기 중인 초안이 아닙니다"}
     author = skills.author_skill()
     if author is None:
-        # 행은 그대로 둔다: 설계자가 create-skill을 넣고 서버를 다시 시작하면 이어서 만든다
+        # 행은 그대로 둔다: 설계자가 create-skill을 넣거나 다시 켜면 다음 요청 때 이어서 만든다
         return {"status": "skipped", "doc_id": doc_id, "reason": skills.author_skill_status()["reason"]}
     request_type = skill_repo.resolve_type(doc["type_id"])
     if request_type is None:
@@ -242,7 +242,7 @@ def request_draft(type_id: int) -> dict:
     """
     skill_repo = repository.skill_repo
     if skills.author_skill() is None:
-        return {"error": f"작성 절차 없음: {skills.author_skill_status()['reason']}", "status_code": 409}
+        return {"error": f"작성 SKILL 없음: {skills.author_skill_status()['reason']}", "status_code": 409}
     request_type = skill_repo.get_type(type_id)
     if request_type is None:
         return {"error": "문의 유형을 찾을 수 없습니다", "status_code": 404}

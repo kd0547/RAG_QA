@@ -1,5 +1,5 @@
 /**
- * 업무 절차 API 클라이언트 (백엔드: app/routers/skills.py). 화면 경로는 /skill, API는 /skills.
+ * SKILL API 클라이언트 (백엔드: app/routers/skills.py). 화면 경로는 /skill, API는 /skills.
  * 베이스 URL 규칙은 lib/http.ts 참고.
  */
 import { request } from '../lib/http';
@@ -29,6 +29,10 @@ export interface SkillItem {
     version: number | null;
     digest: string;
     server_applied: boolean;
+    author: boolean;          // 작성 SKILL(author 채널, create-skill). 답변 SKILL이 아니다
+    enabled: boolean;         // 저장소 SKILL을 끄면 false (DB SKILL은 늘 true — 멈출 때는 사용 중지)
+    disabled_at: string | null;
+    files: string[];          // 참고 파일 (references/·templates/)
     uses_30d: number;
     doc_id: number | null;
     type: TypeRef | null;
@@ -37,6 +41,8 @@ export interface SkillItem {
 
 export interface SkillList {
     items: SkillItem[];
+    load_errors: { folder: string; reason: string }[];  // skills/ 폴더에 있지만 검사를 통과하지 못해 뺀 문서
+    loaded_at: string | null;                            // 저장소 SKILL을 마지막으로 읽은 시각
     author: AuthorStatus;
     settings: { analysis_enabled: boolean; auto_draft: boolean; min_cases: number; usage_days: number };
 }
@@ -68,6 +74,12 @@ export interface SkillDetail {
     type?: TypeRef | null;
     open_draft?: { doc_id: number; version: number } | null;
     history: HistoryItem[];
+    // 저장소 SKILL만
+    author?: boolean;
+    enabled?: boolean;
+    disabled_at?: string | null;
+    disabled_by?: string | null;
+    files?: string[];
 }
 
 export interface CheckResult {
@@ -155,6 +167,9 @@ export const skillApi = {
     get: (name: string) => request<SkillDetail>(`/skills/${enc(name)}`),
     newVersion: (name: string) => request<DraftDetail>(`/skills/${enc(name)}/drafts`, { method: 'POST' }),
     retire: (name: string) => request<SkillDetail>(`/skills/${enc(name)}/retire`, { method: 'POST' }),
+    // 저장소 SKILL 끄기·다시 켜기 (파일은 그대로)
+    disable: (name: string) => request<SkillDetail>(`/skills/${enc(name)}/disable`, { method: 'POST' }),
+    enable: (name: string) => request<SkillDetail>(`/skills/${enc(name)}/enable`, { method: 'POST' }),
 
     drafts: (status?: DocStatus[]) =>
         request<{ items: DraftItem[]; author: AuthorStatus }>(

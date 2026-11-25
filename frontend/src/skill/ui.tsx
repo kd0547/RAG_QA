@@ -17,8 +17,8 @@ export function DocStatusChip({ status }: { status: DocStatus }) {
 
 export function OriginBadge({ origin }: { origin: 'repo' | 'db' }) {
     return origin === 'repo'
-        ? <Chip className="border border-line bg-white text-muted" title="저장소 skills/ 폴더의 절차 (git으로 관리, 화면에서 고칠 수 없음)">기본</Chip>
-        : <Chip className="bg-brand-soft text-brand-hover" title="문의 사례로 만들어 R&D가 승인한 절차">생성</Chip>;
+        ? <Chip className="border border-line bg-white text-muted" title="skills/ 폴더의 SKILL 파일. 파일을 고치면 서버 재시작 없이 다음 실행부터 반영됩니다">저장소</Chip>
+        : <Chip className="bg-brand-soft text-brand-hover" title="문의 사례로 만들어 R&D가 승인한 SKILL">생성</Chip>;
 }
 
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
@@ -38,12 +38,12 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
     );
 }
 
-/** 작성 절차(create-skill)가 없을 때의 안내. 초안 생성이 꺼져 있다. */
+/** 작성 SKILL(create-skill)가 없을 때의 안내. 초안 생성이 꺼져 있다. */
 export function AuthorMissing({ reason }: { reason: string | null }) {
     return (
         <div role="note" className="rounded-xl border border-warn/30 bg-warn-soft/60 px-4 py-3 text-[12.5px] leading-5 text-[#6b4a00]">
-            <b className="font-bold">작성 절차 없음</b> — 절차 초안 생성이 꺼져 있습니다. {reason}
-            <br />설계자가 <code className="rounded bg-white/70 px-1">skills/create-skill/SKILL.md</code>(channels: author)를 넣고 서버를 다시 시작하면 켜집니다.
+            <b className="font-bold">작성 SKILL 없음</b> — SKILL 초안 생성이 꺼져 있습니다. {reason}
+            <br /><code className="rounded bg-white/70 px-1">skills/create-skill/SKILL.md</code>(channels: author)를 넣거나 사용 중 SKILL 화면에서 다시 켜면, 서버 재시작 없이 다음 요청부터 켜집니다.
         </div>
     );
 }

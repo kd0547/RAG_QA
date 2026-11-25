@@ -61,10 +61,49 @@ def test_list_shows_repository_skills_and_author_status(env):
     data = env.client.get("/skills").json()
 
     items = {i["name"]: i for i in data["items"]}
-    assert set(items) == {"mail-reply-style", "revise-after-reject", "spec-compare", "certification-bundle"}
+    assert set(items) == {"mail-reply-style", "revise-after-reject", "spec-compare", "certification-bundle", "create-skill"}
+    assert items["create-skill"]["author"] is True and items["spec-compare"]["author"] is False
+    assert data["items"][-1]["name"] == "create-skill"  # 작성 절차는 답변 절차 뒤에
+    assert all(i["enabled"] for i in data["items"]) and data["load_errors"] == [] and data["loaded_at"]
     assert items["mail-reply-style"]["server_applied"] is True and items["spec-compare"]["server_applied"] is False
     assert items["spec-compare"]["origin"] == "repo" and items["spec-compare"]["version"] is None
     assert data["author"]["available"] is True and data["settings"]["min_cases"] == config.SKILL_DRAFT_MIN_CASES
+
+
+def test_disable_and_enable_repository_skill(env):
+    type_id = env.skill_repo.find_type_by_label("입찰 사양 대조")["type_id"]
+    assert env.skill_repo.get_type(type_id)["skill_name"] == "spec-compare"
+
+    off = env.client.post("/skills/spec-compare/disable")
+    assert off.status_code == 200
+    assert (off.json()["enabled"], off.json()["active"], off.json()["body"]) == (False, False, skills.repo_skills()["spec-compare"].body)
+    assert names(env)["spec-compare"]["enabled"] is False and names(env)["spec-compare"]["disabled_at"]
+    assert load("spec-compare").startswith("오류:")
+    assert "spec-compare" in skills.repo_skills()  # 파일과 이름은 그대로
+    assert env.skill_repo.get_type(type_id)["skill_name"] is None  # 유형 연결은 끊는다
+    assert env.client.post("/skills/spec-compare/disable").status_code == 200  # 두 번 눌러도 된다
+
+    on = env.client.post("/skills/spec-compare/enable")
+    assert on.status_code == 200 and on.json()["enabled"] is True
+    assert load("spec-compare").startswith("[업무 절차 spec-compare")
+
+
+def test_disabled_server_skill_and_author_skill(env):
+    env.client.post("/skills/mail-reply-style/disable")
+    assert skills.applied_skills("mail", rejecting=False) == []
+
+    env.client.post("/skills/create-skill/disable")
+    status = env.client.get("/skills").json()["author"]
+    assert status["available"] is False and "사용 중지" in status["reason"]
+    env.client.post("/skills/create-skill/enable")
+    assert env.client.get("/skills").json()["author"]["available"] is True
+
+
+def test_disable_refuses_db_and_unknown_skills(env):
+    doc_id = make_draft(env)
+    env.client.post(f"/skills/drafts/{doc_id}/approve", json={})
+    assert env.client.post("/skills/warranty-terms/disable").status_code == 400
+    assert env.client.post("/skills/no-such-skill/disable").status_code == 404
 
 
 def test_approve_makes_skill_selectable_without_restart(env):
@@ -207,7 +246,7 @@ def test_types_state_merge_and_draft_request(env, tmp_path):
 
     install_author_skill(tmp_path / "none", with_author=False)
     refused = env.client.post(f"/skills/types/{a}/draft")
-    assert refused.status_code == 409 and "작성 절차 없음" in refused.json()["detail"]
+    assert refused.status_code == 409 and "작성 SKILL 없음" in refused.json()["detail"]
     assert env.client.get("/skills").json()["author"]["available"] is False
 
 

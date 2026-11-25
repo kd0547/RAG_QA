@@ -87,8 +87,8 @@ function AgentRuns({ runs }: { runs: MailRun[] }) {
                                 </span>
                                 {statusText && <span className="ml-1.5 text-danger">{statusText}</span>}
                                 {(run.skills ?? []).length > 0 && (
-                                    <span className="ml-1.5 font-normal text-muted" title="서버가 이 실행에 붙인 업무 절차">
-                                        {' · '}절차 {(run.skills ?? []).map((s) => s.name).join(', ')}
+                                    <span className="ml-1.5 font-normal text-muted" title="서버가 이 실행에 붙인 SKILL">
+                                        {' · '}SKILL {(run.skills ?? []).map((s) => s.name).join(', ')}
                                     </span>
                                 )}
                             </summary>

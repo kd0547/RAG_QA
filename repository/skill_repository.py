@@ -605,6 +605,35 @@ class SkillRepository:
             conn.execute("UPDATE request_type SET skill_name = NULL, updated_at = ? WHERE skill_name = ?", (_now(), name))
             return doc_id
 
+    # ------------------------------------------------------------ 저장소 절차 사용 중지
+
+    def disabled_skills(self) -> dict[str, dict]:
+        """꺼진 저장소 절차: 이름 → {disabled_at, disabled_by}."""
+        with self.db.get_conn() as conn:
+            rows = conn.execute("SELECT name, disabled_at, disabled_by FROM skill_disabled ORDER BY name").fetchall()
+        return {r["name"]: {"disabled_at": r["disabled_at"], "disabled_by": r["disabled_by"]} for r in rows}
+
+    def disabled_skill_names(self) -> set[str]:
+        with self.db.get_conn() as conn:
+            return {r["name"] for r in conn.execute("SELECT name FROM skill_disabled")}
+
+    def disable_skill(self, name: str, by: str | None) -> bool:
+        """저장소 절차를 끈다. 그 절차를 맡던 문의 유형의 연결도 끊는다 (DB 절차 사용 중지와 같다).
+        이미 꺼져 있으면 False."""
+        with self.db.transaction() as conn:
+            inserted = conn.execute(
+                "INSERT OR IGNORE INTO skill_disabled (name, disabled_at, disabled_by) VALUES (?, ?, ?)",
+                (name, _now(), by),
+            ).rowcount
+            if inserted:
+                conn.execute("UPDATE request_type SET skill_name = NULL, updated_at = ? WHERE skill_name = ?", (_now(), name))
+        return bool(inserted)
+
+    def enable_skill(self, name: str) -> bool:
+        """저장소 절차를 다시 켠다. 끊었던 유형 연결은 되살리지 않는다. 꺼져 있지 않았으면 False."""
+        with self.db.transaction() as conn:
+            return bool(conn.execute("DELETE FROM skill_disabled WHERE name = ?", (name,)).rowcount)
+
     def list_docs(self, statuses: tuple[str, ...]) -> list[dict]:
         placeholders = ",".join("?" for _ in statuses)
         with self.db.get_conn() as conn:
