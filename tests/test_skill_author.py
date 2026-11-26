@@ -226,3 +226,42 @@ def test_rejected_type_is_not_auto_redrafted(env):
                               description="d", body="b", type_id=type_id)
 
     assert env.skill_repo.auto_draft_candidates(3) == []
+
+
+# ---------------------------------------------------------------- 비활성화 (2026-11-25, 검증 전)
+
+def test_draft_pipeline_is_off_by_default(monkeypatch):
+    """운영 기본값: 문의 유형 분류와 SKILL 초안 생성은 꺼져 있다 (.env에 1을 넣어야 켜진다)."""
+    import importlib
+
+    monkeypatch.delenv("REQUEST_ANALYSIS_ENABLED", raising=False)
+    monkeypatch.delenv("SKILL_DRAFT_ENABLED", raising=False)
+    try:
+        importlib.reload(config)
+        assert config.REQUEST_ANALYSIS_ENABLED is False and config.SKILL_DRAFT_ENABLED is False
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
+    assert config.REQUEST_ANALYSIS_ENABLED is True and config.SKILL_DRAFT_ENABLED is True  # 테스트 환경은 켬
+
+
+def test_disabled_switches_stop_classification_and_drafts(env, monkeypatch):
+    from agent import request_analysis
+
+    type_id, task_ids = warranty_type(env)
+    monkeypatch.setattr(config, "SKILL_DRAFT_ENABLED", False)
+    llm = FakeStructured([draft()])
+
+    assert skills.author_skill() is None
+    status = skills.author_skill_status()
+    assert status["available"] is False and status["disabled"] is True and "검증 전" in status["reason"]
+    assert skill_author.process_one(llm) is None  # 자동 초안 대상이 있어도 만들지 않는다
+    refused = skill_author.request_draft(type_id)  # 화면의 '초안 만들기'도 막힌다
+    assert refused["status_code"] == 409 and "꺼져 있습니다" in refused["error"]
+    assert llm.calls == []
+    with env.db.get_conn() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM skill_doc").fetchone()[0] == 0
+
+    monkeypatch.setattr(config, "REQUEST_ANALYSIS_ENABLED", False)
+    assert request_analysis.run_cycle(llm) == {"skipped": "disabled"}
+    assert llm.calls == []

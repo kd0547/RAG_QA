@@ -40,7 +40,7 @@ export function ActiveTab({
                     {data && <> 사용 횟수는 최근 {data.settings.usage_days}일 동안 그 SKILL을 쓴 실행 수입니다.</>}
                 </p>
                 {data?.loaded_at && <p className="mt-1 text-[11.5px] text-muted">파일을 마지막으로 읽은 시각 {formatDate(data.loaded_at)}</p>}
-                {data && !data.author.available && <div className="mt-3"><AuthorMissing reason={data.author.reason} /></div>}
+                {data && !data.author.available && <div className="mt-3"><AuthorMissing author={data.author} /></div>}
                 {data && data.load_errors.length > 0 && <LoadErrors errors={data.load_errors} />}
                 {data === null && !loadError && <p className="mt-4 text-[12px] text-muted px-1 py-2">불러오는 중…</p>}
                 {answerItems.length > 0 && <SkillNav label="답변 SKILL" items={answerItems} selected={name} onSelect={onSelect} />}

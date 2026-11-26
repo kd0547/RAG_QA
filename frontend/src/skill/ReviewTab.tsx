@@ -69,7 +69,7 @@ export function ReviewTab({ docId, onSelect }: { docId: number | null; onSelect:
                 <p className="mt-1 text-[12px] leading-5 text-muted">
                     문의 사례로 만든 SKILL 초안입니다. 승인하기 전에는 어떤 답변에도 쓰이지 않습니다.
                 </p>
-                {author && !author.available && <div className="mt-3"><AuthorMissing reason={author.reason} /></div>}
+                {author && !author.available && <div className="mt-3"><AuthorMissing author={author} /></div>}
                 <div role="group" aria-label="상태 필터" className="mt-4 flex flex-wrap gap-1">
                     {FILTERS.map((f) => {
                         const count = f.key === 'all' ? items?.length : items?.filter((d) => d.status === f.key).length;

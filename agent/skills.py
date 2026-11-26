@@ -397,16 +397,27 @@ def get_skills() -> dict[str, Skill]:
 
 
 def author_skill() -> Skill | None:
-    """절차 초안 생성 작업의 시스템 프롬프트(저장소 create-skill, author 채널). 없거나 꺼졌거나 검사를 통과하지 못했으면 None."""
+    """절차 초안 생성 작업의 시스템 프롬프트(저장소 create-skill, author 채널).
+
+    초안 생성이 설정으로 꺼져 있거나(config.SKILL_DRAFT_ENABLED), 없거나 꺼졌거나 읽지 못했으면 None.
+    None이면 skill_author는 자동·화면 요청 어느 쪽도 초안을 만들지 않는다.
+    """
+    import config
+    if not config.SKILL_DRAFT_ENABLED:
+        return None
     skill = enabled_repo_skills().get(AUTHOR_SKILL)
     return skill if skill is not None and skill.channels == (AUTHOR_CHANNEL,) else None
 
 
 def author_skill_status() -> dict:
-    """화면에 보일 작성 절차 상태: {available, name, digest, reason}."""
+    """화면에 보일 작성 절차 상태: {available, name, digest, reason, disabled}. disabled는 설정으로 끈 경우 True."""
+    import config
+    if not config.SKILL_DRAFT_ENABLED:
+        return {"available": False, "name": AUTHOR_SKILL, "digest": None, "disabled": True,
+                "reason": "SKILL 초안 생성이 꺼져 있습니다 (검증 전, SKILL_DRAFT_ENABLED=0)"}
     skill = author_skill()
     if skill is not None:
-        return {"available": True, "name": skill.name, "digest": skill.digest, "reason": None}
+        return {"available": True, "name": skill.name, "digest": skill.digest, "reason": None, "disabled": False}
     errors = repo_errors()
     if AUTHOR_SKILL in errors:
         reason = f"skills/{AUTHOR_SKILL}/SKILL.md가 검사를 통과하지 못했습니다: {errors[AUTHOR_SKILL]}"
@@ -416,7 +427,7 @@ def author_skill_status() -> dict:
         reason = f"skills/{AUTHOR_SKILL}/SKILL.md의 channels가 {AUTHOR_CHANNEL}가 아닙니다"
     else:
         reason = f"skills/{AUTHOR_SKILL}/SKILL.md가 없습니다"
-    return {"available": False, "name": AUTHOR_SKILL, "digest": None, "reason": reason}
+    return {"available": False, "name": AUTHOR_SKILL, "digest": None, "reason": reason, "disabled": False}
 
 
 def channel_for(owner) -> str:

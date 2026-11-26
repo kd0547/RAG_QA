@@ -82,8 +82,11 @@ AGENT_RECURSION_LIMIT = int(os.getenv("AGENT_RECURSION_LIMIT", "200"))
 SESSION_EVIDENCE_RETENTION_DAYS = int(os.getenv("SESSION_EVIDENCE_RETENTION_DAYS", "14"))
 
 # ---------- 문의 분석과 절차 초안 (지시서 I, agent/request_analysis.py · agent/skill_author.py) ----------
+# 2026-11-25: 'LLM이 문의 유형을 분류 → SKILL 초안 생성'은 검증 전이라 기본으로 끈다. 켜려면 .env에 1을 넣는다.
 # 저장된 메일 문의를 답변 뒤에 따로 분석한다 (유형·맡는 절차). 0이면 분석 스레드가 아무것도 하지 않는다
-REQUEST_ANALYSIS_ENABLED = os.getenv("REQUEST_ANALYSIS_ENABLED", "1") not in ("0", "false", "False", "")
+REQUEST_ANALYSIS_ENABLED = os.getenv("REQUEST_ANALYSIS_ENABLED", "0") not in ("0", "false", "False", "")
+# SKILL 초안 생성(agent/skill_author.py) 전체 스위치. 0이면 자동·화면 요청 모두 만들지 않는다
+SKILL_DRAFT_ENABLED = os.getenv("SKILL_DRAFT_ENABLED", "0") not in ("0", "false", "False", "")
 # 분석 스레드 주기(초)와 한 주기에 분석하는 최대 건수. 대기·처리 중 메일이 있으면 그 주기는 쉰다
 REQUEST_ANALYSIS_INTERVAL_SECONDS = float(os.getenv("REQUEST_ANALYSIS_INTERVAL_SECONDS", "30"))
 REQUEST_ANALYSIS_BATCH = int(os.getenv("REQUEST_ANALYSIS_BATCH", "5"))

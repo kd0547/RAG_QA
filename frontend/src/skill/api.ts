@@ -13,6 +13,7 @@ export interface AuthorStatus {
     name: string;
     digest: string | null;
     reason: string | null;
+    disabled?: boolean;   // 설정(SKILL_DRAFT_ENABLED=0)으로 초안 생성을 끈 경우
 }
 
 export interface TypeRef {
@@ -43,7 +44,7 @@ export interface SkillList {
     load_errors: { folder: string; reason: string }[];  // skills/ 폴더에 있지만 검사를 통과하지 못해 뺀 문서
     loaded_at: string | null;                            // 저장소 SKILL을 마지막으로 읽은 시각
     author: AuthorStatus;
-    settings: { analysis_enabled: boolean; auto_draft: boolean; min_cases: number; usage_days: number };
+    settings: { analysis_enabled: boolean; draft_enabled: boolean; auto_draft: boolean; min_cases: number; usage_days: number };
 }
 
 export interface HistoryItem {
@@ -138,7 +139,7 @@ export interface RequestType {
 export interface TypeList {
     items: RequestType[];
     author: AuthorStatus;
-    analysis: { total: number; errors: number };
+    analysis: { total: number; errors: number; enabled: boolean };
 }
 
 export interface AnalysisItem {

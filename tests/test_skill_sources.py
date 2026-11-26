@@ -65,7 +65,7 @@ def test_missing_create_skill_disables_author_only(tmp_path):
     assert skills.author_skill() is None
     assert skills.author_skill_status() == {
         "available": False, "name": "create-skill", "digest": None,
-        "reason": "skills/create-skill/SKILL.md가 없습니다",
+        "reason": "skills/create-skill/SKILL.md가 없습니다", "disabled": False,
     }
     assert [s.name for s in skills.selectable_skills("web")] == ["spec-compare"]
 

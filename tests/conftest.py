@@ -31,6 +31,9 @@ import parser  # noqa: E402,F401
 for _key, _value in {
     "MAIL_ID": "sender@example.com", "MAIL_PW": "test-only",
     "CLIENT_ID": "test-client", "TENANT_ID": "test-tenant",
+    # 문의 유형 분류·SKILL 초안 생성은 운영 기본값이 꺼짐(검증 전)이다. 기능 테스트는 켠 상태로 돈다
+    # (꺼진 기본값은 test_skill_author.py의 test_draft_pipeline_is_off_by_default가 확인한다)
+    "REQUEST_ANALYSIS_ENABLED": "1", "SKILL_DRAFT_ENABLED": "1",
 }.items():
     os.environ.setdefault(_key, _value)
 

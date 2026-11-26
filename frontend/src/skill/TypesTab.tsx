@@ -94,7 +94,7 @@ export function TypesTab({ onOpenDraft }: { onOpenDraft: (docId: number) => void
                     SKILL이 없는 유형의 사례가 쌓이면 SKILL 초안이 만들어지고, R&D가 검토 대기 탭에서 승인합니다.
                     {data && <> 분석 {data.analysis.total}건{data.analysis.errors > 0 && <>, 실패 {data.analysis.errors}건</>}.</>}
                 </p>
-                {data && !data.author.available && <div className="mt-4"><AuthorMissing reason={data.author.reason} /></div>}
+                {data && !data.author.available && <div className="mt-4"><AuthorMissing author={data.author} /></div>}
                 <p role="status" className="mt-3 min-h-5 text-[12px] text-brand-hover">{notice}</p>
                 {error && <p role="alert" className="mt-1 text-[12px] text-danger">{error}</p>}
 

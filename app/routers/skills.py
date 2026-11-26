@@ -123,7 +123,8 @@ def list_skills() -> dict:
         "loaded_at": skills.loaded_at(),
         "author": skills.author_skill_status(),
         "settings": {
-            "analysis_enabled": config.REQUEST_ANALYSIS_ENABLED, "auto_draft": config.SKILL_DRAFT_AUTO,
+            "analysis_enabled": config.REQUEST_ANALYSIS_ENABLED, "draft_enabled": config.SKILL_DRAFT_ENABLED,
+            "auto_draft": config.SKILL_DRAFT_AUTO,
             "min_cases": config.SKILL_DRAFT_MIN_CASES, "usage_days": USAGE_DAYS,
         },
     }
@@ -235,7 +236,7 @@ def list_types() -> dict:
         })
     pending = sum(1 for a in analyses if a["status"] == "error")
     return {"items": items, "author": skills.author_skill_status(),
-            "analysis": {"total": len(analyses), "errors": pending}}
+            "analysis": {"total": len(analyses), "errors": pending, "enabled": config.REQUEST_ANALYSIS_ENABLED}}
 
 
 @router.post("/skills/types/{type_id}/draft", status_code=202)

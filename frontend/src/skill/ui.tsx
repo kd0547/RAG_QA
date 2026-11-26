@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import type { DocStatus } from './api';
+import type { AuthorStatus, DocStatus } from './api';
 import { buttonOutline, buttonPrimary, DOC_STATUS_META } from './format';
 
 export function Chip({ className, children, title }: { className: string; children: ReactNode; title?: string }) {
@@ -38,11 +38,21 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
     );
 }
 
-/** 작성 SKILL(create-skill)가 없을 때의 안내. 초안 생성이 꺼져 있다. */
-export function AuthorMissing({ reason }: { reason: string | null }) {
+/** SKILL 초안 생성이 꺼져 있을 때의 안내: 설정으로 끈 경우(검증 전)와 작성 SKILL(create-skill)이 없는 경우. */
+export function AuthorMissing({ author }: { author: AuthorStatus }) {
+    if (author.disabled) {
+        return (
+            <div role="note" className="rounded-xl border border-line bg-chip px-4 py-3 text-[12.5px] leading-5 text-muted">
+                <b className="font-bold text-ink">문의 유형 분류·SKILL 초안 생성 꺼짐</b> — LLM이 문의 유형을 나누고 SKILL 초안을 만드는 기능은 검증 전이라 꺼 두었습니다.
+                이미 만들어진 유형·초안은 볼 수 있지만 새로 만들지 않습니다.
+                <br />켜려면 <code className="rounded bg-white/70 px-1">.env</code>에 <code className="rounded bg-white/70 px-1">REQUEST_ANALYSIS_ENABLED=1</code>,{' '}
+                <code className="rounded bg-white/70 px-1">SKILL_DRAFT_ENABLED=1</code>을 넣고 서버를 다시 시작합니다.
+            </div>
+        );
+    }
     return (
         <div role="note" className="rounded-xl border border-warn/30 bg-warn-soft/60 px-4 py-3 text-[12.5px] leading-5 text-[#6b4a00]">
-            <b className="font-bold">작성 SKILL 없음</b> — SKILL 초안 생성이 꺼져 있습니다. {reason}
+            <b className="font-bold">작성 SKILL 없음</b> — SKILL 초안 생성이 꺼져 있습니다. {author.reason}
             <br /><code className="rounded bg-white/70 px-1">skills/create-skill/SKILL.md</code>(channels: author)를 넣거나 사용 중 SKILL 화면에서 다시 켜면, 서버 재시작 없이 다음 요청부터 켜집니다.
         </div>
     );
