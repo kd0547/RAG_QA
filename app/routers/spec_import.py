@@ -13,6 +13,7 @@ from typing import Annotated
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from entity.spec import COMPONENT_KINDS
 from parser.spec_table import analyze_grid, extract_table_text, grid_from_text, grid_from_xlsx
@@ -30,7 +31,7 @@ IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"})
 
 
 def _recognize_table_image(content: bytes) -> str:
-    """화면 캡처 같은 표 이미지를 VLM OCR(ocr/llm_ocr.py)로 읽어 표 텍스트만 돌려준다."""
+    """화면 캡처 같은 표 이미지를 VLM OCR(ocr/llm_backend.py)로 읽어 표 텍스트만 돌려준다."""
     from ocr.provider import ocr_image  # 환경변수로 선택한 OCR 백엔드
 
     return extract_table_text(ocr_image(content))
@@ -98,7 +99,8 @@ async def parse_table(
         if is_image:
             # 화면 캡처: VLM이 표를 마크다운으로 읽는다. 결과 텍스트도 같이 돌려줘 화면에서 고쳐 다시 읽을 수 있게 한다
             try:
-                recognized_text = _recognize_table_image(content)
+                # VLM 호출은 동기라 오래 걸린다. 스레드풀에서 돌려 이벤트 루프(서버 전체)를 막지 않는다
+                recognized_text = await run_in_threadpool(_recognize_table_image, content)
             except Exception as exc:
                 logger.exception("사양 표 이미지 인식 실패: %s", file.filename)
                 raise HTTPException(status_code=502, detail=f"이미지에서 표를 읽지 못했습니다 (VLM 오류): {exc}") from exc

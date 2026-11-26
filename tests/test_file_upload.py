@@ -1,5 +1,6 @@
 """문서 업로드 결과와 원본 파일 보존을 확인한다."""
 
+import asyncio
 import importlib.util
 from pathlib import Path
 import sys
@@ -95,20 +96,15 @@ def upload_router(tmp_path, monkeypatch):
 
 
 def _upload(router_module, *files, descriptions=None):
-    """메모리 안의 UploadFile은 await read()에서 대기하지 않아 루프 없이 실행할 수 있다."""
+    """업로드 함수를 이벤트 루프에서 실행한다. 파싱은 스레드풀(run_in_threadpool)로 넘어가서 루프가 있어야 한다."""
     uploads = []
     for name, content in files:
         stream = SpooledTemporaryFile(max_size=1024 * 1024)
         stream.write(content)
         stream.seek(0)
         uploads.append(UploadFile(file=stream, filename=name))
-    coroutine = router_module.upload_files(uploads, group_id=None, descriptions=descriptions)
     try:
-        try:
-            coroutine.send(None)
-        except StopIteration as done:
-            return done.value
-        raise AssertionError("업로드가 외부 비동기 작업을 기다렸습니다.")
+        return asyncio.run(router_module.upload_files(uploads, group_id=None, descriptions=descriptions))
     finally:
         for upload in uploads:
             upload.file.close()

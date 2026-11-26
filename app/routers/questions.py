@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from agent.agent import get_agent, run_agent_temp_attachments
 from app import qa_log
@@ -51,7 +52,9 @@ async def ask_question(payload: QuestionRequest, request: Request) -> dict:
     started = time.perf_counter()
     logger.debug("질문 수신: mode=%s, question=%s", mode, question[:200])
     try:
-        result = run_agent(user_message, mode)
+        # 에이전트 실행(LLM·도구 호출)은 동기라 수십 초 걸린다. async 함수에서 바로 부르면 이벤트 루프를 막아
+        # 답변이 끝날 때까지 서버의 다른 요청이 모두 멈춘다. 스레드풀에서 돌린다.
+        result = await run_in_threadpool(run_agent, user_message, mode)
     except Exception as exc:
         qa_log.record_failure(request, "ask", mode, question, started, exc)
         if not isinstance(exc, RuntimeError):
@@ -165,7 +168,8 @@ async def ask_question_with_attachments(
         )
         attachment_info = [{"filename": a.filename, "type": a.type} for a in attachments]
         try:
-            result = run_agent_temp_attachments(question, mode, attachments=attachments)
+            # /ask와 같은 이유로 스레드풀에서 돌린다 (이벤트 루프를 막지 않게)
+            result = await run_in_threadpool(run_agent_temp_attachments, question, mode, attachments=attachments)
         except Exception as exc:
             qa_log.record_failure(request, "ask_attachments", mode, question, started, exc, attachment_info)
             if not isinstance(exc, RuntimeError):

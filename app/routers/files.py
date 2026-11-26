@@ -16,6 +16,7 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 import config
 from entity.file import create_file
@@ -441,7 +442,8 @@ async def upload_files(
                 chunk_count=None,
             )
 
-            pages = parse_file(dest_path)
+            # 파싱·OCR은 동기라 오래 걸린다. async 함수에서 바로 부르면 이벤트 루프를 막아 서버 전체가 멈춘다
+            pages = await run_in_threadpool(parse_file, dest_path)
 
         except Exception as exc:  # 개별 파일 실패는 건너뛰고 나머지는 계속 처리
             logger.exception("업로드 처리 실패: %s", file.filename)
