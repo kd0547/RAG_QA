@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { remarkPlugins } from '../../lib/markdown';
 import { linkProps } from '../../lib/router';
 import { ApiError, customerApi } from '../api';
 import { customerPath, fmtDateTime, fmtReceived, isLongBody, reviewPath } from '../format';
@@ -362,7 +362,7 @@ function SendNote({ event }: { event: Extract<TimelineEvent, { type: 'send' }> }
                     {open && (
                         <span className="block mt-2 text-left rounded-xl bg-white border border-divide px-3 py-2 text-ink">
                             <span className="block mail-draft-markdown prose prose-sm prose-slate max-w-none">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{event.body}</ReactMarkdown>
+                                <ReactMarkdown remarkPlugins={remarkPlugins}>{event.body}</ReactMarkdown>
                             </span>
                             {event.truncated && <span className="block mt-1 text-[11px] text-muted">{TRUNCATED_NOTE}</span>}
                         </span>
@@ -420,7 +420,7 @@ function Collapsible({ text, markdown }: { text: string; markdown: boolean }) {
         <>
             {markdown ? (
                 <div className={`mail-draft-markdown prose prose-sm prose-slate max-w-none text-ink ${folded ? 'max-h-32 overflow-hidden' : ''}`}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={remarkPlugins}>{text}</ReactMarkdown>
                 </div>
             ) : (
                 <p className={`whitespace-pre-line text-[13.5px] leading-relaxed text-ink/80 ${folded ? 'line-clamp-4' : ''}`}>{text}</p>

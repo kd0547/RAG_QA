@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { remarkPlugins } from '../lib/markdown';
 
 import { AppHeader } from '../components/AppHeader';
 import { ApiError } from '../lib/http';
@@ -1412,7 +1412,7 @@ function TurnView({ turn }: { turn: QaTurn }) {
                         <>
                             {turn.answer ? (
                                 <div className="prose prose-slate max-w-none text-[15px] leading-[1.8] prose-pre:bg-chip prose-pre:text-ink prose-code:before:content-none prose-code:after:content-none prose-code:bg-chip prose-code:px-1 prose-code:py-0.5 prose-code:rounded">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.answer}</ReactMarkdown>
+                                    <ReactMarkdown remarkPlugins={remarkPlugins}>{turn.answer}</ReactMarkdown>
                                 </div>
                             ) : (
                                 <p className="text-[13px] text-muted">(답변이 비어 있습니다)</p>

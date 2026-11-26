@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { remarkPlugins } from './lib/markdown';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize,{defaultSchema} from 'rehype-sanitize';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -60,7 +60,7 @@ function markdownToHtml(markdown: string): string {
     try {
         return renderToStaticMarkup(
             <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={remarkPlugins}
                 rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
                 urlTransform={allowDataUrlTransform}
             >
@@ -897,7 +897,7 @@ export default function App() {
                                                 </div>
                                                 <article className="prose prose-slate prose-sm max-w-none p-6 prose-pre:bg-chip prose-pre:text-ink prose-code:before:content-none prose-code:after:content-none prose-code:bg-chip prose-code:px-1 prose-code:py-0.5 prose-code:rounded">
                                                     <ReactMarkdown
-                                                        remarkPlugins={[remarkGfm]}
+                                                        remarkPlugins={remarkPlugins}
                                                         rehypePlugins={[rehypeRaw, [rehypeSanitize,sanitizeSchema]]}
                                                         urlTransform={allowDataUrlTransform}
                                                     >

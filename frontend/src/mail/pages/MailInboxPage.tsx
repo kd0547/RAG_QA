@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { remarkPlugins } from '../../lib/markdown';
 import { linkProps } from '../../lib/router';
 import { ApiError, mailApi } from '../api';
 import { ALL_STATUSES, fmtReceived, isReviewable, reviewPath } from '../format';
@@ -252,7 +252,7 @@ export function MailInboxPage() {
                                 />
                                 {detail.draft ? (
                                     <article className="mt-3 mail-draft-markdown prose prose-slate max-w-none text-ink py-4">
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.draft}</ReactMarkdown>
+                                        <ReactMarkdown remarkPlugins={remarkPlugins}>{detail.draft}</ReactMarkdown>
                                     </article>
                                 ) : (
                                     <p className="mt-3 py-4 text-[13px] text-muted">

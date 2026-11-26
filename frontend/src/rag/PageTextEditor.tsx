@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import remarkGfm from 'remark-gfm';
+import { remarkPlugins } from '../lib/markdown';
 
 import { PAGE_PROSE_CLASS } from './pageProse';
 import { TableEditor } from './TableEditor';
@@ -34,7 +34,7 @@ const sanitizeSchema = {
 export function PageMarkdown({ text, tableTitle }: { text: string; tableTitle?: string }) {
     return (
         <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={remarkPlugins}
             rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
             components={tableTitle ? {
                 table: ({ node, ...props }) => {

@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { remarkPlugins } from '../../lib/markdown';
 import { LazyMarkdownEditor } from '../../components/LazyMarkdownEditor';
 import { ApiError, mailApi } from '../api';
 import { fmtReceived, reviewPath, SEND_ISSUE_STATUSES } from '../format';
@@ -638,7 +638,7 @@ export function MailReviewPage({
                                             title="클릭해서 수정"
                                             className="mail-draft-markdown prose prose-slate max-w-none text-ink px-5 py-4 rounded-xl cursor-text hover:bg-surface transition-colors"
                                         >
-                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{draftText || detail.draft}</ReactMarkdown>
+                                            <ReactMarkdown remarkPlugins={remarkPlugins}>{draftText || detail.draft}</ReactMarkdown>
                                         </article>
                                     ) : (
                                         <p className="px-5 py-4 text-[13px] text-muted">초안이 아직 없습니다.</p>
