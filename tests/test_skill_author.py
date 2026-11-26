@@ -1,12 +1,11 @@
 """I4: 절차 초안 생성 (대역 모델)."""
-import shutil
-
 import pytest
 
 import config
 from agent import skill_author, skills
 from agent.evidence_context import Owner, owner_scope
 from entity.type import TaskStatus
+from skill_samples import install_samples
 from test_request_analysis import FakeStructured, add_task
 
 AUTHOR_BODY = "# 절차 작성법\n사례를 읽고 순서를 정리한다."
@@ -14,16 +13,8 @@ GOOD_BODY = "# 보증 기간 문의\n1. list_documents로 보증 문서를 찾�
 
 
 def install_author_skill(tmp_path, with_author=True):
-    """저장소 절차 4종(+ create-skill)을 임시 폴더에 두고 읽는다."""
-    root = tmp_path / "skills"
-    for name in ("certification-bundle", "mail-reply-style", "revise-after-reject", "spec-compare"):
-        shutil.copytree(skills.SKILLS_DIR / name, root / name)
-    if with_author:
-        (root / "create-skill").mkdir()
-        (root / "create-skill" / "SKILL.md").write_text(
-            "---\nname: create-skill\ndescription: 업무 절차 초안을 쓰는 방법\nmetadata:\n  channels: \"author\"\n---\n"
-            + AUTHOR_BODY + "\n", encoding="utf-8")
-    skills.reload_skills(root)
+    """테스트 샘플 답변 SKILL 4종(+ create-skill)을 임시 폴더에 두고 읽는다 (tests/skill_samples.py)."""
+    install_samples(tmp_path / "skills", author_body=AUTHOR_BODY if with_author else None)
 
 
 @pytest.fixture

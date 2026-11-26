@@ -50,15 +50,3 @@ def test_ensure_v3_once_and_v2_row_untouched(agent_env):
     names = [p.name for p in repo.list_all()]
     assert names.count(PROMPT_V3_NAME) == 1 and names.count(PROMPT_V2_NAME) == 1
     assert repo.get_selected().id == v2.id
-
-
-def test_replaced_skill_documents_are_version_2_and_load():
-    from agent.skills import load_skills
-
-    loaded = load_skills(PROJECT_ROOT / "skills")
-    for name in ("certification-bundle", "mail-reply-style", "revise-after-reject", "spec-compare"):
-        text = (PROJECT_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
-        assert ('version: "3"' if name == "certification-bundle" else 'version: "2"') in text, name  # GR6
-        assert name in loaded, name
-    assert "compare_specs" in loaded["spec-compare"].body
-    assert not (PROJECT_ROOT / "docs" / "skills_next").exists()

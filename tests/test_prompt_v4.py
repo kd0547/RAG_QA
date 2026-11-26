@@ -1,4 +1,4 @@
-"""GR6: 프롬프트 v4(근거 ID·사양·그래프 정비)와 인증 묶음 절차 version 3."""
+"""GR6: 프롬프트 v4(근거 ID·사양·그래프 정비)."""
 import re
 from pathlib import Path
 
@@ -57,15 +57,3 @@ def test_ensure_v4_once_and_old_rows_untouched(agent_env):
     names = [p.name for p in repo.list_all()]
     assert names.count(PROMPT_V4_NAME) == 1 and names.count(PROMPT_V3_NAME) == 1
     assert repo.get_selected().id == v3.id  # 담당자가 고른 프롬프트가 유지된다
-
-
-def test_certification_bundle_version_3_without_expansion():
-    from agent.skills import load_skills
-
-    text = (PROJECT_ROOT / "skills" / "certification-bundle" / "SKILL.md").read_text(encoding="utf-8")
-    assert 'version: "3"' in text
-    loaded = load_skills(PROJECT_ROOT / "skills")
-    body = loaded["certification-bundle"].body
-    assert "펼쳐진다" not in body and "상위 개념" not in body
-    assert "인증 묶음 이름(예: KC 인증)은 시스템이 속한 종류로 펼쳐 주지 않는다." in body
-    assert '6. **묶음 이름으로만 물었으면**' in body

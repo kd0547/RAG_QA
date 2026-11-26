@@ -13,15 +13,18 @@ from agent.evidence_context import Owner, owner_scope
 from conftest import tool_call
 from entity.file import create_file
 from parser.pdf.type import PageText
+from skill_samples import ANSWER_SKILLS, install_samples
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-REPO_SKILLS = ("certification-bundle", "mail-reply-style", "revise-after-reject", "spec-compare")
 
 
 @pytest.fixture(autouse=True)
-def repo_skills():
-    """테스트마다 저장소의 절차를 읽고, 끝나면 다시 저장소 것으로 돌린다 (임시 폴더를 읽은 테스트 뒤 정리)."""
-    loaded = skills.reload_skills()
+def repo_skills(tmp_path_factory):
+    """테스트마다 샘플 SKILL(tests/skill_samples.py)을 저장소 SKILL로 읽고, 끝나면 실제 저장소 것으로 돌린다.
+
+    저장소의 답변 SKILL은 지웠다 (2026-11-25). 샘플은 테스트의 tmp_path와 겹치지 않는 별도 폴더에 쓴다.
+    """
+    loaded = install_samples(tmp_path_factory.mktemp("skills"))
     yield loaded
     skills.reload_skills()
 
@@ -52,14 +55,18 @@ def call_load_skill(name: str, owner: Owner) -> str:
 
 # ---------------------------------------------------------------- 로더
 
-def test_repository_skills_all_load_and_pass_checks(repo_skills):
-    # 작성 절차(author 채널, create-skill)는 답변 절차가 아니라 지시서 I의 초안 생성 작업이 쓴다
-    answer_skills = {n: s for n, s in repo_skills.items() if skills.AUTHOR_CHANNEL not in s.channels}
-    assert sorted(answer_skills) == list(REPO_SKILLS)
-    for skill in repo_skills.values():
+def test_repository_skills_all_load_and_pass_checks():
+    """실제 저장소 skills/의 문서가 모두 오류 없이 읽힌다 (어떤 SKILL이 있는지는 정하지 않는다)."""
+    loaded = skills.reload_skills()
+    assert skills.repo_errors() == {}
+    for skill in loaded.values():
         assert skill.description and skill.body
         assert re.fullmatch(r"[0-9a-f]{8}", skill.digest)
         assert not skill.body.startswith("---")
+
+
+def test_samples_load_with_their_channels(repo_skills):
+    assert sorted(repo_skills) == sorted(ANSWER_SKILLS)
     assert repo_skills["mail-reply-style"].channels == ("mail",)
     assert repo_skills["spec-compare"].channels == ("mail", "web")
 
@@ -294,6 +301,7 @@ def test_adversarial_skill_cannot_skip_validation_or_send(agent_env, tmp_path, m
 # ---------------------------------------------------------------- 절차가 가리키는 도구
 
 def test_skill_bodies_only_mention_existing_tools(repo_skills):
+    """샘플 SKILL 본문이 실제 도구 이름만 쓴다 (load_skill 테스트가 없는 도구를 가리키지 않게)."""
     from agent.agent import TOOLS
 
     names = {t.name for t in TOOLS}

@@ -9,9 +9,8 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from agent import skills
 from agent.evidence_context import Owner, owner_scope
 from conftest import tool_call
+from skill_samples import install_samples
 from test_skills import write_skill
-
-REPO_ANSWER_SKILLS = ("certification-bundle", "mail-reply-style", "revise-after-reject", "spec-compare")
 
 
 @pytest.fixture(autouse=True)
@@ -138,8 +137,8 @@ def test_disabled_lookup_failure_keeps_everything_on(tmp_path):
 
 # ---------------------------------------------------------------- 검색
 
-def test_search_ranks_repository_skills_by_question_words():
-    skills.reload_skills()
+def test_search_ranks_repository_skills_by_question_words(tmp_path):
+    install_samples(tmp_path)
     web = skills.selectable_skills("web")
 
     top = skills.search_skills("입찰 사양서 조건에 맞는 모델", web)
@@ -151,16 +150,16 @@ def test_search_ranks_repository_skills_by_question_words():
     assert skills.search_skills("메일 답장 문체", skills.selectable_skills("mail"))[0][0].name == "mail-reply-style"
 
 
-def test_search_skills_tool_output():
-    skills.reload_skills()
+def test_search_skills_tool_output(tmp_path):
+    install_samples(tmp_path)
     found = search("입찰 사양 대조")
     assert found.startswith("[절차 검색") and "- spec-compare (점수" in found
     none = search("zzzz")
     assert "맞는 절차가 없습니다" in none and "spec-compare" in none
 
 
-def test_prompt_mentions_search_skills(agent_env):
-    skills.reload_skills()
+def test_prompt_mentions_search_skills(agent_env, tmp_path):
+    install_samples(tmp_path)
     model = agent_env.install([AIMessage(content="답\n근거: 없음")])
     from agent import agent as agent_module
     agent_module.run_agent("질문", mode="local", owner=Owner("session", "s1"))
@@ -227,8 +226,3 @@ def test_standard_skill_folder_loads():
     loaded = skills.reload_skills()
     assert "skill-creator" in loaded and len(loaded["skill-creator"].body) > 6000
     assert "references/schemas.md" in loaded["skill-creator"].files and skills.repo_errors() == {}
-
-
-def test_repository_answer_skills_still_load():
-    loaded = skills.reload_skills()
-    assert set(REPO_ANSWER_SKILLS) <= set(loaded)

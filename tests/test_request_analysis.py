@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage
 import config
 from agent import request_analysis, skills
 from entity.type import MailEntity, TaskStatus
+from skill_samples import install_samples
 
 
 class FakeStructured:
@@ -33,10 +34,11 @@ class FakeStructured:
 
 
 @pytest.fixture
-def env(agent_env):
-    skills.reload_skills()
+def env(agent_env, tmp_path):
+    install_samples(tmp_path / "skills")  # 저장소 답변 SKILL은 지웠다. 테스트 샘플을 읽는다
     agent_env.skill_repo.ensure_seed_types()
-    return agent_env
+    yield agent_env
+    skills.reload_skills()
 
 
 def add_task(env, uid, *, body="N5800 KC 인증번호 알려줘", status=TaskStatus.DRAFTED, subject="문의") -> str:
