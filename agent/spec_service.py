@@ -392,15 +392,45 @@ def _judge(condition: dict, values: list[dict], attribute: sqlite3.Row | None) -
     want = normalize(str(raw_value or ""))
     if not want:
         return done("unknown", "조건 값이 비었습니다")
+    # 조건 값이 용어집 용어의 표기 하나와 같으면 그 용어의 다른 표기로도 맞춘다 ("스피커" ↔ "speakers")
+    term = _glossary_term(str(raw_value), key)
+    forms = [want, *(n for n in term["alias_norms"] if n != want)] if term else [want]
     outcomes = []
+    via_term = False
     for value in values:
         have = normalize(value["value_text"])
         ok = have == want if op == "==" else want in have
+        if not ok and term:
+            ok = have in forms if op == "==" else any(form in have for form in forms)
+            via_term = via_term or ok
         outcomes.append((value["is_option"], True if ok else None))
     verdict = _decide(outcomes)
     if verdict == "unknown":
         return done(verdict, f"조건 '{raw_value}'와 값 [{shown}]이 글자로 맞지 않습니다. 표기만 다른 같은 값일 수 있어 확인이 필요합니다")
-    return done(verdict, f"조건 {op} '{raw_value}': {shown} → {_VERDICT_LABELS[verdict]}")
+    reason = f"조건 {op} '{raw_value}': {shown} → {_VERDICT_LABELS[verdict]}"
+    if via_term:
+        reason += f" (용어집 '{term['name']}'의 표기 {', '.join(term['aliases'])}로 맞춤)"
+    return done(verdict, reason)
+
+
+def _glossary_term(text: str, attribute_key: str) -> dict | None:
+    """조건 값 전체가 용어집 용어의 표기 하나와 같을 때 그 용어 (모든 표기 포함). 아니면 None.
+
+    묶음은 쓰지 않는다. 연결 대상이 다른 곳(다른 사양 속성, 그래프 종류)인 용어도 쓰지 않는다
+    (연결 대상이 없거나 이 속성인 용어만). 근거는 여전히 사양 DB 값이다 — 용어집은 표기를 맞추는 데만 쓴다.
+    """
+    from repository.term_repository import TermRepository
+
+    try:
+        term = TermRepository(repository.spec_repo.db).forms_of(text)
+    except Exception:
+        logger.warning("용어집을 읽지 못해 글자 그대로 비교합니다", exc_info=True)
+        return None
+    if term is None or term["kind"] == "bundle":
+        return None
+    if term["target_type"] and not (term["target_type"] == "spec_attribute" and term["target_key"] == attribute_key):
+        return None
+    return term
 
 
 def _compare(conn: sqlite3.Connection, owner_type: str, owner_id: str, conditions: list[dict],

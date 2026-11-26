@@ -225,6 +225,25 @@ class TermRepository:
         result.sort(key=lambda t: query_norm.find(normalize(t["matched"])))
         return result
 
+    def forms_of(self, text: str) -> dict | None:
+        """글 전체가 어떤 용어의 표기 하나와 같으면 그 용어와 모든 표기. 아니면 None.
+
+        사양 값 비교(agent/spec_service.py)가 조건 "스피커"를 값 "Built in two speakers"와 맞출 때 쓴다.
+        글 일부만 용어인 경우("스피커 2개")는 None이다 (나머지 조건을 건너뛰지 않게).
+        반환: {"id", "name", "kind", "target_type", "target_key", "aliases", "alias_norms"}
+        """
+        norm = normalize(text)
+        if len(norm) < MIN_ALIAS_LEN:
+            return None
+        with self.db.get_conn() as conn:
+            row = conn.execute("SELECT term_id FROM term_alias WHERE alias_norm = ?", (norm,)).fetchone()
+            if row is None:
+                return None
+            term = dict(_details(conn, [row["term_id"]])[row["term_id"]])
+            is_bundle = conn.execute("SELECT 1 FROM term_member WHERE bundle_id = ? LIMIT 1", (row["term_id"],)).fetchone()
+        term["kind"] = "bundle" if is_bundle else "term"
+        return term
+
     # ------------------------------------------------------------ 화면 입력
 
     def create(self, name: str, aliases=(), target_type: str = "", target_key: str = "", description: str = "",

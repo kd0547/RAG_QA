@@ -28,7 +28,7 @@ from repository import graph_repo, group_repo, prompt_repo
 from tools.tool import (
     attachment_page_texts, compare_specs, get_customer_history, get_specs, graph_search, grep_documents, list_documents,
     list_evidence, read_graph_facts,
-    list_spec_attributes, load_skill, read_attachment, read_pages, rerank_documents, search_documents,
+    list_spec_attributes, load_skill, lookup_terms, read_attachment, read_pages, rerank_documents, search_documents,
     search_skills, search_spec_items,
 )
 from langchain.agents.middleware import (
@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 BASE_TOOLS = [
     graph_search, read_graph_facts, list_documents, grep_documents, read_pages, read_attachment,
     search_documents, rerank_documents, list_evidence, load_skill, search_skills,
+    lookup_terms,  # 용어집: 회사 용어 -> 표준 용어·다른 표기·사양 속성 키
 ]
 # 사양 DB 도구 (지시서 E3). config.SPEC_TOOLS_ENABLED가 꺼지면 도구 목록에서 빠진다
 SPEC_TOOLS = [list_spec_attributes, search_spec_items, get_specs, compare_specs]
