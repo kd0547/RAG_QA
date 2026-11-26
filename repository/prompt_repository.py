@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from agent.prompt import (
-    PROMPT_V2_NAME, PROMPT_V2_TEMPLATE, PROMPT_V3_NAME, PROMPT_V3_TEMPLATE, PROMPT_V4_NAME, PROMPT_V4_TEMPLATE,
+    PROMPT_V4_NAME, PROMPT_V4_TEMPLATE,
     SYSTEM_PROMPT_TEMPLATE,
 )
 from repository.repo_connect import Database
@@ -115,14 +115,6 @@ class PromptRepository:
             logger.info("프롬프트 등록·선택: %s (id=%d)", name, cursor.lastrowid)
             return _fetch(conn, cursor.lastrowid)
 
-    def ensure_v2(self) -> Prompt | None:
-        """프롬프트 v2(근거 ID)를 한 번 넣고 선택한다."""
-        return self.ensure_seeded(PROMPT_V2_NAME, PROMPT_V2_TEMPLATE.template)
-
-    def ensure_v3(self) -> Prompt | None:
-        """프롬프트 v3(근거 ID·사양 DB)를 한 번 넣고 선택한다. v2 행은 그대로 둔다."""
-        return self.ensure_seeded(PROMPT_V3_NAME, PROMPT_V3_TEMPLATE.template)
-
     def ensure_v4(self) -> Prompt | None:
         """프롬프트 v4(근거 ID·사양·그래프 정비, 지시서 GR6)를 한 번 넣고 선택한다. v2·v3 행은 그대로 둔다."""
         return self.ensure_seeded(PROMPT_V4_NAME, PROMPT_V4_TEMPLATE.template)
@@ -205,4 +197,19 @@ class PromptRepository:
             # 기존 선택을 먼저 풀어야 한다 (순서가 바뀌면 idx_prompt_selected 유니크 위반)
             conn.execute("UPDATE prompt SET is_selected = 0 WHERE is_selected = 1")
             conn.execute("UPDATE prompt SET is_selected = 1 WHERE id = ?", (prompt_id,))
+            return _fetch(conn, prompt_id)
+
+    def set_default(self, prompt_id: int) -> Prompt | None:
+        """이 프롬프트를 기본(지울 수 없고, 선택이 비면 쓰는 것)으로 바꾼다. 없는 id면 None.
+
+        기본이 있으면 서버 시작의 ensure_default()가 새 기본 프롬프트를 넣지 않는다. 그래서 기본을 바꾼 뒤
+        예전 기본 프롬프트를 지워도 다시 생기지 않는다.
+        """
+        with self.db.transaction() as conn:
+            if _fetch(conn, prompt_id) is None:
+                return None
+            # 기존 기본을 먼저 풀어야 한다 (idx_prompt_default 유니크)
+            conn.execute("UPDATE prompt SET is_default = 0 WHERE is_default = 1")
+            conn.execute("UPDATE prompt SET is_default = 1 WHERE id = ?", (prompt_id,))
+            logger.info("기본 프롬프트 변경: id=%d", prompt_id)
             return _fetch(conn, prompt_id)

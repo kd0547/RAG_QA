@@ -30,6 +30,7 @@ from app.routers.search import router as search_router
 from app.routers.skills import router as skill_router
 from app.routers.spec_import import router as spec_import_router
 from app.routers.specs import router as spec_router
+from app.routers.terms import router as term_router
 from mail.email_service import email_loop_build
 from retrieval.embedder import set_embedding_model
 from agent.llm_provider import set_local_model, set_claude_model
@@ -89,10 +90,8 @@ async def lifespan(app: FastAPI):
     # 실패해도 에이전트는 agent/prompt.py 원문으로 동작하므로 서버 시작은 막지 않는다.
     try:
         prompt_repo.ensure_default()
-        # 근거 ID 방식의 프롬프트 v2를 처음 한 번 넣고 선택한다 (기존 프롬프트는 그대로 둔다)
-        prompt_repo.ensure_v2()
-        # 사양 도구·고객 이력이 들어간 프롬프트 v3를 처음 한 번 넣고 선택한다 (v2 행은 그대로 둔다. 통합 지시서 Z1)
-        prompt_repo.ensure_v3()
+        # 프롬프트 v4를 처음 한 번 넣고 선택한다. v2·v3는 더 넣지 않는다 (2026-11-26 v4만 남기고 지움.
+        # 지운 v2·v3가 서버를 다시 켤 때 되살아나 선택되지 않게. 본문은 agent/prompt.py에 남아 있다)
         prompt_repo.ensure_v4()
     except Exception:
         logger.exception("기본 프롬프트 등록 실패")
@@ -196,6 +195,7 @@ app.include_router(prompt_router)
 app.include_router(skill_router)
 app.include_router(spec_router)
 app.include_router(spec_import_router)
+app.include_router(term_router)
 
 if FRONTEND_DIST.is_dir():
     # 라우터보다 뒤에 등록해야 /upload, /ask 등 API 경로가 가려지지 않는다.

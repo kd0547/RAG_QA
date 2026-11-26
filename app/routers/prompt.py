@@ -81,6 +81,16 @@ def delete_prompt(prompt_id: int) -> None:
     logger.info("프롬프트 삭제: id=%d", prompt_id)
 
 
+@router.post("/{prompt_id}/default")
+def set_default_prompt(prompt_id: int) -> Prompt:
+    """이 프롬프트를 기본 프롬프트로 바꾼다. 예전 기본 프롬프트는 일반 프롬프트가 되어 지울 수 있다."""
+    prompt = prompt_repo.set_default(prompt_id)
+    if prompt is None:
+        raise _not_found(prompt_id)
+    logger.info("기본 프롬프트 지정: id=%d", prompt_id)
+    return prompt
+
+
 @router.post("/{prompt_id}/select")
 def select_prompt(prompt_id: int) -> Prompt:
     """이 프롬프트를 선택한다. 기존에 선택된 프롬프트는 자동으로 해제된다."""

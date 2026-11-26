@@ -314,6 +314,27 @@ class GraphRepository:
                 result.extend(dict(r) for r in extra if r['id'] not in known)
         return result[:limit]
 
+    def find_entities_by_norms(self, norms: list[str], entity_type: str | None = None, limit: int = 20) -> list[dict]:
+        """표기(비교용 키)가 정확히 같은 개체. 용어집이 찾은 용어의 표기로 그래프를 찾을 때 쓴다 (graph_rag/service.py).
+
+        entity_type을 주면 그 종류의 개체만. 반환 항목은 find_entities와 같다.
+        """
+        norms = [n for n in dict.fromkeys(norms) if n]
+        if not norms:
+            return []
+        marks = ",".join("?" * len(norms))
+        sql = f"""SELECT DISTINCT e.id, e.type, e.name, e.ref_type, e.ref_id
+                  FROM graph_alias a JOIN effective_graph_entity e ON e.id = a.entity_id
+                  WHERE a.alias_norm IN ({marks})"""
+        params: list = list(norms)
+        if entity_type:
+            sql += " AND e.type = ?"
+            params.append(entity_type)
+        sql += " ORDER BY e.id LIMIT ?"
+        params.append(limit)
+        with self.db.get_conn() as conn:
+            return [dict(r) for r in conn.execute(sql, params)]
+
     def parents_of(self, entity_ids: list[int]) -> list[dict]:
         """파생 모델 → 상위 모델 (variant_of). [{child_id, parent_id, parent_name, ref_type, ref_id}]"""
         if not entity_ids:

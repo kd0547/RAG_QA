@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { AppHeader } from '../components/AppHeader';
 import { ApiError } from '../lib/http';
+import { navigate, subscribeRoute } from '../lib/router';
 import { ragApi } from '../rag/api';
 import type { FileSummary } from '../rag/types';
 import { graphApi } from './api';
@@ -18,6 +19,9 @@ import { relationPhrase } from './relationPhrases';
 import { ORIGIN_META } from './meta';
 import { entityMeta, typeKeys, useGraphSchema } from './schemaContext';
 import type { EntityType, GraphEdge, GraphNode, GraphRelation, GraphStats, GraphView, RelationOrigin } from './types';
+import { RebuildButton } from './RebuildButton';
+import { GlossaryTab } from './terms/GlossaryTab';
+import { KnowledgeTabs, type KnowledgeTab } from './terms/KnowledgeTabs';
 
 /**
  * 지식 그래프 (/knowledge?entity=…&depth=…)
@@ -119,8 +123,32 @@ function ringPositions(center: Point, ids: number[], start: number): Map<number,
     return result;
 }
 
+/** /knowledge?tab=terms 이면 용어집 탭. 탭을 바꾸면 주소도 바꾼다 (뒤로 가기로 돌아온다) */
+function readTab(): KnowledgeTab {
+    return new URLSearchParams(window.location.search).get('tab') === 'terms' ? 'terms' : 'graph';
+}
+
+function openTab(tab: KnowledgeTab) {
+    navigate(tab === 'terms' ? '/knowledge?tab=terms' : '/knowledge');
+}
+
 export function KnowledgeSection() {
+    const tab = useSyncExternalStore(subscribeRoute, readTab);
+    if (tab === 'terms') return <GlossaryPage />;
     return <GraphSchemaProvider><KnowledgeContent /></GraphSchemaProvider>;
+}
+
+/** 용어집 탭: 사람이 관리하는 회사 용어 (terms/GlossaryTab.tsx). 그래프에는 쓰지 않는다 */
+function GlossaryPage() {
+    return (
+        <div className="min-h-screen md:h-dvh md:overflow-hidden bg-white text-ink font-sans antialiased flex flex-col">
+            <AppHeader current="knowledge">
+                <KnowledgeTabs current="terms" onChange={openTab} />
+                <span className="hidden sm:block text-[12px] text-muted truncate">질문의 표현을 표준 용어로 읽는 회사 용어집</span>
+            </AppHeader>
+            <GlossaryTab />
+        </div>
+    );
 }
 
 function KnowledgeContent() {
@@ -429,15 +457,21 @@ function KnowledgeContent() {
         <div className="min-h-screen md:h-dvh md:overflow-hidden bg-white text-ink font-sans antialiased flex flex-col">
             <AppHeader
                 current="knowledge"
-                aside={stats && (
-                    <span className="hidden lg:block text-[11.5px] text-muted">
-                        개체 {totalEntities} · 관계 {stats.relations}
-                        {!!stats.relations_by_origin.manual && <> · 담당자 {stats.relations_by_origin.manual}</>}
-                        {!!stats.blocked_relations && <> · 지운 관계 {stats.blocked_relations}</>}
-                        {' '}· 문서 {stats.indexed_files}
-                    </span>
+                aside={(
+                    <>
+                        {stats && (
+                            <span className="hidden xl:block text-[11.5px] text-muted">
+                                개체 {totalEntities} · 관계 {stats.relations}
+                                {!!stats.relations_by_origin.manual && <> · 담당자 {stats.relations_by_origin.manual}</>}
+                                {!!stats.blocked_relations && <> · 지운 관계 {stats.blocked_relations}</>}
+                                {' '}· 문서 {stats.indexed_files}
+                            </span>
+                        )}
+                        <RebuildButton />
+                    </>
                 )}
             >
+                <KnowledgeTabs current="graph" onChange={openTab} />
                 <span className="hidden sm:block text-[12px] text-muted truncate">문서에서 뽑은 제품·부품·인증 관계</span>
             </AppHeader>
             <GraphEditingToolbar onChanged={changed} onSelect={focus} />

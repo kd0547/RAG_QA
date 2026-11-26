@@ -499,3 +499,52 @@ CREATE TABLE IF NOT EXISTS customer_note (
     retired_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_customer_note_sender ON customer_note(sender, retired_at);
+
+
+-- ===== 용어집 (사람이 관리하는 회사 용어) =====
+-- 질문에 나온 표현(마케팅·입찰서 표현, 사내 약어)을 표준 용어로 읽는 데만 쓴다.
+-- 문서 그래프(graph_*)에는 쓰지 않는다: 그래프는 문서와 사양 DB로만 만들고, 그래프 검색 때 이 표기들로도 찾는다.
+-- 연결 대상(target_type·target_key): 'entity_type'이면 graph_entity_type.key, 'spec_attribute'면 spec_attribute.key. 없으면 둘 다 ''.
+CREATE TABLE IF NOT EXISTS term (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,                   -- 표준 이름 (R&D에서 쓰는 이름)
+    target_type TEXT NOT NULL DEFAULT '' CHECK (target_type IN ('', 'entity_type', 'spec_attribute')),
+    target_key  TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',        -- 정의·답변 때 주의할 점 (사용자 입력 데이터)
+    created_at  TEXT NOT NULL DEFAULT current_timestamp,
+    updated_at  TEXT NOT NULL DEFAULT current_timestamp
+);
+
+-- 용어의 표기. 표준 이름도 is_name=1인 한 행으로 들어간다. 표기 하나(비교용 키 기준)는 용어 하나에만 속한다.
+CREATE TABLE IF NOT EXISTS term_alias (
+    term_id    INTEGER NOT NULL REFERENCES term(id) ON DELETE CASCADE,
+    alias      TEXT NOT NULL,                    -- 입력한 그대로
+    alias_norm TEXT NOT NULL UNIQUE,             -- graph_rag.types.normalize
+    is_name    INTEGER NOT NULL DEFAULT 0 CHECK (is_name IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS idx_term_alias_term ON term_alias(term_id);
+
+-- 묶음: 이름 하나가 여러 용어를 합쳐 부르는 경우 (예: KC 인증 자료 = 적합성 등록 + 안전확인 신고).
+-- 구성 용어가 있는 용어가 묶음이다. 묶음 안에 묶음은 넣지 않는다 (repository/term_repository.py가 막는다).
+-- 그래프 검색은 질문에 묶음 표기가 나오면 구성 용어마다 그 표기로 그래프를 찾는다.
+CREATE TABLE IF NOT EXISTS term_member (
+    bundle_id  INTEGER NOT NULL REFERENCES term(id) ON DELETE CASCADE,
+    member_id  INTEGER NOT NULL REFERENCES term(id) ON DELETE CASCADE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (bundle_id, member_id),
+    CHECK (bundle_id <> member_id)
+);
+CREATE INDEX IF NOT EXISTS idx_term_member_member ON term_member(member_id);
+
+-- 용어집 변경 이력. 용어를 지워도 남는다 (term_id에 FK를 걸지 않는다).
+CREATE TABLE IF NOT EXISTS term_edit_event (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    term_id     INTEGER NOT NULL,
+    action      TEXT NOT NULL CHECK (action IN ('create', 'update', 'delete')),
+    source      TEXT NOT NULL DEFAULT 'screen',  -- screen(직접 입력) 또는 import:<파일 이름·붙여넣기>
+    before_json TEXT,
+    after_json  TEXT,
+    created_by  TEXT NOT NULL DEFAULT '',        -- 요청 IP (로그인이 없다)
+    created_at  TEXT NOT NULL DEFAULT current_timestamp
+);
+CREATE INDEX IF NOT EXISTS idx_term_edit_event_term ON term_edit_event(term_id, id);

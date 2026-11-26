@@ -7,7 +7,7 @@ from pathlib import Path
 if not hasattr(sys.modules.get("parser"), "__path__"):
     sys.modules.pop("parser", None)
 
-from agent.prompt import PROMPT_V2_TEMPLATE, PROMPT_V3_TEMPLATE, render_prompt  # noqa: E402
+from agent.prompt import render_prompt  # noqa: E402
 from graph_rag import service  # noqa: E402
 from graph_rag.defaults import DEFAULT_ENTITY_TYPES  # noqa: E402
 from graph_rag.types import RELATION_TYPES, ExtractedEntity, PageGraph  # noqa: E402
@@ -90,10 +90,21 @@ def test_no_concept_type_relation_or_extract_field():
     assert not (ROOT / "aliases.yaml").exists()
 
 
+# 옛 프롬프트(v2·v3)에 있던 문구. 본문은 지웠지만 담당자가 이 문구를 붙여 넣은 프롬프트를 고를 수 있다
+OLD_PROMPT_TEXT = (
+    "**용어 별칭 (표준 이름 = 별칭)**\n$aliases\n\n"
+    "| graph_search | 질문의 모델명·인증·부품·규격으로 관련 문서(file_id)와 페이지를 찾는다. "
+    "상위 개념(예: KC 인증)은 속한 인증 종류로 펼쳐 준다 |\n"
+    '- 상위 개념이 펼쳐졌으면 속한 종류마다 문서를 찾고, 찾지 못한 종류는 "문서 없음"으로 밝힌다.\n'
+    "- 끝 줄\n"
+)
+
+
 def test_system_prompt_has_no_concepts_even_with_old_prompts():
-    for template in (PROMPT_V2_TEMPLATE, PROMPT_V3_TEMPLATE):
-        rendered = render_prompt(template.template)
+    for text in (OLD_PROMPT_TEXT, OLD_PROMPT_TEXT.replace("\n", "\r\n")):
+        rendered = render_prompt(text)
         assert "상위 개념" not in rendered and "용어 별칭" not in rendered and "$aliases" not in rendered
+        assert "끝 줄" in rendered
 
 
 def test_graph_search_has_no_expanded(tmp_path, monkeypatch):

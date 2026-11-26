@@ -9,6 +9,7 @@ import config
 from graph_rag.extractor import extract_page_graph
 from graph_rag.types import normalize
 from repository import file_repo, graph_repo, page_repo
+from repository.term_repository import TermRepository
 
 logger = logging.getLogger(__name__)
 
@@ -161,22 +162,87 @@ def relation_lines(relations: list[dict], limit: int = MAX_RELATIONS) -> list[st
     return lines[:limit]
 
 
+def _query_terms(query: str) -> list[dict]:
+    """질문에 나온 용어집 용어. 그래프와 같은 DB에서 읽는다. 용어집을 못 읽어도 그래프 검색은 계속한다."""
+    try:
+        return TermRepository(graph_repo.db).find_in_query(query)
+    except Exception:
+        logger.warning("용어집을 읽지 못해 용어 없이 그래프를 찾습니다", exc_info=True)
+        return []
+
+
+def _term_item(term: dict, term_entities: dict[int, list[str]]) -> dict:
+    item = {
+        "term": term["name"],
+        "aliases": [a for a in term["aliases"] if a != term["name"]],
+        "graph_entities": term_entities.get(term["id"], []),
+    }
+    if term["target_type"]:
+        item["target"] = term["target_text"]
+        if term["target_type"] == "spec_attribute":
+            item["spec_attribute_key"] = term["target_key"]
+    if term["description"]:
+        item["description"] = term["description"]
+    return item
+
+
+def _term_results(terms: list[dict], term_entities: dict[int, list[str]]) -> list[dict]:
+    """결과의 terms: 질문의 어떤 표현을 어떤 표준 용어로 읽었는지. 용어집은 사람이 입력한 자료이며 근거가 아니다.
+
+    묶음이면 kind="bundle"과 구성 용어(members)를 싣는다. 구성 용어마다 그 표기로 찾은 graph_entities가 있다.
+    """
+    results = []
+    for term in terms:
+        item = {"question_text": term["matched"], **_term_item(term, term_entities)}
+        if term.get("members"):
+            item["kind"] = "bundle"
+            item["members"] = [_term_item(member, term_entities) for member in term["members"]]
+        results.append(item)
+    return results
+
+
 def search_graph(query: str, group_id: str | None = None, max_documents: int = MAX_DOCUMENTS) -> dict:
     """질문에 나온 개체를 찾고, 관계와 그 개체가 나온 문서 페이지를 돌려준다.
 
     문서는 질문에서 찾은 개체를 더 많이 담은 순서로 정렬한다. "N5800 안전확인 신고"면 N5800과 안전확인 신고가
-    함께 나온 문서가 앞에 온다. 인증 묶음 이름(예: KC 인증)을 속한 종류로 펼치지 않는다 (지시서 GR1).
+    함께 나온 문서가 앞에 온다. 인증 묶음 이름(예: KC 인증)은 용어집에 묶음으로 등록된 것만 구성 용어로 펼친다
+    (시스템이 정한 상위 개념은 없다, 지시서 GR1).
 
     matched에는 사양 DB 대상(ref_type, ref_id)을 싣는다. 모델은 이 값을 get_specs에 그대로 넘길 수 있다.
+    용어집(term)에 등록된 표현이 질문에 나오면 그 용어의 모든 표기로도 개체를 찾는다 (via_term). 묶음이면 구성 용어마다
+    그 표기로 찾는다 (via_bundle). 용어집은 그래프에 쓰지 않고 여기서 질문을 읽을 때만 쓴다.
+    질문을 어떻게 읽었는지는 결과의 terms에 싣는다 (용어가 있을 때만).
     파생 모델을 물으면 variant_of로 상위 모델이 나온 문서를 documents 뒤에 **후보로** 더하고 via("상위 모델 ○○")를 표시한다.
     상위 모델의 관계(인증 등)는 relations에 넣지 않는다 — 상위 모델의 인증을 파생 모델에 적용된 것으로 보이지 않게 한다.
     """
     matched = graph_repo.find_entities(query)
-    if not matched:
-        return {"matched": [], "documents": [], "message": "그래프에서 질문과 맞는 개체를 찾지 못했습니다. search_documents로 검색하세요."}
+    # 문서 순위는 '질문에서 찾은 대상을 몇 개 담았는지'로 매긴다. 대상은 개체 하나, 또는 용어집 용어 하나
+    # (같은 용어의 표기로 찾은 개체 여럿은 한 대상으로 센다)
+    term_of: dict[int, object] = {e["id"]: e["id"] for e in matched}
 
-    # 문서 순위는 '질문에서 찾은 개체를 몇 개 담았는지'로 매긴다
-    term_of: dict[int, int] = {e["id"]: e["id"] for e in matched}
+    terms = _query_terms(query)
+    via_term: dict[int, dict] = {}
+    term_entities: dict[int, list[str]] = {}
+    for term in terms:
+        # 묶음이면 묶음 이름의 표기와 구성 용어마다의 표기로 찾는다. 구성 용어 하나가 문서 순위의 대상 하나다
+        for part in [term, *term.get("members", [])]:
+            entity_type = part["target_key"] if part["target_type"] == "entity_type" else None
+            found = graph_repo.find_entities_by_norms(part["alias_norms"], entity_type)
+            term_entities[part["id"]] = [e["name"] for e in found]
+            for entity in found:
+                if entity["id"] not in term_of:
+                    matched.append(entity)
+                    via_term[entity["id"]] = ({"via_term": part["name"]} if part is term
+                                              else {"via_term": part["name"], "via_bundle": term["name"]})
+                term_of[entity["id"]] = ("term", part["id"])
+    term_part = {"terms": _term_results(terms, term_entities)} if terms else {}
+
+    if not matched:
+        message = ("그래프에서 질문과 맞는 개체를 찾지 못했습니다. terms의 표준 이름과 다른 표기로 "
+                   "search_documents·grep_documents를 검색하세요." if terms
+                   else "그래프에서 질문과 맞는 개체를 찾지 못했습니다. search_documents로 검색하세요.")
+        return {"matched": [], **term_part, "documents": [], "message": message}
+
     target_ids = list(term_of)
 
     # 사양 값 관계(has_spec)는 질문이 사양 값 노드일 때만 싣는다. 나머지는 개수만 (문서·부품·인증 관계를 밀어내지 않게, GR4-9)
@@ -238,8 +304,10 @@ def search_graph(query: str, group_id: str | None = None, max_documents: int = M
         logger.warning("그래프 문서의 저장 경로 없음: %s", missing_paths)
 
     return {
-        "matched": [{"id":e["id"], "name": e["name"], "type": e["type"], "ref_type": e.get("ref_type"), "ref_id": e.get("ref_id")}
+        "matched": [{"id":e["id"], "name": e["name"], "type": e["type"], "ref_type": e.get("ref_type"), "ref_id": e.get("ref_id"),
+                     **via_term.get(e["id"], {})}
                     for e in matched],
+        **term_part,
         "relations": relation_lines(relations),
         "spec_values": spec_values,
         "documents": [
