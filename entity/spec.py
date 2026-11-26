@@ -168,7 +168,21 @@ DEFAULT_ATTRIBUTES: tuple[SpecAttribute, ...] = (
     # 보안·관리
     SpecAttribute("webcam", "웹캠", "security", "text", "", "예: 5M IR, 없음", aliases=("웹캠", "웹카메라", "카메라", "camera")),
     SpecAttribute("camera_removable", "카메라 기능 제거 가능", "security", "bool", "", "BIOS 비활성화 또는 물리 제거"),
-    SpecAttribute("wireless_removable", "무선 기능 제거 가능", "security", "bool"),
+    # 기능 제거 가능 여부: 입찰 규격의 "○○ 기능 제거(물리적 또는 펌웨어 방식)" 요구를 기능별로 판정한다.
+    # 방식(물리 제거·BIOS 비활성화·모듈 미장착)은 값의 비고(출처 메모)에 적는다
+    SpecAttribute("wireless_removable", "무선 기능 제거 가능", "security", "bool", "",
+                  "무선 LAN(Wi-Fi). 블루투스·무선 데이터 통신(LTE/5G)은 따로 적는다. 물리 제거 또는 BIOS 비활성화",
+                  aliases=("무선lan 제거", "무선 lan 기능 제거", "wi-fi 제거", "wlan 제거")),
+    SpecAttribute("bluetooth_removable", "블루투스 기능 제거 가능", "security", "bool", "", "물리 제거 또는 BIOS 비활성화",
+                  aliases=("블루투스 제거", "bluetooth 제거", "bt 제거")),
+    SpecAttribute("wwan_removable", "무선 데이터 통신(LTE/5G) 기능 제거 가능", "security", "bool", "",
+                  "WWAN 모듈 미장착·물리 제거 또는 BIOS 비활성화. 모듈이 없는 모델은 예",
+                  aliases=("무선데이터통신 제거", "lte 제거", "5g 제거", "wwan 제거")),
+    SpecAttribute("mic_removable", "마이크 기능 제거 가능", "security", "bool", "", "물리 제거 또는 BIOS 비활성화",
+                  aliases=("마이크 제거", "내장 마이크 제거", "microphone 제거")),
+    SpecAttribute("recovery_removable", "복구모드 제거 가능", "security", "bool", "",
+                  "부팅 시 복구 모드(Recovery Mode)·복원 솔루션 진입을 없애거나 막을 수 있는지",
+                  aliases=("복구모드 제거", "recovery mode 제거", "복원 솔루션 제거")),
     SpecAttribute("bios_password_roles", "BIOS 관리자/사용자 비밀번호 분리", "security", "bool"),
     SpecAttribute("tpm", "TPM", "security", "text", "", "예: TPM 2.0"),
     SpecAttribute("kensington_lock", "켄싱턴 락 슬롯", "security", "bool", aliases=("켄싱턴", "잠금장치", "kensington")),
