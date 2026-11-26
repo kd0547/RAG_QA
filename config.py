@@ -70,10 +70,12 @@ RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "3"))
 # ---------- 에이전트 맥락 예산 (agent/agent.py 미들웨어) ----------
 # 로컬 모델(qwen3.8-flash-next)의 최대 컨텍스트는 262,144토큰(vLLM /v1/models max_model_len)이다.
 # 아래 값은 모델 한계가 아니라 비용·지연 예산이다. 2026-11-12 실제 질문 1건이 모델 호출 9회에 입력 63,264토큰을 썼다.
+# 2026-11-26 24,000/40,000에서 올림: 입찰 규격 대조 질문(모델 13종)이 호출마다 약 27,000토큰을 써서 매번 정리가 일어나
+# 앞서 조회한 모델의 사양 값이 지워졌다. 모델 한계(262,144)의 1/3 안쪽으로 둔다.
 # 오래된 도구 결과를 자리표시자로 바꾸는 기준 (모델 입력의 대략적 토큰 수)
-CTX_CLEAR_TRIGGER_TOKENS = int(os.getenv("CTX_CLEAR_TRIGGER_TOKENS", "24000"))
+CTX_CLEAR_TRIGGER_TOKENS = int(os.getenv("CTX_CLEAR_TRIGGER_TOKENS", "80000"))
 # 대화가 이보다 길어지면 앞부분을 요약한다
-CTX_SUMMARY_TRIGGER_TOKENS = int(os.getenv("CTX_SUMMARY_TRIGGER_TOKENS", "40000"))
+CTX_SUMMARY_TRIGGER_TOKENS = int(os.getenv("CTX_SUMMARY_TRIGGER_TOKENS", "120000"))
 # 그래프 단계 한도. 미들웨어 노드 때문에 모델 호출 1회에 약 7단계를 쓴다.
 # 모델 호출 한도(20회, ModelCallLimitMiddleware)가 먼저 걸리도록 넉넉히 둔다 (40이면 도구 9회 호출에서 끊긴다)
 AGENT_RECURSION_LIMIT = int(os.getenv("AGENT_RECURSION_LIMIT", "200"))

@@ -136,6 +136,7 @@ def build_middleware(summary_model) -> list:
     - ContextEditing: 입력이 CTX_CLEAR_TRIGGER_TOKENS를 넘으면 최근 3개를 뺀 오래된 도구 결과를 자리표시자로.
       list_evidence 결과는 지우지 않는다 (자리표시자로 바뀐 결과의 근거 ID를 다시 볼 곳).
       load_skill 결과도 지우지 않는다 (읽은 절차를 실행 중간에 잃지 않게).
+      get_specs·compare_specs 결과도 지우지 않는다 (여러 모델 대조에서 앞 모델의 사양 값을 잃지 않게).
     - Summarization: 대화가 CTX_SUMMARY_TRIGGER_TOKENS를 넘으면 앞부분 요약, 최근 12개 메시지는 그대로.
       로컬 모델에 profile이 없어 비율 기준은 쓰지 않는다.
     - 실행당 한도: search_documents 6회, 도구 25회, 모델 호출 20회(넘으면 종료 → 답변으로 쓰지 않음).
@@ -146,7 +147,9 @@ def build_middleware(summary_model) -> list:
         ContextEditingMiddleware(edits=[ClearToolUsesEdit(
             trigger=config.CTX_CLEAR_TRIGGER_TOKENS,
             keep=3,
-            exclude_tools=("list_evidence", "load_skill"),
+            # 사양 조회·비교 결과도 지우지 않는다: 여러 모델을 대조하는 질문에서 앞서 받은 모델의 값이 지워지면
+            # 마지막에 조회한 모델 값만 남아 "나머지는 근거 없음"이나 한 모델 값으로 전체를 판정하는 답이 나왔다
+            exclude_tools=("list_evidence", "load_skill", "get_specs", "compare_specs"),
             placeholder=CLEARED_TOOL_PLACEHOLDER,
         )]),
         SummarizationMiddleware(
